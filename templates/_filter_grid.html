@@ -1,0 +1,71 @@
+{# The 24-field filter block above the case list, laid out three across with
+   the label to the left of each control, as the real list has it. Every
+   control has an id starting f- so filterRows() in kyc_list.html can read
+   them all; the table rows carry matching data-* attributes. Nothing here
+   posts — the filter is client-side, the way ChargeShield's queue filters
+   are, because a tenant's list is a few dozen rows. #}
+<div class="fgrid">
+    <div class="f"><label for="f-case-id">Case ID</label><input class="input" id="f-case-id" placeholder="Case ID"></div>
+    <div class="f"><label for="f-client-id">Client ID</label><input class="input" id="f-client-id" placeholder="Client ID"></div>
+    <div class="f"><label for="f-name">Client Name</label><input class="input" id="f-name" placeholder="Client Name"></div>
+
+    <div class="f"><label>Date Of Birth</label>
+        <div class="range"><input class="input" type="date" id="f-dob-from" title="Start"><span class="dash">-</span><input class="input" type="date" id="f-dob-to" title="End"></div></div>
+    <div class="f"><label>Status</label>
+        <details class="mselect" id="f-status-box">
+            <summary><div class="input input-sm"><span id="f-status-label" class="placeholder">Select status</span>{{ icon('chevron-down') }}</div></summary>
+            <div class="menu">
+                {% for s in filters.statuses %}
+                <label class="check"><input type="checkbox" class="f-status" value="{{ s }}" {% if s in status_preset %}checked{% endif %}> {{ s }}</label>
+                {% endfor %}
+            </div>
+        </details></div>
+    <div class="f"><label>Creation Time</label>
+        <div class="range"><input class="input" type="date" id="f-created-from" title="Start"><span class="dash">-</span><input class="input" type="date" id="f-created-to" title="End"></div></div>
+
+    <div class="f"><label for="f-reviewer">Current Reviewer</label>
+        <select class="input" id="f-reviewer"><option value="">Select</option>{% for r in filters.reviewers %}<option>{{ r }}</option>{% endfor %}</select></div>
+    <div class="f"><label for="f-prev">Previous Reviewer</label>
+        <select class="input" id="f-prev"><option value="">Select</option>{% for r in filters.reviewers %}<option>{{ r }}</option>{% endfor %}</select></div>
+    <div class="f"><label for="f-source">Source</label>
+        <select class="input" id="f-source"><option value="">Select</option>{% for s in filters.sources %}<option>{{ s }}</option>{% endfor %}</select></div>
+
+    <div class="f"><label>Submit Time</label>
+        <div class="range"><input class="input" type="date" id="f-sub-from" title="Start"><span class="dash">-</span><input class="input" type="date" id="f-sub-to" title="End"></div></div>
+    <div class="f"><label for="f-vendor">Vendor</label>
+        <select class="input" id="f-vendor"><option value="">Select</option>{% for v in filters.vendors %}<option>{{ v }}</option>{% endfor %}</select></div>
+    <div class="f"><label for="f-gifter">Gifter</label>
+        <select class="input" id="f-gifter"><option value="">Select</option><option>Gifter G6</option><option>Gifter G4</option></select></div>
+
+    <div class="f"><label for="f-regional">Regional Gifter</label>
+        <select class="input" id="f-regional"><option value="">Select</option><option>Yes</option><option>No</option></select></div>
+    <div class="f"><label for="f-nat">Nationality</label>
+        <select class="input" id="f-nat"><option value="">Select</option>{% for n in filters.issuing %}<option>{{ n }}</option>{% endfor %}</select></div>
+    <div class="f"><label for="f-issuing">ID issuing place</label>
+        <select class="input" id="f-issuing"><option value="">Select</option>{% for n in filters.issuing %}<option>{{ n }}</option>{% endfor %}</select></div>
+
+    <div class="f"><label for="f-idnum">ID Number</label><input class="input" id="f-idnum" placeholder="ID Number"></div>
+    <div class="f"><label for="f-tags">Tags</label>
+        <select class="input" id="f-tags"><option value="">Select</option>{% for t in filters.tags %}<option>{{ t }}</option>{% endfor %}</select></div>
+    <div class="f"><label for="f-poa">POA is required</label>
+        <select class="input" id="f-poa"><option value="">Select</option><option>Yes</option><option>No</option></select></div>
+
+    <div class="f"><label for="f-level">Case review level</label>
+        <select class="input" id="f-level"><option value="">Select</option>{% for l in filters.levels %}<option>{{ l }}</option>{% endfor %}</select></div>
+    <div class="f"><label for="f-pending">Pending Reason</label>
+        <select class="input" id="f-pending"><option value="">Select</option>{% for p in filters.pending %}<option>{{ p }}</option>{% endfor %}</select></div>
+    <div class="f"><label for="f-edd">EDD-RFI</label>
+        <select class="input" id="f-edd"><option value="">Select</option><option>Yes</option><option>No</option></select></div>
+
+    <div class="f"><label for="f-mrr">Manual Review Reason</label>
+        <select class="input" id="f-mrr"><option value="">Select</option>{% for m in filters.mrr %}<option>{{ m }}</option>{% endfor %}</select></div>
+    <div class="f"><label for="f-change">Status Change</label>
+        <select class="input" id="f-change"><option value="">Select</option><option>Last 24 hours</option><option>Last 7 days</option></select></div>
+    <div class="f"><label for="f-qcrev">QC Reviewer</label>
+        <select class="input" id="f-qcrev"><option value="">Select</option>{% for r in filters.reviewers %}<option>{{ r }}</option>{% endfor %}</select></div>
+
+    <div class="f"><label for="f-qcreason">QC Reason</label><input class="input" id="f-qcreason" placeholder="QC Reason"></div>
+    <div class="f"><label for="f-qcresult">QC Result</label>
+        <select class="input" id="f-qcresult"><option value="">Select</option>{% for q in filters.qc_results %}<option>{{ q }}</option>{% endfor %}</select></div>
+    <div class="f"></div>
+</div>

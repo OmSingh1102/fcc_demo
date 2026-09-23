@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% from "_badges.html" import status_badge, outcome_badge, hit_mark %}
+{% from "_stepper.html" import stepper %}
+{% from "_modals.html" import modal_open, modal_close %}
+{% block title %}{{ case.client.legal_name }} - KYC Case{% endblock %}
+
+{% block content %}
+{% include "_case_header.html" %}
+
+{# ── Verification Points ── #}
+<div class="card mt-12">
+    <div class="card-head"><div class="card-title">Verification Points</div></div>
+    <div class="card-body" style="padding-top:6px">{{ stepper(points) }}</div>
+</div>
+
+{# ── Information Verification: vendor ── #}
+<div class="card mt-12 pad-0">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Information Verification</div></div>
+    <table class="tbl">
+        <thead><tr><th>Vendor Name</th><th>Result</th><th>Reason</th><th>Vendor Reason</th><th>Extracted Infos</th><th>Operation</th></tr></thead>
+        <tbody>
+        <tr>
+            <td>{{ case.vendor_check.vendor }}</td>
+            <td>{{ outcome_badge('Approved' if case.vendor_check.result == 'Approved' else 'Rejected') }}</td>
+            <td>{{ case.vendor_check.reason or '-' }}</td>
+            <td>{{ case.vendor_check.vendor_reason or '-' }}</td>
+            <td><button type="button" class="btn btn-outline btn-xs" onclick="openModal('vendor-modal')">Details</button></td>
+            <td><button type="button" class="btn btn-primary btn-xs" onclick="docPreview('{{ url_for('document_svg', case_id=case.id, doc_id=case.documents[0].id) }}', '{{ case.documents[0].name }}')">View</button></td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+
+{# ── Information Verification: client, agency, documents, screening, decisions ── #}
+<div class="card mt-12">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Information Verification</div></div>
+    <div class="card-body" style="padding-top:8px">
+
+        <details class="section" open>
+            <summary>Client Basic Info <span class="caret">{{ icon('chevron-down') }}</span></summary>
+            <div class="section-body">
+                <div class="desc cols-4">
+                    <div><span class="l">Legal name (full name)</span><span class="v strong">{{ case.client.legal_name }}</span></div>
+                    <div><span class="l">Date of birth</span><span class="v strong">{{ case.client.dob or '-' }}</span></div>
+                    <div><span class="l">Nationality</span><span class="v strong">{{ case.client.nationality }}</span></div>
+                    <div><span class="l">ID number</span><span class="v strong mono">{{ case.client.id_number }}</span></div>
+                    <div><span class="l">ID issuing place</span><span class="v strong">{{ case.client.id_issuing_place }}</span></div>
+                    <div><span class="l">ID Type</span><span class="v strong">{{ case.client.id_type }}</span></div>
+                    <div><span class="l">Phone number</span><span class="v">{{ case.client.phone or '-' }}</span></div>
+                    <div><span class="l">Email</span><span class="v">{{ case.client.email or '-' }}</span></div>
+                    <div><span class="l">Case source</span><span class="v strong">{{ case.source }}</span></div>
+                    <div><span class="l">Trigger scenario</span><span class="v">-</span></div>
+                    <div><span class="l">US person</span><span class="v">{{ 'Yes' if case.client.us_person else 'No' }}</span></div>
+                    <div><span class="l">Address</span><span class="v">{{ case.client.address or '-' }}</span></div>
+                    {% if case.client.native_name %}<div><span class="l">Name (native script)</span><span class="v strong">{{ case.client.native_name }}</span></div>{% endif %}
+                    {% if case.resubmit %}<div><span class="l">Resubmissions</span><span class="v">{{ case.resubmit.count }} — {{ case.resubmit.decisions|join(', ') }}</span></div>{% endif %}
+                </div>
+            </div>
+        </details>
+
+        <details class="section" {% if case.agency %}open{% endif %}>
+            <summary>Agency-Managed Info <span class="caret">{{ icon('chevron-down') }}</span></summary>
+            <div class="section-body">
+                {% set a = case.agency %}
+                <div class="desc cols-4">
+                    <div><span class="l">Agency ID</span><span class="v">{{ a.agency_id if a and a.agency_id else '-' }}</span></div>
+                    <div><span class="l">Agency Name</span><span class="v">{{ a.agency_name if a and a.agency_name else '-' }}</span></div>
+                    <div><span class="l">Onboarding Time</span><span class="v">{{ a.onboarding_time if a and a.onboarding_time else '-' }}</span></div>
+                    <div><span class="l">Company Name</span><span class="v strong">{{ a.company_name if a else '-' }}</span></div>
+                    <div><span class="l">Company Registered Address</span><span class="v">{{ a.registered_address if a else '-' }}</span></div>
+                    <div><span class="l">Representative Name</span><span class="v strong">{{ a.representative if a else '-' }}</span></div>
+                    <div><span class="l">Respective Email</span><span class="v">{{ a.email if a and a.email else '-' }}</span></div>
+                    <div><span class="l">Respective Phone Number</span><span class="v">{{ a.phone if a and a.phone else '-' }}</span></div>
+                    {% if a %}
+                    <div><span class="l">Registration number</span><span class="v mono">{{ a.registration_number }}</span></div>
+                    <div><span class="l">Incorporation country</span><span class="v">{{ a.incorporation_country }}</span></div>
+                    <div><span class="l">Risk rating</span><span class="v">{% if case.risk_rating %}{{ outcome_badge(case.risk_rating) }}{% else %}<span class="muted">Not rated</span>{% endif %}
+                        {% if case.risk_recalculated_at %}<span class="tiny muted"> recalculated {{ case.risk_recalculated_at }}</span>{% endif %}</span></div>
+                    <div><span class="l">Checker</span><span class="v">Checker 1 (TT Shop)</span></div>
+                    {% endif %}
+                </div>
+                {% if a %}
+                <div class="row between mt-12">
+                    <table class="tbl dense" style="max-width:520px">
+                        <thead><tr><th>Beneficial owner</th><th>Ownership</th><th>Nationality</th></tr></thead>
+                        <tbody>{% for u in a.ubos %}<tr><td class="strong">{{ u.name }}</td><td>{{ u.pct }}%</td><td>{{ u.nationality }}</td></tr>{% endfor %}</tbody>
+                    </table>
+                    <form method="post" action="{{ url_for('kyc_recalculate_risk', case_id=case.id) }}" style="margin:0">
+                        <button type="submit" class="btn btn-outline btn-sm" {% if closed %}disabled{% endif %} title="SOP 4.2.2: recalculate the risk rating before approving a seller">{{ icon('refresh-cw') }} Recalculate Risk Rating</button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+        </details>
+
+        <details class="section" open>
+            <summary>Documents <span class="caret">{{ icon('chevron-down') }}</span></summary>
+            <div class="section-body flush">
+                <table class="tbl">
+                    <thead><tr><th>Document Name</th><th>Document Category</th><th>Side</th><th>Quality</th><th>Operation</th></tr></thead>
+                    <tbody>
+                    {% for d in case.documents %}
+                    <tr>
+                        <td>{{ d.name }}</td><td>{{ d.category }}</td><td>{{ d.side }}</td>
+                        <td>{% if d.quality == 'ok' %}<span class="muted">-</span>{% else %}<span class="badge amber">{{ d.quality }}</span>{% endif %}</td>
+                        <td class="btn-group tight">
+                            <button type="button" class="btn btn-primary btn-xs" onclick="docPreview('{{ url_for('document_svg', case_id=case.id, doc_id=d.id) }}', '{{ d.name }} — {{ d.side }}')">Preview</button>
+                            <a class="btn btn-outline btn-xs" href="{{ url_for('document_svg', case_id=case.id, doc_id=d.id) }}" target="_blank" rel="noopener">OpenNewTab</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </details>
+
+        <details class="section" open>
+            <summary>Screening Result <span class="caret">{{ icon('chevron-down') }}</span></summary>
+            <div class="section-body">
+                <div class="small mb-8">Screening Alert Hit: {{ hit_mark('Hit' if case.screening.hit else 'No Match') }}</div>
+                <table class="tbl dense">
+                    <thead><tr><th>Platform Name</th><th>User Name</th><th>Screen time</th><th>Name screening list</th><th>Screening result</th><th>Alert ID</th></tr></thead>
+                    <tbody>
+                    {% for r in case.screening.rows %}
+                    <tr>
+                        <td>{{ r.platform }} <span class="tag">{{ loop.index0 // 2 + 1 }}</span></td>
+                        <td>{{ r.user_name }}</td><td class="nowrap">{{ r.screen_time }}</td><td>{{ r.list }}</td>
+                        <td>{{ hit_mark(r.result) }}</td>
+                        <td>{% if r.alert_id %}<span class="cell-hex" title="{{ r.alert_id }}">{{ r.alert_id }}</span>
+                            <a class="btn btn-outline btn-xs" href="{{ url_for('ns_case', alert_case_id=r.alert_id) }}">Details</a>
+                            {% else %}<button type="button" class="btn btn-outline btn-xs" disabled>Details</button>{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% if case.skopenow %}
+                <div class="note info mt-12">Skopenow report: <b>{{ case.skopenow.status }}</b> — requested {{ case.skopenow.requested_at }} by {{ case.skopenow.requested_by }}.
+                    <a href="{{ url_for('kyc_skopenow', case_id=case.id) }}">Open</a></div>
+                {% endif %}
+            </div>
+        </details>
+
+        <details class="section" open>
+            <summary>Review Decision <span class="caret">{{ icon('chevron-down') }}</span></summary>
+            <div class="section-body flush">
+                <table class="tbl dense">
+                    <thead><tr><th>Check Point</th><th>Decision</th><th>Fail Reason</th><th>POA Fail Reason</th><th>Approve Reason</th><th>Rejection Reason</th><th>ID Summary</th><th>Report</th><th>Operated Time</th><th>By</th></tr></thead>
+                    <tbody>
+                    {% for row in case.review_decisions %}
+                    <tr>
+                        <td class="strong">{{ row.check_point }}</td>
+                        <td>{{ row.decision or '-' }}</td>
+                        <td><span class="ellipsis" title="{{ row.fail_reason }}">{{ row.fail_reason or '-' }}</span></td>
+                        <td><span class="ellipsis" title="{{ row.poa_fail_reason }}">{{ row.poa_fail_reason or '-' }}</span></td>
+                        <td><span class="ellipsis" title="{{ row.approve_reason }}">{{ row.approve_reason or '-' }}</span></td>
+                        <td><span class="ellipsis" title="{{ row.rejection_reason }}">{{ row.rejection_reason or '-' }}</span></td>
+                        <td><span class="ellipsis" title="{{ row.id_summary }}">{{ row.id_summary or '-' }}</span></td>
+                        <td>{% if row.report %}{{ icon('paperclip') }} <span class="ellipsis" title="{{ row.report }}">{{ row.report }}</span>{% else %}-{% endif %}</td>
+                        <td class="nowrap">{{ row.operated_at or '-' }}</td>
+                        <td class="nowrap">{{ row.by or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </details>
+
+    </div>
+</div>
+
+{# ── Footer actions ── #}
+<div class="row mt-16" style="justify-content:flex-end">
+    <button type="button" class="btn btn-outline btn-sm" onclick="openModal('modify-modal')" {% if closed %}disabled{% endif %}>Modify User Info</button>
+    <a class="btn btn-outline btn-sm" href="{{ url_for('kyc_audit', case_id=case.id, view='changes') }}">{{ icon('list') }} Change Log</a>
+    {% if review and is_mine %}
+    <button type="button" class="btn btn-primary btn-sm" onclick="openModal('{{ {'dc': 'dc-modal', 'edd': 'edd-modal', 'l2': 'l2-modal'}[review] }}')">Review</button>
+    {% elif review %}
+    <button type="button" class="btn btn-primary btn-sm" disabled title="Reserve the case first">Review</button>
+    {% elif closed %}
+    <button type="button" class="btn btn-primary btn-sm" disabled title="Case is closed">Review</button>
+    {% else %}
+    <button type="button" class="btn btn-primary btn-sm" disabled title="No review action for your level at this stage">Review</button>
+    {% endif %}
+</div>
+
+{# ── Modals ── #}
+{% if review == 'dc' %}{% include "_modal_data_confirm.html" %}{% endif %}
+{% if review == 'edd' %}{% include "_modal_edd_review.html" %}{% endif %}
+{% if review == 'l2' %}{% include "_modal_l2_decision.html" %}{% endif %}
+
+{{ modal_open('doc-modal', 'Document Preview', 'lg') }}
+<div class="modal-body">
+    <div class="viewer-stage" style="min-height:420px"><img id="doc-modal-img" src="" alt="Document preview"></div>
+    <div class="small muted mt-8" id="doc-modal-cap"></div>
+</div>
+<div class="modal-foot"><span class="spacer"></span><button type="button" class="btn btn-outline btn-sm" onclick="closeModal('doc-modal')">Close</button></div>
+{{ modal_close() }}
+
+{{ modal_open('vendor-modal', 'Extracted Infos — ' ~ vendor.vendor, '') }}
+<div class="modal-body">
+    <div class="desc cols-2">
+        {% for k, v in vendor.checks %}<div><span class="l">{{ k }}</span><span class="v">{{ v or '-' }}</span></div>{% endfor %}
+    </div>
+    <div class="small muted mt-8">Result: <b>{{ vendor.result }}</b> · checked {{ vendor.checked_at }}</div>
+</div>
+<div class="modal-foot"><span class="spacer"></span><button type="button" class="btn btn-outline btn-sm" onclick="closeModal('vendor-modal')">Close</button></div>
+{{ modal_close() }}
+
+{{ modal_open('modify-modal', 'Modify User Info', 'sm') }}
+<form method="post" action="{{ url_for('kyc_modify', case_id=case.id) }}">
+    <div class="modal-body">
+        {% for field, key, label, itype in confirm_fields %}
+        <div class="field"><label for="mod-{{ field }}">{{ label }}</label>
+            <input class="input" type="{{ itype }}" id="mod-{{ field }}" name="{{ field }}" value="{{ case.client[key] }}"></div>
+        {% endfor %}
+        <div class="small muted">Changes are written to the Change Log with your name.</div>
+    </div>
+    <div class="modal-foot"><span class="spacer"></span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="closeModal('modify-modal')">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Save</button></div>
+</form>
+{{ modal_close() }}
+
+{{ modal_open('rfi-modal', 'Request for Information', 'sm') }}
+<form method="post" action="{{ url_for('kyc_rfi', case_id=case.id) }}">
+    <div class="modal-body">
+        <div class="field"><label><span class="req">*</span>Message to the user</label>
+            <textarea class="textarea" name="message" required placeholder="What do you need from the customer?"></textarea></div>
+    </div>
+    <div class="modal-foot"><span class="spacer"></span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="closeModal('rfi-modal')">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Send RFI</button></div>
+</form>
+{{ modal_close() }}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function docPreview(src, caption) {
+    document.getElementById('doc-modal-img').src = src;
+    document.getElementById('doc-modal-cap').textContent = caption || '';
+    openModal('doc-modal');
+}
+</script>
+{% endblock %}

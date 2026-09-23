@@ -1,0 +1,93 @@
+{# The case header: id + tags + status on the first line, the client block
+   with the ownership buttons under it. Included (not imported) so it sees the
+   page context: case, levels, is_mine, closed, sla, analysts. #}
+{% from "_badges.html" import status_badge, tag_chip, sla_chip %}
+{% from "_modals.html" import modal_open, modal_close, confirm_dialog %}
+
+<div class="row between mb-12">
+    <div class="row">
+        <span class="small">KYC Case ID: <b class="mono">{{ case.id }}</b></span>
+        {% for t in case.tags %}{{ tag_chip(t) }}{% endfor %}
+        {{ status_badge(case.status) }}
+        {% if 'QC' in levels or 'L2' in levels %}
+        <button type="button" class="btn btn-outline btn-xs" onclick="openModal('status-modal')">Change Status</button>
+        {% else %}
+        <button type="button" class="btn btn-outline btn-xs" disabled title="Team leads and L2 only">Change Status</button>
+        {% endif %}
+        <form method="post" action="{{ url_for('kyc_tag', case_id=case.id) }}" class="row" style="margin:0">
+            <select name="tag" class="input input-sm" style="width:auto" onchange="if(this.value){this.form.submit()}" aria-label="Add tag">
+                <option value="">Tags</option>
+                {% for t in vocab.TAGS if t not in case.tags %}<option>{{ t }}</option>{% endfor %}
+            </select>
+        </form>
+        {{ sla_chip(sla) }}
+        {% if case.pending_reason %}<span class="badge amber">{{ case.pending_reason }}</span>{% endif %}
+    </div>
+    <a href="{{ url_for('kyc_audit', case_id=case.id) }}" class="btn btn-link btn-sm">Audit History</a>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="row between">
+            <div class="small">Client ID: <b class="mono">{{ case.client_id }}</b></div>
+            <div class="btn-group">
+                <form method="post" action="{{ url_for('kyc_release', case_id=case.id) }}" style="margin:0">
+                    <button type="submit" class="btn btn-outline btn-sm" {% if not is_mine %}disabled title="Only the current reviewer can release"{% endif %}>Release</button>
+                </form>
+                <button type="button" class="btn btn-outline btn-sm" onclick="openModal('assign-modal')" {% if closed %}disabled{% endif %}>Assign to Others</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="openModal('reserve-dialog')"
+                        {% if closed or is_mine %}disabled title="{{ 'Case is closed' if closed else 'Reserved by you' }}"{% endif %}>Reserve</button>
+            </div>
+        </div>
+        <h2 style="font-size:20px;font-weight:800;margin:6px 0 10px;letter-spacing:.01em">
+            {{ case.client.legal_name }}
+            {% if case.client.native_name %}<span class="muted" style="font-weight:500;font-size:14px;margin-left:8px">{{ case.client.native_name }}</span>{% endif %}
+        </h2>
+        <div class="kv">
+            <div><span class="l">Previous Reviewer:</span><span class="v strong">{{ case.previous_reviewer or '-' }}</span></div>
+            <div><span class="l">Source:</span><span class="v strong">{{ case.source }}</span></div>
+            <div><span class="l">Current Reviewer:</span><span class="v strong">{{ case.current_reviewer or '-' }}</span></div>
+            <div><span class="l">Creation date:</span><span class="v strong">{{ case.created_at }}</span></div>
+            <div><span class="l">POA required:</span><span class="v strong">{{ 'YES' if case.poa_required else 'NO' }}</span></div>
+            <div><span class="l">Manual Review Reason:</span><span class="v strong">{{ case.manual_review_reason|join(', ') or '-' }}</span></div>
+            <div><span class="l">QC Reviewer:</span><span class="v">{{ case.qc_reviewer or '-' }}</span></div>
+            <div><span class="l">QC Result:</span><span class="v">{{ case.qc_result or '-' }}</span></div>
+            <div><span class="l">QC Reason:</span><span class="v">{{ case.qc_reason or '-' }}</span></div>
+            <div><span class="l">Case review level:</span><span class="v">{{ case.case_review_level }}</span></div>
+            <div><span class="l">SLA due:</span><span class="v">{{ case.edd_due_at if case.status == 'DataEscalatingL2' and case.edd_due_at else case.sla_due_at }}</span></div>
+            {% if case.client.us_person %}<div><span class="l">US person:</span><span class="v strong">Yes</span></div>{% endif %}
+        </div>
+    </div>
+</div>
+
+{{ confirm_dialog('reserve-dialog', 'Confirm to reserve this case?',
+   'If you confirm, you will reserve this case. If you do not want to review after reserving, please click [Assign to others] or [Release].',
+   url_for('kyc_reserve', case_id=case.id), ok='OK') }}
+
+{{ modal_open('assign-modal', 'Assign to Others', 'sm') }}
+<form method="post" action="{{ url_for('kyc_assign', case_id=case.id) }}">
+    <div class="modal-body">
+        <div class="field"><label for="assignee"><span class="req">*</span>Assign to</label>
+            <select class="input" id="assignee" name="assignee" required>
+                {% for a in analysts if a.email != actor %}<option value="{{ a.email }}">{{ a.name }} — {{ a.roles|join('/') }}</option>{% endfor %}
+            </select></div>
+    </div>
+    <div class="modal-foot"><span class="spacer"></span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="closeModal('assign-modal')">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Assign</button></div>
+</form>
+{{ modal_close() }}
+
+{{ modal_open('status-modal', 'Change Status', 'sm') }}
+<form method="post" action="{{ url_for('kyc_status', case_id=case.id) }}">
+    <div class="modal-body">
+        <div class="note warn mb-12">Manual status changes bypass the workflow and are written to the audit trail with your reason.</div>
+        <div class="field"><label><span class="req">*</span>New status</label>
+            <select class="input" name="status" required>{% for s in vocab.STATUSES if s != case.status %}<option>{{ s }}</option>{% endfor %}</select></div>
+        <div class="field"><label><span class="req">*</span>Reason</label><textarea class="textarea" name="comment" required></textarea></div>
+    </div>
+    <div class="modal-foot"><span class="spacer"></span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="closeModal('status-modal')">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">OK</button></div>
+</form>
+{{ modal_close() }}

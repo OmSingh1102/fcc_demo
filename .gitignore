@@ -1,0 +1,31 @@
+# Virtualenv — rebuildable from requirements.txt
+.venv/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime state the app writes and re-seeds on its own: every action an analyst
+# takes on a case. The wildcard covers SQLite's -wal and -shm sidecars.
+fincrime_state.db*
+
+# Deployment settings: session signing key, real passwords. The example file is
+# the documented template and is the one exception, hence the negation.
+.env
+.env.*
+!.env.example
+
+# Frames of the real production tools that this demo is modelled on. They
+# contain real people's identity documents and addresses. Never commit them.
+docs/reference-screens/
+
+# Logs
+server.log
+*.stackdump
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "_badges.html" import status_badge, sla_chip %}
+{% block title %}Analytics{% endblock %}
+
+{% macro hbars(rows, tone='') %}
+{% set mx = rows|map(attribute=1)|max if rows else 1 %}
+{% for label, n in rows %}
+<div class="hbar"><span class="ellipsis" title="{{ label }}">{{ label }}</span><span class="bar"><i style="width:{{ (100 * n / (mx or 1))|round|int }}%{% if tone %};background:{{ tone }}{% endif %}"></i></span><span class="n">{{ n }}</span></div>
+{% else %}<div class="no-data">No data</div>{% endfor %}
+{% endmacro %}
+
+{% block content %}
+<div class="page-head">
+    <div><h2>Operations analytics — {{ tenants[tenant].label }}</h2><p>Backlog, SLA pressure, escalations and screening outcomes, computed live from the case book. Every action you take on a case moves these numbers.</p></div>
+</div>
+
+<div class="kpi-strip">
+    {% for label, value, hint, tone in vm.kpis %}
+    <div class="kpi {% if tone %}tone-{{ tone }}{% endif %}"><div class="l">{{ label }}</div><div class="v">{{ value }}</div><div class="hint">{{ hint }}</div></div>
+    {% endfor %}
+</div>
+
+<div class="row" style="align-items:stretch;gap:12px">
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Cases by status</div></div><div class="card-body">{{ hbars(vm.status_counts) }}</div></div>
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Closures per reviewer</div><div class="card-sub">throughput</div></div><div class="card-body">{{ hbars(vm.throughput, '#059669') }}</div></div>
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Open cases by manual review reason</div></div><div class="card-body">{{ hbars(vm.reasons, '#d97706') }}</div></div>
+</div>
+
+<div class="row mt-12" style="align-items:stretch;gap:12px">
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Screening alert outcomes</div><div class="card-sub">{{ vm.total_alerts }} alerts</div></div><div class="card-body">{{ hbars(vm.outcome_counts, '#1d4ed8') }}</div></div>
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Auto-resolved vs manual</div><div class="card-sub">how much the screening rules clear before an analyst looks</div></div><div class="card-body">{{ hbars(vm.auto_vs_manual, '#6d28d9') }}</div></div>
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Top rationales</div></div><div class="card-body">{{ hbars(vm.rationales, '#0f766e') }}</div></div>
+</div>
+
+<div class="card mt-12 pad-0">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">SLA watch</div><div class="card-sub">breached or due within 12 hours, most urgent first</div></div>
+    <table class="tbl">
+        <thead><tr><th>Case ID</th><th>Client</th><th>Status</th><th>Reviewer</th><th>Due</th><th>SLA</th><th></th></tr></thead>
+        <tbody>
+        {% for r in vm.breached %}{% set c = r.case %}
+        <tr><td class="cell-id">{{ c.id }}</td><td class="strong">{{ c.client.legal_name }}</td><td>{{ status_badge(c.status) }}</td><td>{{ c.current_reviewer or '-' }}</td>
+            <td class="nowrap">{{ c.edd_due_at if c.status == 'DataEscalatingL2' else c.sla_due_at }}</td><td>{{ sla_chip(r.sla) }}</td>
+            <td><a class="btn btn-outline btn-xs" href="{{ url_for('kyc_detail', case_id=c.id) }}">Open</a></td></tr>
+        {% else %}<tr><td colspan="7"><div class="no-data">{{ icon('check-circle') }}No case is near its SLA.</div></td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
