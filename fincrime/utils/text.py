@@ -62,3 +62,16 @@ def display_name(email: str) -> str:
     """'amara.iyer@straive.com' → 'Amara Iyer'."""
     local = (email or "").split("@")[0]
     return " ".join(p.capitalize() for p in local.replace("_", ".").split(".") if p)
+
+
+def script_of(text: str) -> str:
+    """Which writing system a name uses: cyrillic | arabic | latin. Drives the
+    document-skill match in routing; anything outside the two non-Latin
+    blocks counts as latin."""
+    for ch in text or "":
+        o = ord(ch)
+        if 0x0400 <= o <= 0x04FF:
+            return "cyrillic"
+        if 0x0600 <= o <= 0x06FF:
+            return "arabic"
+    return "latin"

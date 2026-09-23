@@ -23,6 +23,9 @@
         {% if case.skopenow %}
         <div class="note info mb-12">Skopenow report: <b>{{ case.skopenow.status }}</b>. <a href="{{ url_for('kyc_skopenow', case_id=case.id) }}">Review it</a>.</div>
         {% endif %}
+        {% if case.tenant == 'ttshop' %}
+        <div class="note {{ 'ok' if case.risk_recalculated_at else 'warn' }} mb-12">TT Shop, Checker 1: approving sends the seller to Checker 2 for sign-off. Recalculate the risk rating first (SOP 4.2.2 §5.1.1) — {% if case.risk_recalculated_at %}recalculated {{ case.risk_recalculated_at }} ({{ case.risk_rating }}){% else %}<b>not recalculated yet</b>{% endif %}.</div>
+        {% endif %}
         <div class="field"><label><span class="req">*</span>Decision</label>
             <select class="input" name="decision" required>
                 {% for d in edd_decisions %}<option {% if loop.first %}selected{% endif %}>{{ d }}</option>{% endfor %}

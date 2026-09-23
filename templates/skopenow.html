@@ -27,7 +27,7 @@
     <div class="card-head"><div class="card-title">Report (simulated) — generated {{ s.report.generated_at }}</div></div>
     <div class="card-body">
         <table class="tbl"><tbody>
-        {% for title, text in s.report.sections %}<tr><td class="strong nowrap" style="width:200px">{{ title }}</td><td>{{ text }}</td></tr>{% endfor %}
+        {% for sec in s.report.sections %}<tr><td class="strong nowrap" style="width:200px">{{ sec.title }}</td><td>{{ sec.text }}</td><td class="nowrap" style="width:120px"><span class="badge {{ 'emerald' if sec.match == 'Consistent' else 'amber' }}">{{ sec.match }}</span></td></tr>{% endfor %}
         </tbody></table>
         {% if s.notes %}<div class="note {{ 'ok' if s.outcome == 'Cleared' else 'warn' }} mt-12"><b>{{ s.outcome }}</b> — {{ s.notes }}</div>{% endif %}
     </div>

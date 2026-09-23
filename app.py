@@ -7,14 +7,15 @@ that survives a restart, one stylesheet, no JS framework.
 
 Sections, in order: Modular imports · App Setup · Sign-in, analysts and roles
 · Tenant · Nav tables · State · Context processor · Auth routes · KYC case
-management · Documents · Name screening · World-Check (simulated) · Queues,
-Skopenow, KYB · Analytics · Demo affordances · Main.
+management · Documents · Name screening · World-Check (simulated) · Queues ·
+Operations hub (My Work, Pipeline, Trackers, Investigation file, Audit log,
+QC, Routing) · Analytics · Demo affordances · Main.
 """
 import hmac
 import os
 from functools import wraps
 
-from flask import (Flask, Response, abort, flash, jsonify, redirect, render_template, request,
+from flask import (Flask, Response, abort, flash, g, jsonify, redirect, render_template, request,
                    session, url_for)
 
 try:  # A deployed copy reads .env (see .env.example); a dev checkout has none.
@@ -25,18 +26,24 @@ except ImportError:  # pragma: no cover
 
 # ─── Modular imports ───────────────────────────────────────────────────────────
 from fincrime.adapters import idv_vendor
+from fincrime.analytics.audit_log import AuditLogConsole
 from fincrime.analytics.case_list import CaseListConsole
 from fincrime.analytics.dashboard import AnalyticsConsole
+from fincrime.analytics.pipeline import PipelineConsole
 from fincrime.analytics.queues import QueueConsole
+from fincrime.analytics.routing_console import RoutingConsole
+from fincrime.analytics.trackers import TrackerConsole, to_csv
+from fincrime.analytics.work import WorkConsole
 from fincrime.data import vocab
 from fincrime.data.loader import SEED_VERSION, index_by_id, load_seed
 from fincrime.data.state_store import StateStore
 from fincrime.documents import svg_cards
-from fincrime.engines import recommendation, screening, segregation, sla, worldcheck, workflow
+from fincrime.engines import (investigation, qc, recommendation, routing, screening, segregation, sla,
+                              worldcheck, workflow)
 from fincrime.engines.errors import WorkflowError
 from fincrime.engines.wc_report_pdf import render_wc_export
 from fincrime.utils import dates
-from fincrime.utils.text import initials
+from fincrime.utils.text import display_name, initials, translit
 
 # ─── App Setup ─────────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -52,12 +59,18 @@ DEBUG = os.environ.get("DEBUG", "1") == "1"
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8010"))
 
+
+def _who(value):
+    """An email as a display name; anything else (system, FCC Router) as is."""
+    return display_name(value) if "@" in (value or "") else (value or "-")
+
+
 # Jinja *globals*, not context-processor values: a macro imported with
 # {% from "_badges.html" import ... %} does not see the render context, but it
 # does see globals, and the badge macros need the status colour map.
 app.jinja_env.globals.update(status_tone=vocab.STATUS_TONE, vocab=vocab,
                              icon=app.jinja_env.get_template("_icon.html").module.icon)
-app.jinja_env.filters.update(wc_date=dates.wc_date, wc_dt=dates.wc_datetime)
+app.jinja_env.filters.update(wc_date=dates.wc_date, wc_dt=dates.wc_datetime, who=_who, translit=translit)
 
 # ─── Sign-in, analysts and roles ───────────────────────────────────────────────
 # Demo gate only: one shared password, a profile picker, the session cookie
@@ -148,9 +161,13 @@ TOP_TABS = [
     {"label": "Utility Hub"}, {"label": "Risk & Customer Controls"}, {"label": "Platform Configuration"},
 ]
 
-# Which side-nav entry a page belongs to, by endpoint prefix.
+# Which side-nav entry a page belongs to, by endpoint prefix. Order matters:
+# `kyc_` catches kyc_file / kyc_qc_review before the hub prefixes.
 _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"), ("wc_", "ns_queue"),
-              ("queue_", "queue_l2"), ("analytics", "analytics"))
+              ("queue_", "queue_l2"), ("analytics", "analytics"),
+              ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
+              ("qc_", "qc_sampling"), ("routing_", "routing_console"))
+HUB_OWNERS = {"work", "pipeline", "trackers", "audit_log", "qc_sampling", "routing_console"}
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -160,13 +177,21 @@ def _nav_owner(endpoint: str) -> str:
     return ""
 
 
+def _qc_pending_count():
+    """Memoised per request: the nav and the QC page both ask."""
+    if not hasattr(g, "qc_pending"):
+        g.qc_pending = len(qc.pending(KYC_CASES, _tenant()))
+    return g.qc_pending
+
+
 def _side_nav():
     owner = _nav_owner(request.endpoint)
     levels = _levels()
     tenant = _tenant()
+    actor = _actor()
     open_l1 = sum(1 for c in KYC_CASES if c["tenant"] == tenant and c["status"] in ("DataConfirming", "DataScreening"))
     open_l2 = sum(1 for c in KYC_CASES if c["tenant"] == tenant and c["status"] == "DataEscalatingL2"
-                  and not segregation.hidden_from(c, _actor(), "L2"))
+                  and not segregation.hidden_from(c, actor, "L2"))
     items = [
         {"label": "Transaction Monitoring", "icon": "activity", "disabled": True},
         {"label": "Sanctions Screening", "icon": "shield", "has_active": owner == "ns_queue", "children": [
@@ -177,6 +202,21 @@ def _side_nav():
     if levels & {"L2", "EDD", "QC"}:
         items.append({"label": "L2 / EDD Queue", "icon": "layers", "endpoint": "queue_l2", "active": owner == "queue_l2", "count": open_l2})
     items.append({"label": "Analytics", "icon": "bar-chart", "endpoint": "analytics", "active": owner == "analytics"})
+    # The hub — what SOP 5.2 asks for on top of the as-is screens.
+    hub = [
+        {"label": "My Work", "icon": "clipboard", "endpoint": "work", "active": owner == "work",
+         "count": routing.load(actor, KYC_CASES) if actor else 0},
+        {"label": "Pipeline", "icon": "trending-up", "endpoint": "pipeline", "active": owner == "pipeline"},
+        {"label": "Trackers", "icon": "list", "endpoint": "trackers", "active": owner == "trackers"},
+        {"label": "Audit Log", "icon": "book", "endpoint": "audit_log", "active": owner == "audit_log"},
+    ]
+    if "QC" in levels:
+        hub.append({"label": "QC Sampling", "icon": "shield-check", "endpoint": "qc_sampling", "active": owner == "qc_sampling",
+                    "count": _qc_pending_count()})
+    if levels & {"L2", "QC"}:
+        hub.append({"label": "Routing", "icon": "sliders", "endpoint": "routing_console", "active": owner == "routing_console",
+                    "count": len(routing.unassigned(tenant, KYC_CASES))})
+    items.append({"label": "Operations Hub", "icon": "briefcase", "has_active": owner in HUB_OWNERS, "children": hub})
     return items
 
 
@@ -203,8 +243,9 @@ def _rebuild_indexes():
 
 
 def _load_seed():
-    """Rebuild the three case lists from the seed, then lay stored actions
-    back on top. Rebinds the lists in place so every reference stays valid.
+    """Rebuild the case lists from the seed, then lay stored actions back on
+    top. Rebinds the lists in place so every reference stays valid — including
+    the router's, which is bound to the list objects.
 
     A stored seed version that differs from the code's means the record shape
     may have moved; the store is cleared and the log says so. Done only in
@@ -216,6 +257,7 @@ def _load_seed():
     ALERT_CASES[:] = alerts
     WC_CASES[:] = wc
     _rebuild_indexes()
+    routing.configure(ANALYSTS, KYC_CASES)
 
     in_serving_process = (not DEBUG) or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
     stored = StateStore.seed_version()
@@ -227,7 +269,7 @@ def _load_seed():
         StateStore.set_seed_version(SEED_VERSION)
 
     restored = (StateStore.restore("kyc", KYC_BY_ID) + StateStore.restore("alert", ALERT_BY_ID)
-                + StateStore.restore("wc", WC_BY_ID))
+                + StateStore.restore("wc", WC_BY_ID) + StateStore.restore("analyst", ANALYST_BY_KEY))
     if restored:
         app.logger.info("Restored %d stored record(s) onto the seed.", restored)
 
@@ -258,6 +300,21 @@ def _run_action(fn, *args, **kwargs):
     except WorkflowError as exc:
         flash(str(exc), "error")
         return False, None
+
+
+def _csv_response(filename, columns, rows):
+    return Response(to_csv(columns, rows), mimetype="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+def _routing_note(case):
+    """One clause for a flash: where the router sent the case."""
+    r = case.get("routing") or {}
+    if r.get("status") == "routed" and case.get("current_reviewer"):
+        return f"Routed to {display_name(case['current_reviewer'])} at once."
+    if r.get("status") == "queued":
+        return "No analyst has free capacity right now; the case waits in the pipeline."
+    return ""
 
 
 # ─── Context processor ─────────────────────────────────────────────────────────
@@ -379,6 +436,13 @@ def _linked(case):
     return alert, wc
 
 
+_POA_RESUBMIT = {
+    "Issued within the last 6 months": "The proof of address is older than 6 months",
+    "Accepted document type (internal library)": "The document type is not an accepted proof of address",
+    "Not from a sanctioned or prohibited country": "The proof of address is from a prohibited country",
+}
+
+
 @app.route("/kyc/detail/<case_id>")
 def kyc_detail(case_id):
     case = _kyc(case_id)
@@ -386,16 +450,22 @@ def kyc_detail(case_id):
     levels, actor = _levels(), _actor()
     l2_level = "EDD" if case["pending_reason"] == "Pending EDD" else "L2"
     hit = case["screening"]["hit"]
+    checks = workflow.poa_checks(case)
+    failed = [c for c in checks if not c["ok"]]
     return render_template(
         "kyc_detail.html", case=case, alert=alert, wc=wc, levels=levels, actor=actor,
-        points=workflow.verification_points(case), review=workflow.review_action(case, levels),
+        points=workflow.verification_points(case), review=workflow.review_action(case, levels, actor),
         is_mine=case["current_reviewer"] == actor, closed=case["status"] in vocab.CLOSED_STATUSES,
         sla=sla.chip(case), vendor=idv_vendor.details(case), confirm_fields=workflow.confirm_fields(case),
         pending_alerts=sum(1 for a in (alert or {}).get("alerts", []) if a["outcome"] == "Pending"),
         exports=(wc or {}).get("exports", []), l2_level=l2_level,
         segregated=segregation.hidden_from(case, actor, l2_level) if case["status"] == "DataEscalatingL2" else False,
         edd_decisions=(list(vocab.EDD_DECISIONS) if hit else ["No match - Approve"] + list(vocab.EDD_DECISIONS)),
-        analysts=ANALYSTS)
+        analysts=ANALYSTS,
+        poa_checks=checks, poa_failed=bool(failed),
+        poa_sanction_fail=any(c["label"].startswith("Sanctioned-country") for c in failed),
+        poa_resubmit_reason=next((_POA_RESUBMIT[c["label"]] for c in failed if c["label"] in _POA_RESUBMIT), ""),
+        file_items=investigation.items(case, alert, wc) if case.get("investigation_file") else [])
 
 
 @app.route("/kyc/detail/<case_id>/audit")
@@ -403,15 +473,22 @@ def kyc_audit(case_id):
     return render_template("kyc_audit.html", case=_kyc(case_id), view=request.args.get("view", "audit"))
 
 
-def _case_action(case_id, fn, *args, success="", open_modal="", **kwargs):
+def _case_action(case_id, fn, *args, success="", open_modal="", extra=(), **kwargs):
     """Run one workflow action on a case as the signed-in analyst; persist on
-    success; go back to the case, reopening the modal on a validation flash."""
+    success (plus any `extra` (kind, record) pairs the action touched); go
+    back to the case, reopening the modal on a validation flash. `success`
+    may be a callable taking the case, for messages that depend on the
+    outcome (where the router sent it)."""
     case = _kyc(case_id)
     ok, result = _run_action(fn, case, _actor(), *args, **kwargs)
     if ok:
         _save("kyc", case)
-        if success:
-            flash(success, "success")
+        for kind, record in extra:
+            if record is not None:
+                _save(kind, record)
+        text = success(case) if callable(success) else success
+        if text:
+            flash(text, "success")
     target = url_for("kyc_detail", case_id=case_id)
     if not ok and open_modal:
         target += f"?open={open_modal}"
@@ -475,9 +552,12 @@ def kyc_resubmit(case_id):
 @role_required("L1")
 def kyc_escalate(case_id):
     case = _kyc(case_id)
+    alert, _wc = _linked(case)
     back = "dc-modal" if case["status"] == "DataConfirming" else "edd-modal"
     return _case_action(case_id, workflow.escalate, request.form.get("reason", ""), request.form.get("comment", ""),
-                        success="Escalated to L2. The 14-day EDD clock has started.", open_modal=back)
+                        request.form.get("fraud_typology", ""), alert_case=alert, extra=(("alert", alert),),
+                        success=lambda c: f"Escalated to L2. {_routing_note(c)} The 14-day EDD clock has started.".replace("  ", " "),
+                        open_modal=back)
 
 
 @app.route("/kyc/<case_id>/rfi", methods=["POST"])
@@ -493,8 +573,17 @@ def kyc_edd_review(case_id):
     case = _kyc(case_id)
     alert, _wc = _linked(case)
     attachment = request.form.get("attachment", "") or request.form.get("attachment_name", "")
+    level = "L1" if "L1" in _levels() else "L2"
+
+    def done(c):
+        if c.get("pending_reason") == "Pending Checker 2":
+            return f"Checker 1 approval recorded — the seller now waits for Checker 2. {_routing_note(c)}".strip()
+        if c["status"] == "DataEscalatingL2":
+            return f"Escalated to L2. {_routing_note(c)} The 14-day EDD clock has started.".replace("  ", " ")
+        return "Review recorded."
     return _case_action(case_id, workflow.edd_review, request.form.get("decision", ""), request.form.get("summary", ""),
-                        attachment, alert_case=alert, success="Review recorded.", open_modal="edd-modal")
+                        attachment, alert_case=alert, level=level, extra=(("alert", alert),),
+                        success=done, open_modal="edd-modal")
 
 
 @app.route("/kyc/<case_id>/l2_decision", methods=["POST"])
@@ -503,7 +592,19 @@ def kyc_l2_decision(case_id):
     case = _kyc(case_id)
     level = "EDD" if case["pending_reason"] == "Pending EDD" else "L2"
     return _case_action(case_id, workflow.l2_decision, level, request.form.get("decision", ""), request.form.get("comment", ""),
-                        success=f"{level} decision recorded.", open_modal="l2-modal")
+                        levels=_levels(),
+                        success=lambda c: (f"Escalated to EDD. {_routing_note(c)}".strip() if c.get("pending_reason") == "Pending EDD"
+                                           else f"{level} decision recorded."),
+                        open_modal="l2-modal")
+
+
+@app.route("/kyc/<case_id>/checker2", methods=["POST"])
+@role_required("L1", "L2")
+def kyc_checker2(case_id):
+    return _case_action(case_id, workflow.checker2_signoff, request.form.get("decision", ""), request.form.get("comment", ""),
+                        success=lambda c: ("Checker 2 sign-off recorded — the seller is verified." if c["status"] == "Verified"
+                                           else f"Checker 2 decision recorded. {_routing_note(c)}".strip()),
+                        open_modal="checker2-modal")
 
 
 @app.route("/kyc/<case_id>/skopenow", methods=["GET", "POST"])
@@ -719,10 +820,154 @@ def queue_l2():
     return render_template("queue_l2.html", vm=vm)
 
 
+# ─── Operations hub: My Work and case on-demand (SOP 5.2.2) ────────────────────
+@app.route("/work")
+def work():
+    return render_template("work.html", vm=WorkConsole.compute(KYC_CASES, ALERT_CASES, _analyst()))
+
+
+@app.route("/work/next", methods=["POST"])
+@role_required("L1", "L2", "EDD")
+def work_next():
+    ok, routed = _run_action(routing.request_cases, _analyst(), 1, tenant=_tenant(), trigger="next")
+    if not ok:
+        return redirect(url_for("work"))
+    case = routed[0]
+    _save("kyc", case)
+    flash(f"Routed to you: {case['client']['legal_name']} — {case['routing']['reason']}.", "success")
+    return redirect(url_for("kyc_detail", case_id=case["id"]))
+
+
+@app.route("/work/request", methods=["POST"])
+@role_required("L1", "L2", "EDD")
+def work_request():
+    ok, routed = _run_action(routing.request_cases, _analyst(), request.form.get("n", "1"), tenant=_tenant())
+    if ok:
+        for c in routed:
+            _save("kyc", c)
+        flash(f"Routed {len(routed)} case(s) to you: " + ", ".join(c["client"]["legal_name"] for c in routed) + ".", "success")
+    return redirect(url_for("work"))
+
+
+@app.route("/kyc/<case_id>/qc_ack", methods=["POST"])
+def kyc_qc_ack(case_id):
+    case = _kyc(case_id)
+    ok, _ = _run_action(workflow.qc_ack, case, _actor())
+    if ok:
+        _save("kyc", case)
+        flash("QC feedback acknowledged.", "success")
+    return redirect(url_for("work"))
+
+
+# ─── Operations hub: pipeline, trackers, investigation file, audit log (SOP 5.2.3–5.2.4)
+@app.route("/pipeline")
+def pipeline():
+    return render_template("pipeline.html", vm=PipelineConsole.compute(KYC_CASES, _tenant()))
+
+
+@app.route("/trackers")
+def trackers():
+    vm = TrackerConsole.compute(KYC_CASES, ALERT_CASES, WC_CASES, _tenant(), request.args.get("view", "productivity"))
+    if request.args.get("format") == "csv":
+        return _csv_response(f"tracker_{vm['view']}_{_tenant()}.csv", vm["columns"], vm["rows"])
+    return render_template("trackers.html", vm=vm)
+
+
+@app.route("/kyc/detail/<case_id>/file")
+def kyc_file(case_id):
+    case = _kyc(case_id)
+    alert, wc = _linked(case)
+    return render_template("investigation_file.html", case=case, alert=alert, wc=wc,
+                           items=investigation.items(case, alert, wc))
+
+
+@app.route("/kyc/<case_id>/investigation_file.zip")
+def kyc_file_zip(case_id):
+    case = _kyc(case_id)
+    alert, wc = _linked(case)
+    actor = _actor()
+    name, data = investigation.zip_bytes(case, alert, wc,
+                                        render_pdf=lambda w, a, k: render_wc_export(w, a, k, actor),
+                                        render_doc=svg_cards.render)
+    return Response(data, mimetype="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.route("/audit")
+def audit_log():
+    vm = AuditLogConsole.compute(KYC_CASES, ALERT_CASES, WC_CASES, _tenant())
+    if request.args.get("format") == "csv":
+        rows = [[r["at"], r["actor"], r["kind_label"], r["record_id"], r["label"], r["action"], r["detail"]] for r in vm["rows"]]
+        return _csv_response(f"audit_log_{_tenant()}.csv", ["At", "Actor", "Record", "Record ID", "Name", "Action", "Detail"], rows)
+    return render_template("audit_log.html", vm=vm)
+
+
+# ─── Operations hub: QC sampling (SOP 2.1) ─────────────────────────────────────
+@app.route("/qc")
+@role_required("QC")
+def qc_sampling():
+    tenant = _tenant()
+    sample = qc.sample(KYC_CASES, tenant)
+    return render_template("qc.html", sample=[{"case": c, "sla": sla.chip(c)} for c in sample],
+                           scorecard=qc.scorecard(KYC_CASES, tenant),
+                           pending=sum(1 for c in sample if not c.get("qc_result")), day=dates.now_str()[:10])
+
+
+@app.route("/kyc/<case_id>/qc_review", methods=["POST"])
+@role_required("QC")
+def kyc_qc_review(case_id):
+    case = _kyc(case_id)
+    ok, _ = _run_action(workflow.qc_review, case, _actor(), request.form.get("result", ""),
+                        request.form.get("reason", ""), request.form.get("comment", ""))
+    if ok:
+        _save("kyc", case)
+        flash(f"QC review recorded: {case['qc_result']} — {case['client']['legal_name']}.", "success")
+    return redirect(url_for("qc_sampling"))
+
+
+# ─── Operations hub: routing console (SOP 5.2.1) ───────────────────────────────
+@app.route("/routing")
+@role_required("L2", "QC")
+def routing_console():
+    return render_template("routing.html", vm=RoutingConsole.compute(KYC_CASES, ANALYSTS, _tenant()),
+                           can_edit="QC" in _levels())
+
+
+@app.route("/routing/run", methods=["POST"])
+@role_required("L2", "QC")
+def routing_run():
+    ids = request.form.getlist("case_id")
+    results = routing.route_backlog(_tenant(), only_ids=ids if ids else None)
+    for c, _a, _r in results:
+        _save("kyc", c)
+    routed = [(c, a) for c, a, _ in results if a]
+    queued = len(results) - len(routed)
+    if not results:
+        flash("Nothing to route.", "error")
+    else:
+        detail = ", ".join(f"{c['client']['legal_name']} → {display_name(a['email'])}" for c, a in routed[:6])
+        flash(f"Routed {len(routed)} case(s){' — ' + detail if detail else ''}."
+              + (f" {queued} still waiting for capacity." if queued else ""), "success" if routed else "error")
+    return redirect(url_for("routing_console"))
+
+
+@app.route("/routing/capacity", methods=["POST"])
+@role_required("QC")
+def routing_capacity():
+    a = ANALYST_BY_KEY.get(request.form.get("key", ""))
+    if not a:
+        flash("Unknown analyst.", "error")
+        return redirect(url_for("routing_console"))
+    ok, res = _run_action(routing.set_capacity, a, request.form.get("capacity", ""))
+    if ok:
+        _save("analyst", a)
+        flash(f"{a['name']}: capacity {res[0]} → {res[1]}.", "success")
+    return redirect(url_for("routing_console"))
+
+
 # ─── Analytics ─────────────────────────────────────────────────────────────────
 @app.route("/analytics")
 def analytics():
-    vm = AnalyticsConsole.compute(KYC_CASES, ALERT_CASES, WC_CASES, _tenant())
+    vm = AnalyticsConsole.compute(KYC_CASES, ALERT_CASES, WC_CASES, _tenant(), analysts=ANALYSTS)
     return render_template("analytics.html", vm=vm)
 
 

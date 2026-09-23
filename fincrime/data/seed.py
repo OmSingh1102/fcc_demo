@@ -8,18 +8,23 @@ a real system.
 
 Record shapes (the templates and engines depend on these keys):
 
+Analyst
+    id (== key), key, name, email, roles[], role, tenants[], role_label,
+    skills{scripts[], kyb}, capacity, shift
+
 KycCase
     id, client_id, tenant, tags[], status, pending_reason, source,
     manual_review_reason[], poa_required, case_review_level,
     created_at, submitted_at, sla_due_at, escalated_at, edd_due_at, closed_at,
+    closed_by, assigned_at,
     current_reviewer, previous_reviewer, reviewers_by_level{L1[],L2[],EDD[]},
-    qc_reviewer, qc_result, qc_reason,
+    qc_reviewer, qc_result, qc_reason, qc_at, qc_comment, qc_ack,
     client{legal_name, native_name, dob, nationality, gender, id_number,
            id_type, id_issuing_place, phone, email, us_person, address, country},
     agency{...} | None,
     vendor_check{vendor, result, vendor_reason, extracted{}, checked_at},
-    documents[{id, name, category, kind, side, quality}],
-    confirmations{name, dob, nationality → {value, confirmed_by, at, edited} | None},
+    documents[{id, name, category, kind, side, quality, issued_on?, country?}],
+    confirmations{name, dob, nationality, poa → {value, confirmed_by, at, edited} | None},
     verification_points[{label, at}] (six, in STEP_LABELS order),
     review_decisions[{check_point, decision, fail_reason, poa_fail_reason,
                       approve_reason, rejection_reason, id_summary, report,
@@ -27,6 +32,12 @@ KycCase
     screening{hit, alert_case_id, rows[{platform, user_name, screen_time,
                                         list, result, alert_id}]},
     risk_rating, risk_recalculated_at, skopenow, attachments[], resubmit,
+    fraud_typology, escalate_reason,
+    routing{status, to, trigger, reason, at} | None,
+    work[{level, analyst, from, to, outcome}],
+    handoffs[{from, to, at, assigned_to, assigned_at, lag_seconds, via}],
+    investigation_file{name, created_at, created_by} | None,
+    checker1{by, at, decision, summary} | None, checker2{by, at, decision, comment} | None,
     audit[{at, actor, action, detail}], change_log[]
 
 ScreeningAlertCase
@@ -50,6 +61,7 @@ WcCase
     reports[[date, text]]}, aliases[], keywords[], sources[[date, url]]}],
     exports[], audit[]
 """
+import copy
 import random
 
 from fincrime.data import vocab
@@ -58,22 +70,26 @@ from fincrime.utils import dates, ids
 # ── Analysts ────────────────────────────────────────────────────────────────
 
 
-def analyst(key, name, roles, tenants):
+def analyst(key, name, roles, tenants, *, scripts=("latin",), kyb=False, capacity=5, shift=""):
+    """One analyst profile with the skill book the router reads (SOP 5.2.1:
+    cases are matched to the analyst's skills) and a capacity (5.2.2)."""
     labels = ", ".join(vocab.TENANTS[t]["label"] for t in tenants)
     return {
-        "key": key, "name": name, "email": f"{key}@straive.com",
+        "id": key, "key": key, "name": name, "email": f"{key}@straive.com",
         "roles": list(roles), "role": roles[0], "tenants": list(tenants),
         "role_label": f"{' / '.join(roles)} · {labels}",
+        "skills": {"scripts": list(scripts), "kyb": bool(kyb)},
+        "capacity": int(capacity), "shift": shift,
     }
 
 
 ANALYSTS = [
-    analyst("amara.iyer", "Amara Iyer", ["L1"], ["ttlive"]),
-    analyst("jon.miranda", "Jon Miranda", ["L1"], ["ttlive", "ttshop"]),
-    analyst("mario.kim", "Mario Kim", ["L1", "L2"], ["ttlive", "ttshop"]),
-    analyst("nisha.rao", "Nisha Rao", ["L2"], ["ttlive", "ttshop"]),
-    analyst("ryan.lee", "Ryan Lee", ["EDD"], ["ttlive", "ttshop"]),
-    analyst("leah.fernandez", "Leah Fernandez", ["QC"], ["ttlive", "ttshop"]),
+    analyst("amara.iyer", "Amara Iyer", ["L1"], ["ttlive"], scripts=("latin", "cyrillic"), capacity=6, shift="06:00–14:00 UTC"),
+    analyst("jon.miranda", "Jon Miranda", ["L1"], ["ttlive", "ttshop"], scripts=("latin", "arabic"), kyb=True, capacity=6, shift="14:00–22:00 UTC"),
+    analyst("mario.kim", "Mario Kim", ["L1", "L2"], ["ttlive", "ttshop"], scripts=("latin",), kyb=True, capacity=5, shift="22:00–06:00 UTC"),
+    analyst("nisha.rao", "Nisha Rao", ["L2"], ["ttlive", "ttshop"], scripts=("latin", "cyrillic", "arabic"), kyb=True, capacity=4, shift="08:00–16:00 UTC"),
+    analyst("ryan.lee", "Ryan Lee", ["EDD"], ["ttlive", "ttshop"], scripts=("latin", "cyrillic", "arabic"), kyb=True, capacity=3, shift="08:00–16:00 UTC"),
+    analyst("leah.fernandez", "Leah Fernandez", ["QC"], ["ttlive", "ttshop"], scripts=("latin", "cyrillic", "arabic"), kyb=True, capacity=0, shift="08:00–16:00 UTC"),
 ]
 EMAIL = {a["key"]: a["email"] for a in ANALYSTS}
 AMARA, JON, MARIO, NISHA, RYAN, LEAH = (EMAIL[k] for k in
@@ -86,25 +102,46 @@ ID_KINDS = {"passport": "Passport", "driving_licence": "DrivingLicense", "nation
 POA_KINDS = {"utility_bill": "ProofOfAddress", "bank_statement": "ProofOfAddress"}
 
 
-def doc(kind, side="front", quality="ok"):
-    """A document row. `quality` drives the synthetic image: ok | blurred | cropped | expired."""
+def doc(kind, side="front", quality="ok", *, issued_days_ago=None, country=""):
+    """A document row. `quality` drives the synthetic image: ok | blurred |
+    cropped | expired. A proof of address also carries when it was issued and
+    by which country — the two facts the SOP's POA checks read; kyc_case()
+    fills the defaults from the case."""
     if kind in ID_KINDS:
         return {"name": "Photos of ID document", "category": ID_KINDS[kind], "kind": kind, "side": side, "quality": quality}
-    return {"name": "Photos of Proof of Address", "category": POA_KINDS[kind], "kind": kind, "side": side, "quality": quality}
+    return {"name": "Photos of Proof of Address", "category": POA_KINDS[kind], "kind": kind, "side": side, "quality": quality,
+            "issued_days_ago": issued_days_ago, "country": country}
 
 
-def std_docs(id_kind="passport", poa=True, id_quality="ok"):
+def std_docs(id_kind="passport", poa=True, id_quality="ok", *, poa_kind="utility_bill", poa_issued_days_ago=None, poa_country=""):
     out = [doc(id_kind, "front", id_quality), doc(id_kind, "back")]
     if poa:
-        out += [doc("utility_bill", "page 1"), doc("utility_bill", "page 2")]
+        out += [doc(poa_kind, "page 1", issued_days_ago=poa_issued_days_ago, country=poa_country),
+                doc(poa_kind, "page 2", issued_days_ago=poa_issued_days_ago, country=poa_country)]
     return out
 
 
-# ── Audit helper ────────────────────────────────────────────────────────────
+# ── Audit / hand-off helpers ────────────────────────────────────────────────
 
 
 def event(at, actor, action, detail=""):
     return {"at": at, "actor": actor, "action": action, "detail": detail}
+
+
+def handoff(from_level, to_level, at, assigned_to="", lag_hours=None, via="bot"):
+    """A tier hand-off as the pipeline records it. `lag_hours` None means the
+    case is still waiting for somebody to take it."""
+    assigned_at = dates.add_hours(at, lag_hours) if (assigned_to and lag_hours is not None) else ""
+    return {"from": from_level, "to": to_level, "at": at, "assigned_to": assigned_to if assigned_at else "",
+            "assigned_at": assigned_at, "lag_seconds": int(lag_hours * 3600) if assigned_at else None, "via": via}
+
+
+def _level_for(status, pending_reason):
+    if status in ("DataConfirming", "DataScreening"):
+        return "L2" if pending_reason == "Pending Checker 2" else "L1"
+    if status == "DataEscalatingL2":
+        return "EDD" if pending_reason == "Pending EDD" else "L2"
+    return ""
 
 
 # ── KYC case ────────────────────────────────────────────────────────────────
@@ -120,13 +157,20 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
              l1=(), l2=(), edd=(), current_reviewer="", previous_reviewer="",
              pending_reason="", confirmed_hours_after=None, escalated_hours_after=None,
              closed_hours_after=None, agency=None, risk_rating="", case_review_level="L1",
-             resubmit=None, extra_audit=()):
+             resubmit=None, extra_audit=(),
+             routed_to="", routed_hours_after=None, handoffs=(), fraud_typology="", escalate_reason="",
+             qc=None, poa_country="", confirmed=True):
     """One onboarding case.
 
     Timestamps are derived from `created_hours_ago`; the *_hours_after
     arguments place the later verification points relative to creation. A
     status past Data Confirming without a confirmed_hours_after gets a
     sensible default so the stepper is never missing a tick it should have.
+
+    `routed_to` seeds an open case already given to an analyst by the router
+    (with the routing chip and audit row that implies); `handoffs` seeds the
+    tier hand-offs of an escalated case, so the pipeline's lag metrics have
+    history; `qc` seeds a QC review on a closed case.
     """
     t = vocab.TENANTS[tenant]
     source = source or t["source"]
@@ -135,7 +179,7 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
     screened_at = dates.add_minutes(created, 2.5)
     step = vocab.STATUS_STEP[status]
 
-    if confirmed_hours_after is None and (step >= 3 or status in vocab.CLOSED_STATUSES):
+    if confirmed_hours_after is None and confirmed and (step >= 3 or status in vocab.CLOSED_STATUSES):
         confirmed_hours_after = 1.2
     confirmed_at = dates.add_hours(created, confirmed_hours_after) if confirmed_hours_after is not None else ""
     if escalated_hours_after is None and (step >= 4 and status != "Verified"):
@@ -152,9 +196,15 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
     l1 = list(l1)
     docs = docs if docs is not None else std_docs("passport" if id_type == "Passport" else "national_id", poa_required)
     documents = []
+    poa_default_days = 30 + ids._h(key, "poa") % 90
     for n, d in enumerate(docs, start=1):
         row = dict(d)
         row["id"] = ids.doc_id(n)
+        if row["category"] == "ProofOfAddress":
+            days = row.pop("issued_days_ago", None)
+            days = poa_default_days if days is None else days
+            row["issued_on"] = dates.add_days(created, -days)[:10]
+            row["country"] = row.get("country") or poa_country or nationality
         documents.append(row)
 
     points = [
@@ -172,14 +222,16 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
         row.update(kw)
         return row
 
-    confirmer = previous_reviewer or (l1[-1] if l1 else "")
+    confirmer = l1[-1] if l1 else previous_reviewer
+    escalate_reason = escalate_reason or ("Unresolved medium or high risk screening hit" if escalated_at else "")
     review_decisions = [
         decision("Submitted"),
         decision("System Review"),
         decision("Data Matching"),
         decision("Data Confirming", decision="Pass" if confirmed_at else "", operated_at=confirmed_at, by=confirmer if confirmed_at else ""),
         decision("Data Screening", operated_at=screened_at),
-        decision("Data Escalating L2", decision="Escalated" if escalated_at else "", operated_at=escalated_at, by=confirmer if escalated_at else ""),
+        decision("Data Escalating L2", decision="Escalated" if escalated_at else "", operated_at=escalated_at,
+                 by=confirmer if escalated_at else "", rejection_reason=escalate_reason if escalated_at else ""),
     ]
     if status == "Verified":
         review_decisions[4].update(decision="False positive" if screening_hit else "No match",
@@ -187,12 +239,14 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
                                    by=confirmer)
         review_decisions[5].update(decision="Approved" if escalated_at else "", approve_reason="EDD completed" if escalated_at else "")
     if status == "Rejected":
-        review_decisions[5].update(decision="Rejected", rejection_reason="True positive confirmed")
+        review_decisions[5].update(decision="Rejected", rejection_reason=fraud_typology or "True positive confirmed")
 
-    confirmations = {"name": None, "dob": None, "nationality": None}
+    confirmations = {"name": None, "dob": None, "nationality": None, "poa": None}
     if confirmed_at:
         for fld, val in (("name", surname_first), ("dob", dob), ("nationality", nationality)):
             confirmations[fld] = {"value": val, "confirmed_by": confirmer, "at": confirmed_at, "edited": False}
+        if poa_required:
+            confirmations["poa"] = {"value": "checked", "confirmed_by": confirmer, "at": confirmed_at, "edited": False}
 
     alert_case_id = ids.alert_case_id(screening_key or key) if screening_hit else ""
     rows = [
@@ -203,6 +257,7 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
          "list": "Internal_blacklist", "result": "No Match", "alert_id": ""},
     ]
 
+    closed_by = (list(edd) or list(l2) or [confirmer or "system"])[-1] if closed_at else ""
     audit = [
         event(created, "system", "Case created", f"{source} submission received from the onboarding flow."),
         event(idv_at, vendor, "ID verification", f"Vendor result: {vendor_result}." + (f" {vendor_reason}" if vendor_reason else "")),
@@ -212,11 +267,84 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
     if confirmed_at:
         audit.append(event(confirmed_at, confirmer, "Data confirmed", "Name, date of birth and nationality confirmed against the document."))
     if escalated_at:
-        audit.append(event(escalated_at, confirmer, "Escalated to L2", pending_reason or "Unresolved screening hit."))
+        audit.append(event(escalated_at, confirmer, "Escalated to L2",
+                           f"{escalate_reason}." + (f" Fraud typology: {fraud_typology}." if fraud_typology else "")))
     if closed_at:
-        who = (list(edd) or list(l2) or [confirmer or "system"])[-1]
-        audit.append(event(closed_at, who, f"Case {status.lower()}", "Review complete."))
+        audit.append(event(closed_at, closed_by, f"Case {status.lower()}", "Review complete."))
     audit.extend(extra_audit)
+
+    # Tier hand-offs. Explicit ones come from the scenario; an escalated case
+    # without any gets one L1 → L2 record still waiting for a taker, which is
+    # exactly what bot allocation looked like.
+    handoffs = [dict(h) for h in handoffs]
+    if escalated_at and not handoffs:
+        taker = (list(l2) or [""])[0] or (routed_to if status == "DataEscalatingL2" and pending_reason != "Pending EDD" else "")
+        handoffs.append(handoff("L1", "L2", escalated_at, taker, 3.0 if taker else None, via="bot"))
+
+    # Who held the case when — the entries the Productivity / Time Tracker shows.
+    work = []
+    level_now = _level_for(status, pending_reason)
+    if confirmer and (confirmed_at or escalated_at or closed_at):
+        start = dates.add_hours(created, 0.3)
+        if escalated_at:
+            end, outcome = escalated_at, "Escalated to L2"
+        elif closed_at and not (l2 or edd):
+            end, outcome = closed_at, f"Closed — {status}"
+        elif routed_to == confirmer and level_now == "L1":
+            end, outcome = "", ""
+        else:
+            end, outcome = confirmed_at, "Data confirmed"
+        work.append({"level": "L1", "analyst": confirmer, "from": start, "to": end, "outcome": outcome})
+    for h in handoffs:
+        if not h.get("assigned_at"):
+            continue
+        level = h["to"]
+        later = [x for x in handoffs if x["from"] == level and x["at"] > h["assigned_at"]]
+        if later:
+            end, outcome = later[0]["at"], f"Escalated to {later[0]['to']}"
+        elif closed_at:
+            end, outcome = closed_at, f"Closed — {status}"
+        else:
+            end, outcome = "", ""
+        work.append({"level": level, "analyst": h["assigned_to"], "from": h["assigned_at"], "to": end, "outcome": outcome})
+
+    routing = None
+    current = current_reviewer
+    if routed_to and status not in vocab.CLOSED_STATUSES:
+        if routed_hours_after is None:
+            base = escalated_at or confirmed_at or created
+            routed_at = dates.add_minutes(base, 12) if base != created else dates.add_hours(created, 0.3)
+        else:
+            routed_at = dates.add_hours(created, routed_hours_after)
+        analyst_rec = next((a for a in ANALYSTS if a["email"] == routed_to), None)
+        script = "cyrillic" if any("Ѐ" <= ch <= "ӿ" for ch in native_name) else "latin"
+        reason = f"{level_now} · {script} script{' · KYB' if agency else ''} · skill match"
+        routing = {"status": "routed", "to": routed_to, "trigger": "seed", "reason": reason, "at": routed_at}
+        current = routed_to
+        if not any(w["analyst"] == routed_to and not w["to"] for w in work):
+            work.append({"level": level_now, "analyst": routed_to, "from": routed_at, "to": "", "outcome": ""})
+        audit.append(event(routed_at, "FCC Router", "Auto-routed",
+                           f"→ {analyst_rec['name'] if analyst_rec else routed_to} · {reason} · Routed at intake"))
+        for h in reversed(handoffs):
+            if not h.get("assigned_at") and h["to"] == level_now:
+                h.update(assigned_to=routed_to, assigned_at=routed_at, via="hub",
+                         lag_seconds=int((dates.parse(routed_at) - dates.parse(h["at"])).total_seconds()))
+                break
+    audit.sort(key=lambda e: e["at"])
+
+    qc_fields = {"qc_reviewer": "", "qc_result": "", "qc_reason": "", "qc_at": "", "qc_comment": "", "qc_ack": False}
+    if qc and closed_at:
+        qc_at = qc.get("at") or dates.add_hours(closed_at, 6)
+        qc_fields.update(qc_reviewer=qc["reviewer"], qc_result=qc["result"], qc_reason=qc.get("reason", ""),
+                         qc_at=qc_at, qc_comment=qc.get("comment", ""), qc_ack=bool(qc.get("ack")))
+        audit.append(event(qc_at, qc["reviewer"], f"QC review: {qc['result']}", f"{qc.get('reason', '')}. {qc.get('comment', '')}".strip(". ")))
+        if qc["result"] == "Fail" and not qc.get("ack"):
+            pending_reason = "Pending QC"
+
+    investigation_file = None
+    if escalated_at:
+        investigation_file = {"name": f"{ids.client_id(key)} ({ids.kyc_case_id(key)})", "created_at": escalated_at,
+                              "created_by": confirmer}
 
     return {
         "id": ids.kyc_case_id(key), "key": key, "client_id": ids.client_id(key), "tenant": tenant,
@@ -227,10 +355,11 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
         "sla_due_at": dates.add_hours(created, vocab.SLA_HOURS_L1),
         "escalated_at": escalated_at,
         "edd_due_at": dates.add_hours(escalated_at, vocab.SLA_HOURS_EDD) if escalated_at else "",
-        "closed_at": closed_at,
-        "current_reviewer": current_reviewer, "previous_reviewer": previous_reviewer,
+        "closed_at": closed_at, "closed_by": closed_by,
+        "assigned_at": (routing or {}).get("at", "") or (dates.add_hours(created, 0.3) if current else ""),
+        "current_reviewer": current, "previous_reviewer": previous_reviewer,
         "reviewers_by_level": {"L1": l1, "L2": list(l2), "EDD": list(edd)},
-        "qc_reviewer": "", "qc_result": "", "qc_reason": "",
+        **qc_fields,
         "client": {
             "legal_name": surname_first, "native_name": native_name, "dob": dob, "nationality": nationality,
             "gender": gender, "id_number": id_number, "id_type": id_type,
@@ -247,6 +376,9 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
         "screening": {"hit": bool(screening_hit), "alert_case_id": alert_case_id, "rows": rows},
         "risk_rating": risk_rating, "risk_recalculated_at": "",
         "skopenow": None, "attachments": [], "resubmit": resubmit,
+        "fraud_typology": fraud_typology, "escalate_reason": escalate_reason if escalated_at else "",
+        "routing": routing, "work": work, "handoffs": handoffs,
+        "investigation_file": investigation_file, "checker1": None, "checker2": None,
         "audit": audit, "change_log": [],
     }
 
@@ -324,7 +456,7 @@ def alert_from_match(key, i, match, screened_at):
     }
 
 
-def alert_case(*, kyc, key, matches, level="L1", status="Init", assigned_to="", case_outcome=None,
+def alert_case(*, kyc, key, matches, level=None, status="Init", assigned_to="", case_outcome=None,
                handled_at=""):
     t = vocab.TENANTS[kyc["tenant"]]
     screened_at = kyc["verification_points"][3]["at"]
@@ -335,6 +467,10 @@ def alert_case(*, kyc, key, matches, level="L1", status="Init", assigned_to="", 
         audit.append(event(handled_at, assigned_to, "Case handled", "Analyst took the case."))
     if case_outcome:
         audit.append(event(case_outcome["at"], case_outcome["by"], "Case outcome", case_outcome["value"]))
+    # A screening case whose KYC case was escalated sits at L2 (SOP 2.1: L2
+    # conducts the deep-dive on escalation hits).
+    if level is None:
+        level = "L2" if kyc.get("escalated_at") else "L1"
     return {
         "id": ids.alert_case_id(key), "key": key, "kyc_case_id": kyc["id"], "case_level": level,
         "status": status, "assigned_to": assigned_to, "created_at": screened_at,
@@ -444,18 +580,28 @@ _FILLER_SELLERS = [
     ("Orchid Lane Cosmetics FZ-LLC", "AE", "Maryam Al Ali"), ("Pine Street Books Inc", "CA", "Owen Fraser"),
 ]
 
+_INTAKE = [("Sofia Bianchi", "IT", "Passport", "1995-09-12", "F"), ("Marcus Oyelaran", "NG", "NationalID", "1990-02-27", "M")]
+
 
 def filler_cases(seed="filler"):
     """Background rows so the list paginates and the analytics have volume.
     Mostly closed; a few open with no screening hit, so nothing here needs a
-    screening or watchlist case."""
+    screening or watchlist case. The open screening-stage ones are already
+    routed, so My Work and the pipeline have something to show at boot; the
+    Data Confirming ones are left for the presenter to pull."""
     rng = random.Random(seed)
     out = []
     statuses = ["Verified"] * 12 + ["DataScreening"] * 4 + ["DataConfirming"] * 4 + ["ResubmitID", "ResubmitPOA", "Rejected", "Verified"]
     for i, (name, nat, id_type, dob, gender) in enumerate(_FILLER_PEOPLE):
         status = statuses[i % len(statuses)]
         hours = rng.uniform(6, 240) if status in vocab.CLOSED_STATUSES else rng.uniform(2, 40)
-        l1 = [rng.choice([AMARA, JON, MARIO])]
+        l1 = [rng.choice([AMARA, JON, MARIO])] if i else [AMARA]
+        qc = None
+        if i == 0:
+            qc = {"reviewer": LEAH, "result": "Fail", "reason": "Rationale insufficient",
+                  "comment": "Closing note says 'ok' — the SOP asks for a single line saying what was checked and why it clears."}
+        elif status == "Verified" and i % 5 == 2:
+            qc = {"reviewer": LEAH, "result": "Pass", "reason": "Decision correct and evidenced", "comment": "Rationale and evidence complete."}
         case = kyc_case(
             key=f"{seed}-{i}", name=name, nationality=nat, dob=dob, id_type=id_type, gender=gender,
             tags=[rng.choice(vocab.TAGS[:4])], status=status,
@@ -465,8 +611,14 @@ def filler_cases(seed="filler"):
             previous_reviewer=l1[0] if status not in ("DataConfirming",) else "",
             pending_reason="Pending Resubmission" if status.startswith("Resubmit") else "",
             docs=std_docs("passport" if id_type == "Passport" else ("driving_licence" if id_type == "DrivingLicense" else "national_id"), rng.random() < 0.3),
+            routed_to=l1[0] if status == "DataScreening" else "",
+            qc=qc,
         )
         out.append(case)
+    for i, (name, nat, id_type, dob, gender) in enumerate(_INTAKE):
+        out.append(kyc_case(key=f"{seed}-intake-{i}", name=name, nationality=nat, dob=dob, id_type=id_type, gender=gender,
+                            tags=["Creator G3"], status="IDVerification", manual_review_reason=["Manual referral"],
+                            created_hours_ago=0.2 + i * 0.4, vendor=rng.choice(vocab.VENDORS)))
     for i, (company, country, rep) in enumerate(_FILLER_SELLERS):
         status = ["Verified", "Verified", "DataScreening", "DataConfirming", "Verified", "Rejected", "Verified", "DataScreening"][i]
         hours = rng.uniform(6, 200) if status in vocab.CLOSED_STATUSES else rng.uniform(3, 30)
@@ -482,14 +634,17 @@ def filler_cases(seed="filler"):
                                incorporation_country=country, address=f"{rng.randint(1, 400)} Commerce Street, {country}",
                                representative=rep, ubos=[(rep, 100, country)]),
             risk_rating=rng.choice(["Low", "Medium"]),
+            routed_to=l1[0] if status == "DataScreening" and i == 2 else "",
         )
         out.append(case)
     return out
 
 
 def assemble():
-    """(analysts, kyc_cases, alert_cases, wc_cases) — fresh objects every call."""
+    """(analysts, kyc_cases, alert_cases, wc_cases) — fresh objects every call.
+    Analysts are deep-copied: a capacity edited at runtime lives on the app's
+    copy and must not leak into the module-level roster that /reset rebuilds."""
     from fincrime.data import scenarios   # lazy: scenarios imports the builders above
     kyc, alerts, wc = scenarios.build()
     kyc = kyc + filler_cases()
-    return [dict(a) for a in ANALYSTS], kyc, alerts, wc
+    return copy.deepcopy(ANALYSTS), kyc, alerts, wc

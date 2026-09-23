@@ -6,11 +6,13 @@ fincrime_state.db beside app.py.
 
 Run:  .venv\\Scripts\\python.exe -m unittest -v
 """
+import io
 import os
 import re
 import sys
 import tempfile
 import unittest
+import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -20,8 +22,8 @@ from fincrime.data.state_store import StateStore  # noqa: E402
 StateStore.path = _DB
 import app as fcc  # noqa: E402
 
-AMARA, JON, MARIO, NISHA, RYAN = ("amara.iyer@straive.com", "jon.miranda@straive.com", "mario.kim@straive.com",
-                                  "nisha.rao@straive.com", "ryan.lee@straive.com")
+AMARA, JON, MARIO, NISHA, RYAN, LEAH = ("amara.iyer@straive.com", "jon.miranda@straive.com", "mario.kim@straive.com",
+                                        "nisha.rao@straive.com", "ryan.lee@straive.com", "leah.fernandez@straive.com")
 
 
 def flash_text(response):
@@ -47,13 +49,18 @@ class FlowTestCase(unittest.TestCase):
     def post(self, path, **data):
         return self.c.post(path, data=data, follow_redirects=True)
 
-    def confirm(self, case):
+    def confirm(self, case, poa_ok="1"):
         self.post(f"/kyc/{case['id']}/reserve")
         c = case["client"]
         return self.post(f"/kyc/{case['id']}/data_confirm", name=c["legal_name"], name_ok="1", dob=c["dob"], dob_ok="1",
-                         nationality=c["nationality"], nationality_ok="1", summary="Checked against the document.")
+                         nationality=c["nationality"], nationality_ok="1", poa_ok=poa_ok, summary="Checked against the document.")
 
-    # tests -----------------------------------------------------------------
+    def escalate(self, key, case, reason="Non-US person with potential match", comment="Unresolved records.", **extra):
+        self.login(key)
+        self.post(f"/kyc/{case['id']}/reserve")
+        return self.post(f"/kyc/{case['id']}/escalate", reason=reason, comment=comment, **extra)
+
+    # phases 0-7 ------------------------------------------------------------
     def test_login_and_gate(self):
         self.assertEqual(self.c.get("/kyc/list").status_code, 302)          # signed out → portal
         r = self.c.post("/login", data={"analyst": "amara.iyer", "password": "wrong"})
@@ -73,6 +80,7 @@ class FlowTestCase(unittest.TestCase):
         self.assertEqual(m["status"], "DataScreening", flash_text(r))
         self.assertTrue(m["verification_points"][2]["at"])
         self.assertIn(AMARA, m["reviewers_by_level"]["L1"])
+        self.assertEqual(m["confirmations"]["poa"]["confirmed_by"], AMARA)
         self.assertGreater(len(m["audit"]), audit_len)
         audit_len = len(m["audit"])
 
@@ -101,11 +109,15 @@ class FlowTestCase(unittest.TestCase):
                       attachment=wc["exports"][0]["filename"])
         self.assertEqual(m["status"], "Verified", flash_text(r))
         self.assertEqual(m["previous_reviewer"], AMARA)
+        self.assertEqual(m["closed_by"], AMARA)
         self.assertEqual(m["current_reviewer"], "")
         self.assertEqual(m["review_decisions"][4]["report"], wc["exports"][0]["filename"])
         self.assertGreater(len(m["audit"]), audit_len)
         # A closed case that was never escalated shows five verification points.
         self.assertEqual(len(fcc.workflow.verification_points(m)), 5)
+        # The work log closed Amara's entry with the outcome.
+        self.assertEqual(m["work"][-1]["analyst"], AMARA)
+        self.assertTrue(m["work"][-1]["to"])
 
     def test_edd_review_refused_while_alerts_pending(self):
         self.login("amara.iyer")
@@ -134,7 +146,7 @@ class FlowTestCase(unittest.TestCase):
         m = self.K["mercer"]
         self.post(f"/kyc/{m['id']}/reserve")
         r = self.post(f"/kyc/{m['id']}/data_confirm", name=m["client"]["legal_name"], name_ok="1",
-                      dob=m["client"]["dob"], dob_ok="0", nationality="US", nationality_ok="1")
+                      dob=m["client"]["dob"], dob_ok="0", nationality="US", nationality_ok="1", poa_ok="1")
         self.assertEqual(m["status"], "DataConfirming")
         self.assertIn("Birthday", flash_text(r))
 
@@ -168,11 +180,13 @@ class FlowTestCase(unittest.TestCase):
         self.post(f"/kyc/{md['id']}/reserve")
         self.post(f"/kyc/{md['id']}/l2_decision", decision="Escalate to EDD", comment="SoW review.")
         self.assertEqual(md["pending_reason"], "Pending EDD")
+        self.assertEqual(md["case_review_level"], "L3")
         self.login("ryan.lee")
         self.post(f"/kyc/{md['id']}/reserve")
         self.post(f"/kyc/{md['id']}/l2_decision", decision="Approve", comment="SoW verified.")
         self.assertEqual(md["status"], "Verified")
         self.assertIn(RYAN, md["reviewers_by_level"]["EDD"])
+        self.assertEqual(md["closed_by"], RYAN)
 
     def test_skopenow_path(self):
         self.login("amara.iyer")
@@ -181,6 +195,9 @@ class FlowTestCase(unittest.TestCase):
         self.post(f"/kyc/{p['id']}/edd_review", decision="Request Skopenow report", summary="US person, medium risk.")
         self.assertEqual(p["pending_reason"], "Pending Skopenow")
         self.post(f"/kyc/{p['id']}/skopenow", outcome="Cleared", notes="All four comparisons distinct.")
+        self.assertEqual(p["skopenow"]["report"]["sections"][0]["match"], "Consistent")
+        self.assertIn("Seattle", p["skopenow"]["report"]["sections"][2]["text"])
+        self.assertEqual(self.c.get(f"/kyc/{p['id']}/skopenow").status_code, 200)
         self.post(f"/kyc/{p['id']}/edd_review", decision="Approve after Skopenow", summary="Cleared.")
         self.assertEqual(p["status"], "Verified")
 
@@ -211,6 +228,9 @@ class FlowTestCase(unittest.TestCase):
         self.assertIn("Анатолий".encode("utf-8"), r.data)
         cropped = self.c.get(f"/documents/{self.K['nguyen']['id']}/d1.svg").data
         self.assertNotIn(b'viewBox="0 0 640 400"', cropped)
+        poa = self.c.get(f"/documents/{self.K['sidorov']['id']}/d3.svg").data.decode("utf-8")
+        self.assertIn("Cyprus", poa)
+        self.assertIn(self.K["sidorov"]["documents"][2]["issued_on"][:4], poa)
 
     def test_wc_pagination_and_facets(self):
         self.login("amara.iyer")
@@ -243,9 +263,248 @@ class FlowTestCase(unittest.TestCase):
 
     def test_analytics_and_queue_render(self):
         self.login("nisha.rao")
-        self.assertEqual(self.c.get("/analytics").status_code, 200)
-        self.assertEqual(self.c.get("/queue/l2").status_code, 200)
-        self.assertEqual(self.c.get("/name_screening/queue").status_code, 200)
+        for path in ("/analytics", "/queue/l2", "/name_screening/queue", "/work", "/pipeline", "/trackers", "/audit", "/routing"):
+            self.assertEqual(self.c.get(path).status_code, 200, path)
+        self.login("leah.fernandez")
+        self.assertEqual(self.c.get("/qc").status_code, 200)
+
+    # phase 8: routing, capacity and hand-offs (SOP 5.2.1–5.2.3) -------------
+    def test_routing_skill_capacity_segregation(self):
+        v = self.K["volkov"]                                               # Cyrillic native name
+        best, why, considered = fcc.routing.pick(v)
+        self.assertEqual(best["key"], "amara.iyer", why)                   # the only L1 with the cyrillic skill
+        blocked = {a["key"]: reason for a, ok, reason in considered if not ok}
+        self.assertIn("cyrillic", blocked["jon.miranda"])
+        amara = fcc.ANALYST_BY_KEY["amara.iyer"]
+        amara["capacity"] = fcc.routing.load(AMARA)
+        best, why, _ = fcc.routing.pick(v)
+        self.assertIsNone(best)
+        self.assertIn("capacity", why)
+        # A seller needs the KYB skill; Amara (no KYB, no TT Shop) is never eligible.
+        ok, reason = fcc.routing.eligible(amara, self.K["vanguard"])
+        self.assertFalse(ok)
+
+    def test_request_cases_on_demand(self):
+        self.login("amara.iyer")
+        before = fcc.routing.load(AMARA)
+        r = self.post("/work/request", n="3")
+        got = fcc.routing.load(AMARA) - before
+        self.assertEqual(got, min(3, 6 - before), flash_text(r))
+        self.assertIn(f"Routed {got} case(s)", flash_text(r))
+        routed = [c for c in fcc.KYC_CASES if (c.get("routing") or {}).get("trigger") == "on_demand"]
+        self.assertEqual(len(routed), got)
+        self.assertTrue(all(c["current_reviewer"] == AMARA and c["work"][-1]["analyst"] == AMARA for c in routed))
+        r = self.post("/work/request", n="5")                              # now at capacity
+        self.assertIn("at capacity", flash_text(r))
+        self.assertEqual(fcc.routing.load(AMARA), 6)
+
+    def test_get_next_case_redirects(self):
+        self.login("jon.miranda")
+        r = self.c.post("/work/next")
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/kyc/detail/", r.headers["Location"])
+        case = fcc.KYC_BY_ID[r.headers["Location"].rstrip("/").rsplit("/", 1)[1]]
+        self.assertEqual(case["current_reviewer"], JON)
+        self.assertEqual(case["audit"][-1]["action"], "Auto-routed")
+        self.assertEqual(case["routing"]["trigger"], "next")
+        self.assertEqual(self.c.get(f"/kyc/detail/{case['id']}").status_code, 200)
+
+    def test_escalation_handoff_zero_lag(self):
+        h = self.K["hassan"]
+        self.escalate("mario.kim", h)
+        self.assertEqual(h["status"], "DataEscalatingL2")
+        self.assertEqual(h["current_reviewer"], NISHA)                     # handed off at once
+        self.assertEqual(h["handoffs"][-1]["via"], "hub")
+        self.assertEqual(h["handoffs"][-1]["lag_seconds"], 0)
+        self.assertEqual(h["work"][-1]["analyst"], NISHA)
+        self.assertTrue(h["investigation_file"])
+        alert = fcc.ALERT_BY_ID[h["screening"]["alert_case_id"]]
+        self.assertEqual(alert["case_level"], "L2")
+        page = self.c.get("/pipeline").data.decode("utf-8")
+        self.assertIn("AHMED HASSAN", page)
+        r = self.post(f"/kyc/{h['id']}/l2_decision", decision="Approve", comment="fine")
+        self.assertIn("earlier level", flash_text(r))                      # Mario worked it at L1
+        self.login("nisha.rao")
+        self.assertIn(h["id"], self.c.get("/work").data.decode("utf-8"))
+
+    def test_capacity_override_persists_and_queueing(self):
+        self.login("leah.fernandez")
+        r = self.post("/routing/capacity", key="nisha.rao", capacity="1")
+        self.assertEqual(fcc.ANALYST_BY_KEY["nisha.rao"]["capacity"], 1, flash_text(r))
+        hid = self.K["hassan"]["id"]
+        fcc._load_seed()                                                   # simulated restart: fresh record objects
+        self.assertEqual(fcc.ANALYST_BY_KEY["nisha.rao"]["capacity"], 1)
+        h = fcc.KYC_BY_ID[hid]
+        self.escalate("mario.kim", h)                                      # Nisha is full, Mario is excluded
+        self.assertEqual(h["current_reviewer"], "")
+        self.assertEqual(h["routing"]["status"], "queued")
+        self.assertIsNone(h["handoffs"][-1]["lag_seconds"])
+        self.login("leah.fernandez")
+        console = self.c.get("/routing").data.decode("utf-8")
+        self.assertIn("nobody free", console)
+        self.post("/routing/capacity", key="nisha.rao", capacity="4")
+        r = self.post("/routing/run", case_id=h["id"])
+        self.assertEqual(h["current_reviewer"], NISHA, flash_text(r))
+        self.assertGreaterEqual(h["handoffs"][-1]["lag_seconds"], 0)
+        self.post("/reset")
+        self.assertEqual(fcc.ANALYST_BY_KEY["nisha.rao"]["capacity"], 4)
+
+    # phase 8: trackers, investigation file, audit log (SOP 5.2.4) -----------
+    def test_trackers_render_and_csv(self):
+        self.login("nisha.rao")
+        for view in ("productivity", "fraud", "edd", "tts"):
+            self.assertEqual(self.c.get(f"/trackers?view={view}").status_code, 200, view)
+        r = self.c.get("/trackers?view=fraud&format=csv")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data.startswith("﻿".encode("utf-8")))
+        self.assertIn(b"Fraud Typology,Status\r\n", r.data)
+        self.assertIn(b"KWAME MENSAH", r.data)
+        page = self.c.get("/trackers?view=edd").data.decode("utf-8")
+        self.assertIn("Screening Date", page)
+        self.assertIn(self.K["mensah"]["investigation_file"]["name"], page)
+        self.c.post("/tenant", data={"tenant": "ttshop", "next": "/kyc/list"})
+        page = self.c.get("/trackers?view=edd").data.decode("utf-8")
+        self.assertIn("TT Shop Escalation Tracker", page)
+        self.assertIn(self.K["oceanic"]["investigation_file"]["name"], page)
+
+    def test_investigation_file_zip(self):
+        self.login("amara.iyer")
+        m = self.K["mercer"]
+        aid = m["screening"]["alert_case_id"]
+        wc = fcc.WC_BY_ID[aid]
+        self.confirm(m)
+        self.post(f"/name_screening/{aid}/handle")
+        self.post(f"/wc/{aid}/export")
+        r = self.post(f"/kyc/{m['id']}/edd_review", decision="Potential match - Escalate", summary="Unresolved UK record.",
+                      attachment=wc["exports"][0]["filename"])
+        self.assertEqual(m["status"], "DataEscalatingL2", flash_text(r))
+        self.assertEqual(m["investigation_file"]["name"], f"{m['client_id']} ({m['id']})")
+        self.assertEqual(self.c.get(f"/kyc/detail/{m['id']}/file").status_code, 200)
+        z = self.c.get(f"/kyc/{m['id']}/investigation_file.zip")
+        self.assertEqual(z.status_code, 200)
+        archive = zipfile.ZipFile(io.BytesIO(z.data))
+        names = archive.namelist()
+        pdfs = [n for n in names if n.endswith(".pdf")]
+        self.assertEqual(len(pdfs), 1)
+        self.assertTrue(archive.read(pdfs[0]).startswith(b"%PDF"))
+        self.assertTrue(any(n.endswith("audit_trail.csv") for n in names))
+        self.assertTrue(any("/documents/" in n for n in names))
+
+    def test_global_audit_log(self):
+        self.login("amara.iyer")
+        page = self.c.get("/audit").data.decode("utf-8")
+        for kind in ("KYC case", "Screening case", "World-Check case"):
+            self.assertIn(kind, page)
+        self.assertIn("FCC Router", page)
+        r = self.c.get("/audit?format=csv")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"At,Actor,Record", r.data)
+
+    # phase 8: QC and Checker 2 (SOP 2.1, 4.2) --------------------------------
+    def test_qc_sampling_and_scorecard(self):
+        self.login("leah.fernandez")
+        s1 = fcc.qc.sample(fcc.KYC_CASES, "ttlive")
+        s2 = fcc.qc.sample(fcc.KYC_CASES, "ttlive")
+        self.assertTrue(s1)
+        self.assertEqual([c["id"] for c in s1], [c["id"] for c in s2])    # deterministic for the day
+        page = self.c.get("/qc").data.decode("utf-8")
+        self.assertIn(s1[0]["id"], page)
+        target = next(c for c in s1 if not c.get("qc_result"))
+        r = self.post(f"/kyc/{target['id']}/qc_review", result="Fail", reason="Rationale insufficient",
+                      comment="The closing note does not say what was checked.")
+        self.assertEqual(target["qc_result"], "Fail", flash_text(r))
+        self.assertEqual(target["qc_reviewer"], LEAH)
+        self.assertEqual(target["pending_reason"], "Pending QC")
+        self.assertEqual([c["id"] for c in fcc.qc.sample(fcc.KYC_CASES, "ttlive")], [c["id"] for c in s1])  # sample stable after a review
+        closer = target["closed_by"]
+        self.login(closer.split("@")[0])
+        work = self.c.get("/work").data.decode("utf-8")
+        self.assertIn(target["id"], work)
+        self.post(f"/kyc/{target['id']}/qc_ack")
+        self.assertTrue(target["qc_ack"])
+        self.assertEqual(target["pending_reason"], "")
+        self.login("leah.fernandez")
+        page = self.c.get("/qc").data.decode("utf-8")
+        self.assertIn("Rationale insufficient", page)
+        row = next(r for r in fcc.qc.scorecard(fcc.KYC_CASES, "ttlive") if r["email"] == closer)
+        self.assertGreaterEqual(row["failed"], 1)
+
+    def test_checker2_ttshop(self):
+        self.login("jon.miranda")
+        self.c.post("/tenant", data={"tenant": "ttshop", "next": "/kyc/list"})
+        f = self.K["filler-shop-7"]                                        # DataScreening, no hit
+        self.post(f"/kyc/{f['id']}/reserve")
+        r = self.post(f"/kyc/{f['id']}/edd_review", decision="No match - Approve", summary="Clean.")
+        self.assertEqual(f["status"], "DataScreening")
+        self.assertIn("Recalculate", flash_text(r))
+        self.post(f"/kyc/{f['id']}/recalculate_risk")
+        r = self.post(f"/kyc/{f['id']}/edd_review", decision="No match - Approve", summary="Clean seller, documents in order.")
+        self.assertEqual(f["pending_reason"], "Pending Checker 2", flash_text(r))
+        self.assertEqual(f["checker1"]["by"], JON)
+        self.assertEqual(f["status"], "DataScreening")
+        holder = f["current_reviewer"]
+        self.assertIn(holder, (NISHA, MARIO))                              # routed to an L2 with the KYB skill
+        r = self.post(f"/kyc/{f['id']}/checker2", decision="Approve", comment="ok")
+        self.assertEqual(f["status"], "DataScreening", "Checker 1 must not sign off as Checker 2")
+        self.login(holder.split("@")[0])
+        self.c.post("/tenant", data={"tenant": "ttshop", "next": "/queue/l2"})
+        self.assertIn(f["id"], self.c.get("/queue/l2").data.decode("utf-8"))
+        self.post(f"/kyc/{f['id']}/reserve")
+        r = self.post(f"/kyc/{f['id']}/checker2", decision="Approve", comment="Risk rating and documents verified independently.")
+        self.assertEqual(f["status"], "Verified", flash_text(r))
+        self.assertEqual(f["checker2"]["by"], holder)
+        self.assertEqual(f["closed_by"], holder)
+
+    def test_level_role_enforced(self):
+        o = self.K["oceanic"]                                              # Pending EDD, held by Ryan
+        self.login("nisha.rao")
+        r = self.post(f"/kyc/{o['id']}/l2_decision", decision="Approve", comment="ok")
+        self.assertEqual(o["status"], "DataEscalatingL2")
+        self.assertIn("EDD role", flash_text(r))
+        self.login("ryan.lee")
+        self.post(f"/kyc/{o['id']}/reserve")
+        r = self.post(f"/kyc/{o['id']}/l2_decision", decision="Reject", comment="Sanctioned parent — 50% rule.")
+        self.assertEqual(o["status"], "Rejected", flash_text(r))
+
+    def test_screening_l2_tile(self):
+        h = self.K["hassan"]
+        aid = h["screening"]["alert_case_id"]
+        self.escalate("mario.kim", h)
+        page = self.c.get("/name_screening/queue?level=L2").data.decode("utf-8")
+        self.assertIn(aid, page)
+
+    # phase 8: SOP 4 details -----------------------------------------------------
+    def test_poa_checks_block_confirm(self):
+        self.login("amara.iyer")
+        cam = self.K["camargo"]
+        r = self.confirm(cam)
+        self.assertEqual(cam["status"], "DataConfirming")
+        self.assertIn("6 months", flash_text(r))
+        vol = self.K["volkov"]
+        r = self.confirm(vol)
+        self.assertEqual(vol["status"], "DataConfirming")
+        self.assertIn("escalate", flash_text(r).lower())
+        page = self.c.get(f"/kyc/detail/{vol['id']}").data.decode("utf-8")
+        self.assertIn("Sanctioned-country ID rule", page)
+        sid = self.K["sidorov"]
+        r = self.confirm(sid, poa_ok="0")
+        self.assertEqual(sid["status"], "DataConfirming")
+        self.assertIn("proof of address", flash_text(r).lower())
+        r = self.confirm(sid)
+        self.assertEqual(sid["status"], "DataScreening", flash_text(r))
+
+    def test_fraud_typology_tracker(self):
+        n = self.K["nguyen"]
+        r = self.escalate("amara.iyer", n, reason="Fraud ID / AI-generated document", comment="Data-page font mismatch.")
+        self.assertEqual(n["status"], "DataConfirming")
+        self.assertIn("typology", flash_text(r).lower())
+        r = self.post(f"/kyc/{n['id']}/escalate", reason="Fraud ID / AI-generated document", comment="Data-page font mismatch.",
+                      fraud_typology="Forged or altered document")
+        self.assertEqual(n["status"], "DataEscalatingL2", flash_text(r))
+        self.assertEqual(n["fraud_typology"], "Forged or altered document")
+        page = self.c.get("/trackers?view=fraud").data.decode("utf-8")
+        self.assertIn(n["id"], page)
+        self.assertIn("Forged or altered document", page)
 
 
 if __name__ == "__main__":

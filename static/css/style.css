@@ -728,3 +728,44 @@ body.wc-theme a { color: #7cb3ff; }
     .app-main { padding: 0; }
     body { background: #fff; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OPERATIONS HUB — My Work, Pipeline, Trackers, Routing, QC (SOP 5.2)
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* Capacity / rate meter: one neutral fill; the danger tone only when the meaning is "over". */
+.cap-bar { display: block; height: 6px; border-radius: 3px; background: var(--muted); overflow: hidden; margin-top: 8px; min-width: 60px; }
+.cap-bar > i { display: block; height: 100%; background: var(--primary); }
+.cap-bar.over > i { background: var(--danger); }
+.hbar.wide { grid-template-columns: 150px 1fr 96px; }
+.hbar .n .sla { font-size: 10px; padding: 0 5px; }
+/* Pipeline board */
+.pipeline { display: grid; grid-template-columns: repeat(7, minmax(150px, 1fr)); gap: 10px; align-items: start; overflow-x: auto; }
+.pcol { background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px; min-height: 120px; }
+.pcol-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; margin-bottom: 6px; }
+.pcol-title { font-size: 12.5px; font-weight: 600; color: var(--foreground); }
+.pcol-sub { font-size: 10.5px; color: var(--muted-foreground); }
+.pcol-n { font-size: 16px; font-weight: 700; color: var(--foreground); font-variant-numeric: tabular-nums; }
+.pcol-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.pcard { display: block; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px; margin-bottom: 6px; color: inherit; text-decoration: none; box-shadow: var(--shadow-sm); }
+.pcard:hover { border-color: var(--primary); text-decoration: none; }
+.pcard-name { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard-meta { font-size: 11px; color: var(--muted-foreground); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard-foot { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; }
+.pcard-foot .who { color: var(--foreground); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard-foot .who.queued { color: var(--warning); }
+.pcard-foot .who.muted { color: var(--muted-foreground); }
+.pcol-more { display: block; text-align: center; font-size: 11.5px; padding: 6px; }
+/* POA check list in the Data Confirm modal */
+.check-list { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card); padding: 6px 10px; }
+.check-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.check-row { display: grid; grid-template-columns: 18px 1fr; gap: 2px 6px; padding: 4px 0; border-top: 1px solid var(--border); font-size: 12px; align-items: start; }
+.check-row .mark { width: 16px; height: 16px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px; }
+.check-row .mark .nav-ic { width: 11px; height: 11px; }
+.check-row.ok .mark { background: #ecfdf5; color: #047857; }
+.check-row.bad .mark { background: #fff1f2; color: #be123c; }
+.check-row .lbl { font-weight: 500; }
+.check-row .det { grid-column: 2; font-size: 11.5px; color: var(--muted-foreground); }
+.check-row.bad .det { color: #9f1239; }
+/* Skill chips, feedback card */
+.skill-chip { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 10.5px; font-weight: 600; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; margin-right: 3px; white-space: nowrap; }
+.feedback-card { border-left: 3px solid var(--warning); }

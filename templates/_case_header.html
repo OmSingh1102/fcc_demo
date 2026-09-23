@@ -22,6 +22,8 @@
         </form>
         {{ sla_chip(sla) }}
         {% if case.pending_reason %}<span class="badge amber">{{ case.pending_reason }}</span>{% endif %}
+        {% if case.routing and case.routing.status == 'routed' and case.current_reviewer %}<span class="badge blue" title="{{ case.routing.reason }} · {{ vocab.ROUTING_TRIGGERS.get(case.routing.trigger, case.routing.trigger) }} · {{ case.routing.at }}">{{ icon('sliders') }} Auto-routed</span>
+        {% elif case.routing and case.routing.status == 'queued' and not case.current_reviewer %}<span class="badge amber" title="{{ case.routing.reason }}">Waiting for capacity</span>{% endif %}
     </div>
     <a href="{{ url_for('kyc_audit', case_id=case.id) }}" class="btn btn-link btn-sm">Audit History</a>
 </div>
@@ -53,7 +55,7 @@
             <div><span class="l">QC Reviewer:</span><span class="v">{{ case.qc_reviewer or '-' }}</span></div>
             <div><span class="l">QC Result:</span><span class="v">{{ case.qc_result or '-' }}</span></div>
             <div><span class="l">QC Reason:</span><span class="v">{{ case.qc_reason or '-' }}</span></div>
-            <div><span class="l">Case review level:</span><span class="v">{{ case.case_review_level }}</span></div>
+            <div><span class="l">Case review level:</span><span class="v">{{ vocab.LEVEL_LABELS.get(case.case_review_level, case.case_review_level) }}</span></div>
             <div><span class="l">SLA due:</span><span class="v">{{ case.edd_due_at if case.status == 'DataEscalatingL2' and case.edd_due_at else case.sla_due_at }}</span></div>
             {% if case.client.us_person %}<div><span class="l">US person:</span><span class="v strong">Yes</span></div>{% endif %}
         </div>

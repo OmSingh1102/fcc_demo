@@ -76,7 +76,8 @@
                     <div><span class="l">Incorporation country</span><span class="v">{{ a.incorporation_country }}</span></div>
                     <div><span class="l">Risk rating</span><span class="v">{% if case.risk_rating %}{{ outcome_badge(case.risk_rating) }}{% else %}<span class="muted">Not rated</span>{% endif %}
                         {% if case.risk_recalculated_at %}<span class="tiny muted"> recalculated {{ case.risk_recalculated_at }}</span>{% endif %}</span></div>
-                    <div><span class="l">Checker</span><span class="v">Checker 1 (TT Shop)</span></div>
+                    <div><span class="l">Checker 1</span><span class="v">{% if case.checker1 %}{{ case.checker1.by|who }} · {{ case.checker1.at }}{% elif case.status == 'DataScreening' %}<span class="muted">pending — the L1 approval</span>{% else %}<span class="muted">-</span>{% endif %}</span></div>
+                    <div><span class="l">Checker 2</span><span class="v">{% if case.checker2 %}{{ case.checker2.by|who }} · {{ case.checker2.at }}{% elif case.pending_reason == 'Pending Checker 2' %}<span class="badge amber">awaiting sign-off</span>{% elif case.status == 'DataScreening' %}<span class="muted">second reviewer, after Checker 1</span>{% else %}<span class="muted">-</span>{% endif %}</span></div>
                     {% endif %}
                 </div>
                 {% if a %}
@@ -140,6 +141,22 @@
             </div>
         </details>
 
+        {% if case.investigation_file %}
+        <details class="section" open>
+            <summary>Investigation File <span class="caret">{{ icon('chevron-down') }}</span></summary>
+            <div class="section-body">
+                <div class="row between mb-8" style="gap:12px">
+                    <div class="small">Folder <b class="mono">{{ case.investigation_file.name }}</b> · opened {{ case.investigation_file.created_at }} by {{ case.investigation_file.created_by|who }} (SOP 4.1.3 §6.2 — kept by the case, never a share-drive link that goes stale)</div>
+                    <div class="btn-group tight"><a class="btn btn-outline btn-xs" href="{{ url_for('kyc_file', case_id=case.id) }}">Open folder</a><a class="btn btn-primary btn-xs" href="{{ url_for('kyc_file_zip', case_id=case.id) }}">{{ icon('download') }} ZIP</a></div>
+                </div>
+                <table class="tbl dense">
+                    <thead><tr><th>Item</th><th>Kind</th><th>Added</th><th>By</th></tr></thead>
+                    <tbody>{% for it in file_items %}<tr><td class="strong">{{ it.label }}</td><td>{{ it.kind }}</td><td class="nowrap">{{ it.at }}</td><td class="nowrap">{{ it.by|who }}</td></tr>{% endfor %}</tbody>
+                </table>
+            </div>
+        </details>
+        {% endif %}
+
         <details class="section" open>
             <summary>Review Decision <span class="caret">{{ icon('chevron-down') }}</span></summary>
             <div class="section-body flush">
@@ -173,7 +190,7 @@
     <button type="button" class="btn btn-outline btn-sm" onclick="openModal('modify-modal')" {% if closed %}disabled{% endif %}>Modify User Info</button>
     <a class="btn btn-outline btn-sm" href="{{ url_for('kyc_audit', case_id=case.id, view='changes') }}">{{ icon('list') }} Change Log</a>
     {% if review and is_mine %}
-    <button type="button" class="btn btn-primary btn-sm" onclick="openModal('{{ {'dc': 'dc-modal', 'edd': 'edd-modal', 'l2': 'l2-modal'}[review] }}')">Review</button>
+    <button type="button" class="btn btn-primary btn-sm" onclick="openModal('{{ {'dc': 'dc-modal', 'edd': 'edd-modal', 'l2': 'l2-modal', 'checker2': 'checker2-modal'}[review] }}')">Review</button>
     {% elif review %}
     <button type="button" class="btn btn-primary btn-sm" disabled title="Reserve the case first">Review</button>
     {% elif closed %}
@@ -187,6 +204,7 @@
 {% if review == 'dc' %}{% include "_modal_data_confirm.html" %}{% endif %}
 {% if review == 'edd' %}{% include "_modal_edd_review.html" %}{% endif %}
 {% if review == 'l2' %}{% include "_modal_l2_decision.html" %}{% endif %}
+{% if review == 'checker2' %}{% include "_modal_checker2.html" %}{% endif %}
 
 {{ modal_open('doc-modal', 'Document Preview', 'lg') }}
 <div class="modal-body">

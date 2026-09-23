@@ -6,7 +6,7 @@ missing keys the templates read, and clearing the store is the honest answer.
 """
 from fincrime.data.seed import assemble
 
-SEED_VERSION = "2026-09-23.1"
+SEED_VERSION = "2026-09-24.1"
 
 
 def load_seed():

@@ -44,7 +44,8 @@ STATUS_STEP = {
 # Review Decision table rows.
 CHECK_POINTS = ["Submitted", "System Review", "Data Matching", "Data Confirming", "Data Screening", "Data Escalating L2"]
 
-PENDING_REASONS = ["", "Pending EDD", "Pending Skopenow", "RFI Sent", "Pending Resubmission", "Pending QC", "Pending L2"]
+PENDING_REASONS = ["", "Pending EDD", "Pending Skopenow", "RFI Sent", "Pending Resubmission", "Pending QC", "Pending L2",
+                   "Pending Checker 2"]
 
 MANUAL_REVIEW_REASONS = [
     "Namescreen hit - WC or CMS",
@@ -149,3 +150,71 @@ RISK_RATINGS = ["Low", "Medium", "High"]
 # ── SLA (hours) ──────────────────────────────────────────────────────────────
 SLA_HOURS_L1 = 48
 SLA_HOURS_EDD = 14 * 24
+
+# ── Tiers (SOP 2.1, 5.2: L1 → L2 → L3) ───────────────────────────────────────
+# Decisions are recorded under L1 / L2 / EDD; the case review level shown in
+# the header counts L1 / L2 / L3. Both spellings map to the same label.
+LEVEL_LABELS = {"L1": "L1 Frontline", "L2": "L2 Escalation", "EDD": "L3 EDD / PIC", "L3": "L3 EDD / PIC", "QC": "QC / Team Lead"}
+
+# ── Operations hub: routing (SOP 5.2.1–5.2.3) ────────────────────────────────
+SCRIPTS = ["latin", "cyrillic", "arabic"]
+CAPACITY_MAX = 20
+ROUTING_TRIGGERS = {
+    "handoff": "Immediate hand-off", "on_demand": "Case on-demand", "next": "Get next case",
+    "lead_run": "Routing run by the lead", "seed": "Routed at intake",
+}
+
+# ── Proof of address (SOP 4.1.2 step 1) ──────────────────────────────────────
+# The "internal library" of accepted POA document types. Demo list.
+ACCEPTED_POA_TYPES = {"utility_bill": "Utility bill", "bank_statement": "Bank statement",
+                      "council_tax": "Council tax / municipal bill", "tenancy_agreement": "Tenancy agreement"}
+POA_MAX_AGE_DAYS = 183
+# Demo list only — the real hub reads the internal library of sanctioned and
+# prohibited jurisdictions. ISO-2 codes, as the seed stores nationalities.
+SANCTIONED_OR_PROHIBITED = {"RU": "Russian Federation", "IR": "Iran", "KP": "North Korea", "SY": "Syria",
+                            "CU": "Cuba", "BY": "Belarus", "AF": "Afghanistan", "MM": "Myanmar", "VE": "Venezuela"}
+COUNTRY_NAMES = {
+    "US": "United States", "GB": "United Kingdom", "SG": "Singapore", "RU": "Russian Federation", "CY": "Cyprus",
+    "VN": "Vietnam", "MX": "Mexico", "PK": "Pakistan", "BR": "Brazil", "AE": "United Arab Emirates", "DE": "Germany",
+    "ES": "Spain", "JO": "Jordan", "CH": "Switzerland", "GH": "Ghana", "JP": "Japan", "IN": "India", "CO": "Colombia",
+    "NG": "Nigeria", "IT": "Italy", "IE": "Ireland", "LB": "Lebanon", "AU": "Australia", "FR": "France", "KR": "South Korea",
+    "CZ": "Czechia", "EG": "Egypt", "DK": "Denmark", "SE": "Sweden", "PT": "Portugal", "KZ": "Kazakhstan", "MA": "Morocco",
+    "MY": "Malaysia", "CA": "Canada", "IR": "Iran", "KP": "North Korea", "SY": "Syria", "CU": "Cuba", "BY": "Belarus",
+    "AF": "Afghanistan", "MM": "Myanmar", "VE": "Venezuela",
+}
+# What the document itself prints, so the analyst reads the birthday in the
+# right order before confirming it (SOP 4.1.2: dd/mm vs mm/dd; system stores yyyy-mm-dd).
+DATE_FORMAT_NOTES = {
+    "Passport": "the passport prints dates as DD MON YYYY",
+    "NationalID": "the ID card prints dates as DD MON YYYY",
+    "ResidencePermit": "the permit prints dates as DD MON YYYY",
+    "DrivingLicense": "the US licence prints dates as MM/DD/YYYY",
+    "TradeLicense": "the licence prints dates as DD MON YYYY",
+}
+
+# ── Escalation typology (SOP 4.1.3 step 2.1.1: Fraud Typology on the tracker) ─
+FRAUD_TYPOLOGIES = [
+    "Forged or altered document",
+    "AI-generated or synthetic document",
+    "Stolen or borrowed identity (impersonation)",
+    "Template or specimen document",
+    "Sanctions evasion (ID / POA mismatch)",
+    "Mule or third-party account",
+    "Not applicable (screening escalation)",
+]
+
+# ── TT Shop Checker 2 (SOP 4.2: second reviewer on seller approvals) ─────────
+CHECKER2_DECISIONS = ["Approve", "Return to Checker 1", "Escalate to L2"]
+
+# ── QC sampling (SOP 2.1: QA / QC / Team Lead) ───────────────────────────────
+QC_REASONS = [
+    "Decision correct and evidenced",
+    "Rationale insufficient",
+    "Wrong outcome",
+    "World-Check export missing",
+    "POA check not evidenced",
+    "SLA breached without a note",
+    "Data-entry error",
+]
+QC_SAMPLE_RATE = 0.2
+QC_SAMPLE_MIN = 5

@@ -13,6 +13,7 @@ Text inside an SVG that is loaded through <img> cannot use the page's web
 font, so the cards name Arial, which is on every Windows and macOS box and
 renders Cyrillic. Everything interpolated is XML-escaped.
 """
+from fincrime.data import vocab
 from fincrime.utils import dates
 from fincrime.utils.text import esc, mrz_field, mrz_name, split_name, translit
 
@@ -371,10 +372,11 @@ def utility_bill_svg(case, doc, provider="Northgate Utilities", kind="ELECTRICIT
     c = case["client"]
     W, H = 620, 800
     page2 = doc.get("side") == "page 2"
-    issue = case["created_at"][:10]
+    issue = doc.get("issued_on") or case["created_at"][:10]
     period_end = dates.add_days(issue + " 00:00:00", -12)[:10]
     period_start = dates.add_days(period_end + " 00:00:00", -30)[:10]
-    old = any(d.get("quality") == "expired" for d in case["documents"] if d.get("kind") in ("utility_bill", "bank_statement"))
+    # A stored issue date is the truth the POA checks read; the `expired` quality flag only moves an undated bill.
+    old = (not doc.get("issued_on")) and any(d.get("quality") == "expired" for d in case["documents"] if d.get("kind") in ("utility_bill", "bank_statement"))
     if old:
         period_end = dates.add_days(issue + " 00:00:00", -240)[:10]
         period_start = dates.add_days(period_end + " 00:00:00", -30)[:10]
@@ -401,8 +403,12 @@ def utility_bill_svg(case, doc, provider="Northgate Utilities", kind="ELECTRICIT
         body += _label(40, 100, "ACCOUNT HOLDER")
         body += _value(40, 118, c["legal_name"], 14)
         body += _label(40, 140, "SERVICE ADDRESS")
-        body += _value(40, 158, c.get("address") or "Address on file", 12, "600")
-        body += _label(380, 100, "ACCOUNT NUMBER") + _value(380, 118, "NG-" + c["id_number"][-8:].replace("-", ""), 13, family=MONO)
+        country = vocab.COUNTRY_NAMES.get((doc.get("country") or "").upper(), doc.get("country") or "")
+        address = c.get("address") or "Address on file"
+        if country and country.lower() not in address.lower():
+            address = f"{address}, {country}"
+        body += _value(40, 158, address, 12, "600")
+        body += _label(380, 100, "ACCOUNT NUMBER") + _value(380, 118, (doc.get("country") or "NG").upper() + "-" + c["id_number"][-8:].replace("-", ""), 13, family=MONO)
         body += _label(380, 140, "STATEMENT DATE") + _value(380, 158, _long_date(issue if not old else period_end), 12)
         body += _label(380, 180, "BILLING PERIOD") + _value(380, 198, f"{period_start} to {period_end}", 11)
         body += f'<rect x="40" y="230" width="{W-80}" height="90" rx="8" fill="#f0fdfa" stroke="#99f6e4"/>'

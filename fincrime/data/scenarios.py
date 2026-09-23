@@ -1,11 +1,11 @@
-"""The sixteen hand-written scenarios.
+"""The hand-written scenarios (nineteen).
 
 Each one exists to demonstrate a branch of the SOP. All people, companies,
 documents and watchlist records are fictional; adverse-media text and source
 links are invented and point at reserved example domains.
 """
-from fincrime.data.seed import (AMARA, JON, MARIO, NISHA, RYAN, agency_info, alert_case, auto_fp,
-                                auto_fp_matches, doc, event, kyc_case, resolved, std_docs, wc_case, wc_match)
+from fincrime.data.seed import (AMARA, JON, LEAH, MARIO, NISHA, RYAN, agency_info, alert_case, auto_fp,
+                                auto_fp_matches, doc, event, handoff, kyc_case, resolved, std_docs, wc_case, wc_match)
 from fincrime.utils import dates
 
 
@@ -68,7 +68,7 @@ def build():
     rahman = kyc_case(
         key="rahman", name="Farah Rahman", nationality="SG", dob="1996-12-09", id_type="NationalID", gender="F",
         tags=["Creator G3"], created_hours_ago=14, status="DataScreening", confirmed_hours_after=0.9,
-        l1=[JON], previous_reviewer=JON, screening_hit=True, address="12 Tanjong Pagar Road, Singapore 088444",
+        l1=[JON], previous_reviewer=JON, routed_to=JON, screening_hit=True, address="12 Tanjong Pagar Road, Singapore 088444",
         country="Singapore",
     )
     rahman_matches = [wc_match(
@@ -91,7 +91,7 @@ def build():
         nationality="RU", dob="1975-04-12", id_type="Passport", issuing="RU", tags=["Creator G2"], poa_required=True,
         manual_review_reason=["POA Collected", "Namescreen hit - WC or CMS", "Namescreen hit - Sanction country"],
         created_hours_ago=9, docs=std_docs("passport", poa=True),
-        address="45 Griva Digeni Avenue, Office 302, Nicosia 1080, Cyprus", country="Cyprus", screening_hit=True,
+        address="45 Griva Digeni Avenue, Office 302, Nicosia 1080, Cyprus", country="Cyprus", poa_country="CY", screening_hit=True,
     )
     sidorov_matches = [wc_match(
         key="sidorov-1", name="SIDOROV, Anatoly Petrovich", alias="Anatolii SIDOROV", strength=0.98, types=("SAN",),
@@ -129,7 +129,7 @@ def build():
     hassan = kyc_case(
         key="hassan", name="Ahmed Hassan", nationality="PK", dob="2005-07-26", id_type="NationalID",
         tags=["Creator G2"], created_hours_ago=30, status="DataScreening", confirmed_hours_after=1.0,
-        l1=[MARIO], previous_reviewer=MARIO, screening_hit=True, address="Block 7, Clifton, Karachi", country="Pakistan",
+        l1=[MARIO], previous_reviewer=MARIO, routed_to=MARIO, screening_hit=True, address="Block 7, Clifton, Karachi", country="Pakistan",
     )
     h_at = hassan["verification_points"][3]["at"]
     hassan_matches = auto_fp_matches(first="Ahmed", surname="Hassan", n=212, seed="hassan", keep_unresolved=3, screened_at=h_at)
@@ -148,7 +148,7 @@ def build():
     taylor = kyc_case(
         key="taylor", name="Michael James Taylor", nationality="GB", dob="1991-08-15", id_type="Passport",
         tags=["Gifter G6"], created_hours_ago=11, status="DataScreening", confirmed_hours_after=0.7,
-        l1=[AMARA], previous_reviewer=AMARA, screening_hit=True, address="142 High Street, Kensington, London W8 7RG",
+        l1=[AMARA], previous_reviewer=AMARA, routed_to=AMARA, screening_hit=True, address="142 High Street, Kensington, London W8 7RG",
         country="United Kingdom",
     )
     taylor_matches = [wc_match(
@@ -194,6 +194,8 @@ def build():
         tags=["Gifter G6"], created_hours_ago=26, status="DataEscalatingL2", confirmed_hours_after=0.8,
         escalated_hours_after=1.9, l1=[JON], previous_reviewer=JON, pending_reason="Pending L2", case_review_level="L2",
         screening_hit=True, address="Villa 88, Al Barsha 2, Dubai", country="United Arab Emirates",
+        routed_to=NISHA, routed_hours_after=1.9,
+        handoffs=[handoff("L1", "L2", dates.add_hours(dates.hours_ago(26), 1.9), NISHA, 0.0, "hub")],
     )
     esc_at = almansoor["escalated_at"]
     almansoor_matches = [resolved(wc_match(
@@ -217,7 +219,7 @@ def build():
     petrova = kyc_case(
         key="petrova", name="Sofia Petrova", nationality="US", dob="1990-01-19", id_type="Passport", gender="F",
         us_person=True, tags=["Creator G3"], created_hours_ago=16, status="DataScreening", confirmed_hours_after=0.6,
-        l1=[AMARA], previous_reviewer=AMARA, screening_hit=True, address="410 Pine Street, Apt 5B, Seattle, WA 98101",
+        l1=[AMARA], previous_reviewer=AMARA, routed_to=AMARA, screening_hit=True, address="410 Pine Street, Apt 5B, Seattle, WA 98101",
         country="United States",
     )
     petrova_matches = [wc_match(
@@ -235,7 +237,7 @@ def build():
     yusuf = kyc_case(
         key="yusuf", name="Nadia Yusuf", nationality="AE", dob="1992-10-02", id_type="Passport", gender="F",
         tags=["Creator G2"], created_hours_ago=8, status="DataScreening", confirmed_hours_after=0.5,
-        l1=[JON], previous_reviewer=JON, screening_hit=True, address="Marina Walk, Tower 3, Dubai Marina", country="United Arab Emirates",
+        l1=[JON], previous_reviewer=JON, routed_to=JON, screening_hit=True, address="Marina Walk, Tower 3, Dubai Marina", country="United Arab Emirates",
     )
     yusuf_matches = [wc_match(
         key="yusuf-1", name="Nadiya YUSSUF", alias="Nadia YUSUF", strength=0.72, types=("SIC", "RE"), gender="Female",
@@ -253,7 +255,7 @@ def build():
     stein = kyc_case(
         key="stein", name="Milo Stein", nationality="DE", dob="1989-05-18", id_type="Passport",
         tags=["Gifter G4"], created_hours_ago=5, status="DataScreening", confirmed_hours_after=0.4,
-        l1=[MARIO], previous_reviewer=MARIO, screening_hit=True, address="Leopoldstrasse 27, 80802 Munich", country="Germany",
+        l1=[MARIO], previous_reviewer=MARIO, routed_to=MARIO, screening_hit=True, address="Leopoldstrasse 27, 80802 Munich", country="Germany",
     )
     stein_matches = [wc_match(
         key="stein-1", name="Milo STEIN", strength=0.96, types=("LE",), dobs=["18-May-1989"], pob="Graz",
@@ -270,6 +272,7 @@ def build():
         key="gomez", name="Jose Luis Rodriguez Gomez", nationality="ES", dob="1985-12-04", id_type="NationalID",
         tags=["Creator G3"], created_hours_ago=76, status="Verified", confirmed_hours_after=1.3, closed_hours_after=2.6,
         l1=[AMARA], previous_reviewer=AMARA, screening_hit=True, address="Calle de Alcala 85, 4 Dcha, 28009 Madrid", country="Spain",
+        qc={"reviewer": LEAH, "result": "Pass", "reason": "Decision correct and evidenced", "comment": "DOB gap documented, export attached, single-line rationale."},
     )
     g_at = dates.add_hours(gomez["created_at"], 2.2)
     gomez_matches = [resolved(wc_match(
@@ -289,6 +292,7 @@ def build():
         key="alhassan", name="Fatima Al-Hassan", nationality="JO", dob="1995-02-14", id_type="NationalID", gender="F",
         tags=["Gifter G4"], created_hours_ago=52, status="Verified", confirmed_hours_after=0.9, closed_hours_after=1.8,
         l1=[JON], previous_reviewer=JON, screening_hit=True, address="Building 12, Rainbow Street, Amman 11118", country="Jordan",
+        qc={"reviewer": LEAH, "result": "Pass", "reason": "Decision correct and evidenced", "comment": "Distinct person established; employer letter referenced."},
     )
     f_at = dates.add_hours(alhassan["created_at"], 1.5)
     alhassan_matches = [resolved(wc_match(
@@ -310,6 +314,9 @@ def build():
         escalated_hours_after=2.0, closed_hours_after=70.0, l1=[AMARA], l2=[NISHA], edd=[RYAN], previous_reviewer=RYAN,
         screening_hit=True, address="74 Quai de Cologny, 1223 Cologny, Geneva", country="Switzerland",
         docs=std_docs("residence_permit", poa=True), poa_required=True,
+        handoffs=[handoff("L1", "L2", dates.add_hours(dates.hours_ago(120), 2.0), NISHA, 5.0, "bot"),
+                  handoff("L2", "EDD", dates.hours_ago(120 - 30), RYAN, 3.5, "bot")],
+        qc={"reviewer": LEAH, "result": "Pass", "reason": "Decision correct and evidenced", "comment": "Source-of-wealth file complete; senior approval on record."},
         extra_audit=[event(dates.hours_ago(120 - 30), NISHA, "L2 decision", "Escalate to EDD — source of wealth review required for PEP relative."),
                      event(dates.hours_ago(120 - 69), RYAN, "EDD completed", "Source of wealth established via inheritance deeds and audited holding-company dividends. Senior approval recorded.")],
     )
@@ -379,8 +386,12 @@ def build():
     oceanic = kyc_case(
         key="oceanic", name="Oceanic Logistics & Energy Pte Ltd", nationality="SG", dob="", tenant="ttshop", status="DataEscalatingL2",
         id_type="TradeLicense", gender="", tags=["Agency", "Priority Review"], poa_required=True, created_hours_ago=44,
-        confirmed_hours_after=1.0, escalated_hours_after=2.8, l1=[JON], previous_reviewer=JON, pending_reason="Pending EDD",
-        case_review_level="L2", vendor="shufti_pro_android_webview",
+        confirmed_hours_after=1.0, escalated_hours_after=2.8, l1=[JON], l2=[NISHA], previous_reviewer=NISHA, pending_reason="Pending EDD",
+        case_review_level="L3", vendor="shufti_pro_android_webview", routed_to=RYAN, routed_hours_after=32.8,
+        handoffs=[handoff("L1", "L2", dates.add_hours(dates.hours_ago(44), 2.8), NISHA, 4.2, "bot"),
+                  handoff("L2", "EDD", dates.add_hours(dates.hours_ago(44), 32.8), RYAN, 0.0, "hub")],
+        extra_audit=[event(dates.add_hours(dates.hours_ago(44), 32.8), NISHA, "Escalated to EDD",
+                           "Sanctions exposure via the majority parent — EDD to establish beneficial ownership and take legal advisory.")],
         docs=[doc("trade_licence", "page 1"), doc("passport", "front"), doc("utility_bill", "page 1")],
         address="8 Shenton Way, #24-01, Singapore 068811", country="Singapore", screening_hit=True, risk_rating="High",
         agency=agency_info(company="Oceanic Logistics & Energy Pte Ltd", registration_number="SG-2018-0910-L", incorporation_country="Singapore",
@@ -403,5 +414,36 @@ def build():
                                "by": JON, "at": dates.add_minutes(esc_at, -4)})
     w["assignee"] = JON
     kyc.append(oceanic); alerts.append(a); wc.append(w)
+
+    # 17 ── Beatriz Camargo: proof of address eight months old → Resubmit POA
+    kyc.append(kyc_case(
+        key="camargo", name="Beatriz Camargo", nationality="BR", dob="1997-03-09", id_type="Passport", gender="F",
+        tags=["Creator G3"], poa_required=True, manual_review_reason=["POA Collected"], created_hours_ago=4,
+        docs=std_docs("passport", poa=True, poa_issued_days_ago=245),
+        address="Rua Oscar Freire 1200, Jardins, Sao Paulo 01426-001", country="Brazil",
+    ))
+
+    # 18 ── Dmitri Volkov: sanctioned-country passport AND a same-country POA → must escalate
+    kyc.append(kyc_case(
+        key="volkov", name="Dmitri Volkov", native_name="Дмитрий Волков", nationality="RU", dob="1983-06-21",
+        id_type="Passport", issuing="RU", tags=["Creator G2"], poa_required=True,
+        manual_review_reason=["POA Collected", "High-risk country"], created_hours_ago=7,
+        docs=std_docs("passport", poa=True, poa_country="RU"),
+        address="Leninsky Prospekt 42, kv. 17, Moscow 119334", country="Russian Federation",
+    ))
+
+    # 19 ── Kwame Mensah: forged passport, escalated as Fraud ID, rejected at L2 (fraud tracker row)
+    kyc.append(kyc_case(
+        key="mensah", name="Kwame Mensah", nationality="GH", dob="1990-08-14", id_type="Passport", issuing="GH",
+        tags=["Gifter G4"], manual_review_reason=["Vendor rejected"], created_hours_ago=70, status="Rejected", confirmed=False,
+        vendor_result="Declined", vendor_reason="Security-feature check failed: data-page font inconsistent with the specimen.",
+        escalated_hours_after=1.5, closed_hours_after=9.0, l1=[JON], l2=[NISHA], previous_reviewer=NISHA,
+        escalate_reason="Fraud ID / AI-generated document", fraud_typology="Forged or altered document",
+        handoffs=[handoff("L1", "L2", dates.add_hours(dates.hours_ago(70), 1.5), NISHA, 3.0, "bot")],
+        docs=[doc("passport", "front"), doc("passport", "back")],
+        address="14 Ring Road East, Accra", country="Ghana",
+        extra_audit=[event(dates.add_hours(dates.hours_ago(70), 9.0), NISHA, "L2 decision: Reject",
+                           "Forged data page confirmed against the specimen library; account blocked, fraud tracker updated.")],
+    ))
 
     return kyc, alerts, wc

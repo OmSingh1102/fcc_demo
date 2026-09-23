@@ -12,19 +12,25 @@ the audit trail on their behalf), and `reviewers_by_level` is append-only so
 the segregation check still knows who touched a case at L1 after it has been
 returned and picked up by somebody else.
 
+Ownership changes also keep the work log (engines/worklog) and, on every
+tier hand-off, ask the router (engines/routing) for the next analyst at
+once — SOP 5.2.3, no bot lag.
+
     Submitted → IDVerification → DataConfirming ──OK──▶ DataScreening ──review: FP / no match──▶ Verified
-                                      │  │                     │
+                                      │  │                     │                (TT Shop: Checker 2 signs off first)
                                       │  └─Resubmit─▶ ResubmitID / ResubmitPOA
                                       └────Escalate─▶ DataEscalatingL2 ◀──review: TP / potential match──┘
                                                               └─ L2/EDD: Approve → Verified | Reject → Rejected | Escalate to EDD
 """
 from fincrime.adapters import cms, skopenow
 from fincrime.data import vocab
-from fincrime.engines import segregation
+from fincrime.engines import routing, segregation, worklog
 from fincrime.engines.errors import WorkflowError
 from fincrime.utils import dates
 
-HIGH_RISK_COUNTRIES = {"RU", "IR", "KP", "SY", "AF", "MM", "BY", "VE", "CU"}
+# Kept as an alias: the list now lives in vocab as the demo's stand-in for
+# the internal library of sanctioned / prohibited jurisdictions.
+HIGH_RISK_COUNTRIES = vocab.SANCTIONED_OR_PROHIBITED
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -78,10 +84,21 @@ def _require_reserved(case, actor):
              "Reserve the case first — only the current reviewer can act on it.")
 
 
-def _hand_back(case, actor):
-    """The reviewer's turn is over: they become the previous reviewer."""
+def _hand_back(case, actor, outcome=""):
+    """The reviewer's turn is over: they become the previous reviewer and
+    their work-log entry closes with how the case left them."""
     case["previous_reviewer"] = actor
     case["current_reviewer"] = ""
+    worklog.close_entry(case, outcome, email=actor)
+
+
+def _open_investigation_file(case, actor, now):
+    """SOP 4.1.3 §6.2: the investigation folder, named UID + (case id). Its
+    contents are read live from the case (engines/investigation)."""
+    if case.get("investigation_file"):
+        return
+    case["investigation_file"] = {"name": f"{case['client_id']} ({case['id']})", "created_at": now, "created_by": actor}
+    _audit(case, actor, "Investigation file opened", f"Folder {case['investigation_file']['name']} — WC export, Skopenow report and attachments collect here.")
 
 
 # ── read models ──────────────────────────────────────────────────────────────
@@ -109,9 +126,12 @@ def verification_points(case):
     return out
 
 
-def review_action(case, levels):
+def review_action(case, levels, actor=""):
     """Which modal the Review button opens for an analyst holding `levels`."""
     s = case["status"]
+    if s == "DataScreening" and case.get("pending_reason") == "Pending Checker 2":
+        checker1 = (case.get("checker1") or {}).get("by")
+        return "checker2" if (levels & {"L1", "L2"} and actor != checker1) else ""
     if s == "DataConfirming" and "L1" in levels:
         return "dc"
     if s == "DataScreening" and levels & {"L1", "L2"}:
@@ -127,7 +147,10 @@ def reserve(case, actor):
     _require_open(case)
     _require(not case["current_reviewer"] or case["current_reviewer"] == actor,
              f"Already reserved by {case['current_reviewer']}. Ask them to release it or use Assign to Others.")
+    now = dates.now_str()
     case["current_reviewer"] = actor
+    worklog.open_entry(case, actor, routing.level_for(case) or "L1", now)
+    routing.complete_handoff(case, actor, now)
     _audit(case, actor, "Reserved", "Case reserved for review.")
 
 
@@ -135,6 +158,7 @@ def release(case, actor):
     _require(case["current_reviewer"], "The case is not reserved.")
     _require(case["current_reviewer"] == actor, "Only the current reviewer can release the case.")
     case["current_reviewer"] = ""
+    worklog.close_entry(case, "Released", email=actor)
     _audit(case, actor, "Released", "Case returned to the queue.")
 
 
@@ -142,7 +166,12 @@ def assign(case, actor, assignee):
     _require_open(case)
     assignee = _require_text(assignee, "An assignee")
     before = case["current_reviewer"]
+    now = dates.now_str()
+    if before and before != assignee:
+        worklog.close_entry(case, "Reassigned", now, email=before)
     case["current_reviewer"] = assignee
+    worklog.open_entry(case, assignee, routing.level_for(case) or "L1", now)
+    routing.complete_handoff(case, assignee, now)
     _audit(case, actor, "Assigned", f"Assigned to {assignee}" + (f" (was {before})" if before else "") + ".")
 
 
@@ -161,10 +190,56 @@ def confirm_fields(case):
     return CONFIRM_FIELDS_KYB if case.get("agency") else CONFIRM_FIELDS
 
 
+def poa_docs(case):
+    return [d for d in case.get("documents", []) if d.get("category") == "ProofOfAddress"]
+
+
+def poa_checks(case, now=None):
+    """SOP 4.1.2 step 1, computed from the uploaded proof of address: issued
+    within six months, an accepted document type, not from a sanctioned or
+    prohibited country — and the rule for a sanctioned-country ID (same
+    country on the POA ⇒ escalate; a clean POA ⇒ process normally). Empty
+    when the case needs no POA."""
+    if not case.get("poa_required"):
+        return []
+    docs = poa_docs(case)
+    if not docs:
+        return [{"label": "Proof of address uploaded", "ok": False, "detail": "No proof of address on the case."}]
+    d = docs[0]
+    checks = []
+    issued = dates.parse(d.get("issued_on") or "")
+    if issued is None:
+        checks.append({"label": "Issued within the last 6 months", "ok": False, "detail": "The document shows no issue date."})
+    else:
+        age = ((now or dates.now()) - issued).days
+        checks.append({"label": "Issued within the last 6 months", "ok": age <= vocab.POA_MAX_AGE_DAYS,
+                       "detail": f"issued {d['issued_on']}, {age} days ago (limit {vocab.POA_MAX_AGE_DAYS})"})
+    kind = d.get("kind", "")
+    checks.append({"label": "Accepted document type (internal library)", "ok": kind in vocab.ACCEPTED_POA_TYPES,
+                   "detail": vocab.ACCEPTED_POA_TYPES.get(kind, kind.replace("_", " ") or "unknown type")})
+    country = (d.get("country") or "").upper()
+    cname = vocab.COUNTRY_NAMES.get(country, country or "unknown country")
+    checks.append({"label": "Not from a sanctioned or prohibited country", "ok": country not in vocab.SANCTIONED_OR_PROHIBITED,
+                   "detail": f"issued in {cname}"})
+    id_country = (case["client"].get("id_issuing_place") or case["client"].get("nationality") or "").upper()
+    if id_country in vocab.SANCTIONED_OR_PROHIBITED:
+        idname = vocab.COUNTRY_NAMES.get(id_country, id_country)
+        same = country == id_country
+        checks.append({"label": "Sanctioned-country ID rule (SOP 4.1.2 §2.3)", "ok": not same,
+                       "detail": (f"ID and POA are both from {idname} — escalate" if same
+                                  else f"ID from {idname}, POA from {cname} — process normally")})
+    return checks
+
+
+def poa_failures(case, now=None):
+    return [c for c in poa_checks(case, now) if not c["ok"]]
+
+
 def data_confirm(case, actor, form):
     """OK on the Data Confirm modal: all three fields confirmed (or edited and
-    confirmed), optional summary and attachment. Moves the case to Data
-    Screening and re-runs the name screen on the confirmed data."""
+    confirmed), the POA checks confirmed when a POA is required, optional
+    summary and attachment. Moves the case to Data Screening and re-runs the
+    name screen on the confirmed data."""
     _require(case["status"] == "DataConfirming", "Data confirming is only available while the case is in Data Confirming.")
     _require_reserved(case, actor)
     now = dates.now_str()
@@ -181,6 +256,13 @@ def data_confirm(case, actor, form):
             case["client"][client_key] = value
             edited.append(label)
         case["confirmations"][field] = {"value": value, "confirmed_by": actor, "at": now, "edited": changed}
+    if case.get("poa_required"):
+        failures = poa_failures(case)
+        _require(not failures, "The proof of address fails a check: "
+                 + "; ".join(f"{f['label']} — {f['detail']}" for f in failures)
+                 + ". Use Resubmit POA, or Escalate when the sanctioned-country rule applies.")
+        _require(form.get("poa_ok") == "1", "Confirm the proof of address checks before pressing OK.")
+        case["confirmations"]["poa"] = {"value": "checked", "confirmed_by": actor, "at": now, "edited": False}
     summary = (form.get("summary") or "").strip()[:200]
     attachment = (form.get("attachment_name") or "").strip()
     if attachment:
@@ -196,6 +278,8 @@ def data_confirm(case, actor, form):
     # further pair of rows under Screening Result.
     case["screening"]["rows"].extend(cms.rescreen_rows(case, now))
     detail = "Name, date of birth and nationality confirmed against the document."
+    if case.get("poa_required"):
+        detail += " Proof of address checked (age, type, country)."
     if edited:
         detail += f" Edited: {', '.join(edited)}."
     if summary:
@@ -224,29 +308,47 @@ def resubmit(case, actor, decisions, id_reason, poa_reason, note):
     _decision(case, "Data Confirming", decision="Resubmit", operated_at=now, by=actor,
               fail_reason=case["resubmit"]["id_reason"], poa_fail_reason=case["resubmit"]["poa_reason"])
     _touch_level(case, "L1", actor)
-    _hand_back(case, actor)
+    _hand_back(case, actor, "Resubmission requested")
     reasons = "; ".join(r for r in (case["resubmit"]["id_reason"], case["resubmit"]["poa_reason"]) if r)
     _audit(case, actor, "Resubmission requested",
            f"{', '.join(decisions)} (#{prior + 1}). {reasons}" + (f" Note: {note.strip()}" if (note or '').strip() else ""))
 
 
-def escalate(case, actor, reason, comment):
+def escalate(case, actor, reason, comment, fraud_typology="", alert_case=None):
+    """Hand the case to L2. A fraud escalation carries its typology (SOP
+    4.1.3 §2.1.1: the fraud tracker needs it); the investigation folder opens
+    (§6.2); the linked screening case moves to L2; the router gives the case
+    to an L2 analyst at once."""
     _require(case["status"] in ("DataConfirming", "DataScreening"),
              "Only a case in Data Confirming or Data Screening can be escalated from L1.")
     _require_reserved(case, actor)
     _require(reason in vocab.ESCALATE_REASONS, "Pick an escalation reason.")
     comment = _require_text(comment, "A comment")
+    fraud_typology = (fraud_typology or "").strip()
+    if reason.startswith("Fraud"):
+        _require(fraud_typology in vocab.FRAUD_TYPOLOGIES,
+                 "Pick the fraud typology — it is what the fraud tracker records (SOP 4.1.3 §2.1.1).")
+    else:
+        _require(not fraud_typology or fraud_typology in vocab.FRAUD_TYPOLOGIES, "Unknown fraud typology.")
     now = dates.now_str()
     case["status"] = "DataEscalatingL2"
     case["pending_reason"] = "Pending L2"
     case["case_review_level"] = "L2"
     case["escalated_at"] = now
     case["edd_due_at"] = dates.add_hours(now, vocab.SLA_HOURS_EDD)
+    case["escalate_reason"] = reason
+    case["fraud_typology"] = fraud_typology
     _point(case, "Data Escalating L2", now)
     _decision(case, "Data Escalating L2", decision="Escalated", operated_at=now, by=actor, rejection_reason=reason)
     _touch_level(case, "L1", actor)
-    _hand_back(case, actor)
-    _audit(case, actor, "Escalated to L2", f"{reason}. {comment}")
+    _hand_back(case, actor, "Escalated to L2")
+    _audit(case, actor, "Escalated to L2", f"{reason}. {comment}" + (f" Fraud typology: {fraud_typology}." if fraud_typology else ""))
+    _open_investigation_file(case, actor, now)
+    if alert_case is not None and alert_case.get("case_level") != "L2":
+        alert_case["case_level"] = "L2"
+        alert_case.setdefault("audit", []).append({"at": now, "actor": actor, "action": "Moved to L2",
+                                                   "detail": "KYC case escalated; the screening case now sits in the L2 queue."})
+    routing.handoff(case, "L1", "L2", exclude=(actor,))
 
 
 def rfi(case, actor, message):
@@ -260,9 +362,13 @@ def rfi(case, actor, message):
 
 # ── L1: screening review ─────────────────────────────────────────────────────
 
-def edd_review(case, actor, decision, summary, attachment, alert_case=None):
-    """OK on the EDD Review modal, after the screening case is dealt with."""
+def edd_review(case, actor, decision, summary, attachment, alert_case=None, level="L1"):
+    """OK on the EDD Review modal, after the screening case is dealt with.
+    `level` is the tier the actor is acting at (L1, or L2 for a senior
+    analyst working the screening queue) — it is where the close is recorded."""
     _require(case["status"] == "DataScreening", "The screening review is only available while the case is in Data Screening.")
+    _require(case.get("pending_reason") != "Pending Checker 2",
+             "This seller is waiting for Checker 2 — the second reviewer signs it off from the L2 queue.")
     _require_reserved(case, actor)
     summary = _require_text(summary, "A summary")
     hit = case["screening"]["hit"]
@@ -280,13 +386,13 @@ def edd_review(case, actor, decision, summary, attachment, alert_case=None):
         if decision == "Approve after Skopenow":
             _require((case.get("skopenow") or {}).get("status") == "Cleared",
                      "The Skopenow report has not cleared this person yet.")
-        _close(case, actor, "Verified", now, decision, summary, attachment)
+        _close(case, actor, "Verified", now, decision, summary, attachment, level=level)
         return
     if decision == "Request Skopenow report":
         _require(case["client"]["us_person"], "Skopenow reports are only requested for US persons (SOP 4.1.3). Escalate instead.")
         case["pending_reason"] = "Pending Skopenow"
         case["skopenow"] = skopenow.request_report(case, actor)
-        _touch_level(case, "L1", actor)
+        _touch_level(case, level, actor)
         _audit(case, actor, "Skopenow report requested", summary)
         return
     # True positive / potential match: hand to L2.
@@ -294,21 +400,63 @@ def edd_review(case, actor, decision, summary, attachment, alert_case=None):
     if attachment:
         case["attachments"].append({"name": attachment, "at": now, "by": actor, "ref": "edd_review"})
     _decision(case, "Data Screening", decision=decision, operated_at=now, by=actor, id_summary=summary, report=attachment)
-    escalate(case, actor, reason, summary)
+    escalate(case, actor, reason, summary, alert_case=alert_case)
 
 
-def _close(case, actor, status, now, decision, summary, attachment=""):
-    case["status"] = status
-    case["pending_reason"] = ""
-    case["closed_at"] = now
-    _point(case, "Completed", now)
+def _close(case, actor, status, now, decision, summary, attachment="", level="L1"):
+    """Close the case — or, for a TT Shop seller being approved, park it for
+    Checker 2 (SOP 4.2: a second reviewer signs off every seller approval,
+    after the risk rating has been recalculated)."""
+    checker2_gate = status == "Verified" and case["tenant"] == "ttshop" and not case.get("checker2")
+    if checker2_gate:
+        _require(case.get("risk_recalculated_at"), "Recalculate the risk rating before approving a seller (SOP 4.2.2 §5.1.1).")
     if attachment:
         case["attachments"].append({"name": attachment, "at": now, "by": actor, "ref": "edd_review"})
     _decision(case, "Data Screening", decision=decision, operated_at=now, by=actor,
               approve_reason=summary if status == "Verified" else "", id_summary=summary, report=attachment)
-    _touch_level(case, "L1", actor)
-    _hand_back(case, actor)
+    _touch_level(case, level, actor)
+    if checker2_gate:
+        case["checker1"] = {"by": actor, "at": now, "decision": decision, "summary": summary, "attachment": attachment}
+        case["pending_reason"] = "Pending Checker 2"
+        _hand_back(case, actor, "Checker 1 approved")
+        _audit(case, actor, "Checker 1 approved", f"{decision}. {summary} Awaiting Checker 2 sign-off.")
+        routing.handoff(case, "L1", "L2", exclude=(actor,))
+        return
+    case["status"] = status
+    case["pending_reason"] = ""
+    case["closed_at"] = now
+    case["closed_by"] = actor
+    _point(case, "Completed", now)
+    _hand_back(case, actor, f"Closed — {status}")
     _audit(case, actor, f"Case {status.lower()}", f"{decision}. {summary}")
+
+
+def checker2_signoff(case, actor, decision, comment):
+    """TT Shop Checker 2: a different analyst approves, returns, or escalates
+    what Checker 1 approved."""
+    _require(case["status"] == "DataScreening" and case.get("pending_reason") == "Pending Checker 2",
+             "This case is not waiting for Checker 2.")
+    _require_reserved(case, actor)
+    checker1 = case.get("checker1") or {}
+    _require(actor != checker1.get("by"), "Checker 2 must be a different analyst from Checker 1 (four-eyes rule).")
+    _require(decision in vocab.CHECKER2_DECISIONS, "Pick a decision.")
+    comment = _require_text(comment, "A comment")
+    now = dates.now_str()
+    if decision == "Approve":
+        case["checker2"] = {"by": actor, "at": now, "decision": decision, "comment": comment}
+        _audit(case, actor, "Checker 2 approved", comment)
+        _close(case, actor, "Verified", now, checker1.get("decision") or "False positive",
+               checker1.get("summary") or comment, checker1.get("attachment", ""), level="L2")
+        return
+    _touch_level(case, "L2", actor)
+    case["pending_reason"] = ""
+    if decision == "Return to Checker 1":
+        case["checker1"] = None
+        _hand_back(case, actor, "Returned to Checker 1")
+        _audit(case, actor, "Returned to Checker 1", comment)
+        routing.handoff(case, "L2", "L1", exclude=(actor,))
+        return
+    escalate(case, actor, "Other", comment)
 
 
 def skopenow_clear(case, actor, outcome, notes):
@@ -316,7 +464,7 @@ def skopenow_clear(case, actor, outcome, notes):
     _require_reserved(case, actor)
     notes = _require_text(notes, "Your review of the report")
     _require(outcome in ("Cleared", "Inconclusive"), "Pick an outcome.")
-    case["skopenow"] = skopenow.complete_report(case["skopenow"], outcome, actor, notes)
+    case["skopenow"] = skopenow.complete_report(case["skopenow"], outcome, actor, notes, case=case)
     case["pending_reason"] = "" if outcome == "Cleared" else "Pending L2"
     _audit(case, actor, f"Skopenow report {outcome.lower()}", notes)
     if outcome == "Inconclusive":
@@ -325,12 +473,19 @@ def skopenow_clear(case, actor, outcome, notes):
 
 # ── L2 / EDD ─────────────────────────────────────────────────────────────────
 
-def l2_decision(case, actor, level, decision, comment):
-    """Approve / Reject / Escalate to EDD at L2, or Approve / Reject at EDD."""
+def l2_decision(case, actor, level, decision, comment, levels=None):
+    """Approve / Reject / Escalate to EDD at L2, or Approve / Reject at EDD.
+    `levels` (the actor's roles) closes the gap where an L2-only analyst
+    could decide at EDD from the case page."""
     _require(case["status"] == "DataEscalatingL2", "Only an escalated case can be decided here.")
     _require(level in ("L2", "EDD"), "Unknown level.")
-    _require_reserved(case, actor)
+    if levels is not None:
+        _require(level in levels, f"{vocab.LEVEL_LABELS[level]} decisions need the {level} role.")
+    # Segregation before reservation: an analyst who touched the case at L1
+    # gets that refusal even when the router has since given the case to
+    # somebody else.
     segregation.assert_may_decide(case, actor, level)
+    _require_reserved(case, actor)
     comment = _require_text(comment, "A comment")
     _require(decision in vocab.L2_DECISIONS, "Pick a decision.")
     if level == "EDD":
@@ -341,21 +496,21 @@ def l2_decision(case, actor, level, decision, comment):
     if decision == "Escalate to EDD":
         case["pending_reason"] = "Pending EDD"
         case["case_review_level"] = "L3"
-        case["current_reviewer"] = ""
-        case["previous_reviewer"] = actor
         _decision(case, "Data Escalating L2", decision="Escalated to EDD", operated_at=now, by=actor, rejection_reason=comment)
+        _hand_back(case, actor, "Escalated to EDD")
         _audit(case, actor, "Escalated to EDD", comment)
+        routing.handoff(case, "L2", "EDD", exclude=(actor,))
         return
     status = "Verified" if decision == "Approve" else "Rejected"
     case["status"] = status
     case["pending_reason"] = ""
     case["closed_at"] = now
+    case["closed_by"] = actor
     _point(case, "Completed", now)
     _decision(case, "Data Escalating L2", decision="Approved" if status == "Verified" else "Rejected",
               operated_at=now, by=actor,
               approve_reason=comment if status == "Verified" else "", rejection_reason=comment if status == "Rejected" else "")
-    case["previous_reviewer"] = actor
-    case["current_reviewer"] = ""
+    _hand_back(case, actor, f"Closed — {status}")
     _audit(case, actor, f"{level} decision: {decision}", comment)
 
 
@@ -399,6 +554,36 @@ def set_pending(case, actor, reason):
     _audit(case, actor, "Pending reason set", f"{before or '-'} → {reason or '-'}")
 
 
+# ── QC (SOP 2.1) ─────────────────────────────────────────────────────────────
+
+def qc_review(case, actor, result, reason, comment):
+    """A QC reviewer samples a closed case: Pass or Fail with a reason. Fail
+    parks the feedback on the closing analyst's My Work page."""
+    _require(case["status"] in vocab.CLOSED_STATUSES, "QC samples closed cases only.")
+    _require(result in ("Pass", "Fail"), "Pick a QC result.")
+    _require(reason in vocab.QC_REASONS, "Pick a QC reason.")
+    comment = _require_text(comment, "A QC comment")
+    touched = {e for lst in (case.get("reviewers_by_level") or {}).values() for e in lst}
+    _require(actor not in touched and actor != case.get("closed_by"),
+             "You worked this case — another QC reviewer must sample it.")
+    now = dates.now_str()
+    case.update(qc_reviewer=actor, qc_result=result, qc_reason=reason, qc_at=now, qc_comment=comment, qc_ack=False)
+    if result == "Fail":
+        case["pending_reason"] = "Pending QC"
+    elif case.get("pending_reason") == "Pending QC":
+        case["pending_reason"] = ""
+    _audit(case, actor, f"QC review: {result}", f"{reason}. {comment}")
+
+
+def qc_ack(case, actor):
+    _require(case.get("qc_result") == "Fail" and not case.get("qc_ack"), "There is no QC feedback to acknowledge on this case.")
+    _require(actor == case.get("closed_by"), "Only the analyst who closed the case acknowledges its QC feedback.")
+    case["qc_ack"] = True
+    if case.get("pending_reason") == "Pending QC":
+        case["pending_reason"] = ""
+    _audit(case, actor, "QC feedback acknowledged", f"{case.get('qc_reason', '')}.")
+
+
 # ── small edits ──────────────────────────────────────────────────────────────
 
 def add_tag(case, actor, tag):
@@ -431,6 +616,7 @@ def change_status(case, actor, status, comment):
     case["status"] = status
     if status in vocab.CLOSED_STATUSES:
         case["closed_at"] = dates.now_str()
+        case["closed_by"] = actor
         _point(case, "Completed", case["closed_at"])
     _change(case, actor, "Status", before, status)
     _audit(case, actor, "Status changed", f"{before} → {status}. {comment}")
