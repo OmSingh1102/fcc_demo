@@ -128,7 +128,7 @@
                         <td>{{ r.user_name }}</td><td class="nowrap">{{ r.screen_time }}</td><td>{{ r.list }}</td>
                         <td>{{ hit_mark(r.result) }}</td>
                         <td>{% if r.alert_id %}<span class="cell-hex" title="{{ r.alert_id }}">{{ r.alert_id }}</span>
-                            <a class="btn btn-outline btn-xs" href="{{ url_for('ns_case', alert_case_id=r.alert_id) }}">Details</a>
+                            <a class="btn btn-outline btn-xs" href="{{ url_for('ns_case', alert_case_id=r.alert_id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a>
                             {% else %}<button type="button" class="btn btn-outline btn-xs" disabled>Details</button>{% endif %}</td>
                     </tr>
                     {% endfor %}
@@ -136,7 +136,7 @@
                 </table>
                 {% if case.skopenow %}
                 <div class="note info mt-12">Skopenow report: <b>{{ case.skopenow.status }}</b> — requested {{ case.skopenow.requested_at }} by {{ case.skopenow.requested_by }}.
-                    <a href="{{ url_for('kyc_skopenow', case_id=case.id) }}">Open</a></div>
+                    <a href="{{ url_for('kyc_skopenow', case_id=case.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open<span class="ext-ic">{{ icon('external-link') }}</span></a></div>
                 {% endif %}
             </div>
         </details>

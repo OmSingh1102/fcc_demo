@@ -12,7 +12,7 @@
         <div class="note {{ 'warn' if pending_alerts or not alert.case_outcome else 'ok' }} mb-12">
             Screening case: {{ alert.alerts|length }} alert(s), <b>{{ pending_alerts }} pending</b>
             {% if alert.case_outcome %} · outcome <b>{{ alert.case_outcome.value }}</b>{% else %} · <b>no case outcome yet</b>{% endif %}.
-            <a href="{{ url_for('ns_case', alert_case_id=alert.id) }}">Open screening case</a>
+            <a href="{{ url_for('ns_case', alert_case_id=alert.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open screening case<span class="ext-ic">{{ icon('external-link') }}</span></a>
         </div>
         {% else %}
         <div class="note ok mb-12">No screening hit on any list. Approve to complete the case.</div>
@@ -21,7 +21,7 @@
         <div class="note info mb-12">US person — an unresolved medium or high risk match may be checked with a Skopenow report before escalating (SOP 4.1.3, 4.2.1).</div>
         {% endif %}
         {% if case.skopenow %}
-        <div class="note info mb-12">Skopenow report: <b>{{ case.skopenow.status }}</b>. <a href="{{ url_for('kyc_skopenow', case_id=case.id) }}">Review it</a>.</div>
+        <div class="note info mb-12">Skopenow report: <b>{{ case.skopenow.status }}</b>. <a href="{{ url_for('kyc_skopenow', case_id=case.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Review it<span class="ext-ic">{{ icon('external-link') }}</span></a>.</div>
         {% endif %}
         {% if case.tenant == 'ttshop' %}
         <div class="note {{ 'ok' if case.risk_recalculated_at else 'warn' }} mb-12">TT Shop, Checker 1: approving sends the seller to Checker 2 for sign-off. Recalculate the risk rating first (SOP 4.2.2 §5.1.1) — {% if case.risk_recalculated_at %}recalculated {{ case.risk_recalculated_at }} ({{ case.risk_rating }}){% else %}<b>not recalculated yet</b>{% endif %}.</div>

@@ -167,6 +167,11 @@ button { font-family: inherit; }
 }
 .nav-ic.sm { width: 13px; height: 13px; vertical-align: -2px; }
 .nav-ic.lg { width: 20px; height: 20px; }
+/* Trailing cue on a link that opens a new tab: another system, a vendor
+   report or a file. Smaller than a line icon so it reads as a marker. */
+.ext-ic { display: inline-flex; align-items: center; margin-left: 4px; }
+.ext-ic .nav-ic { width: 11px; height: 11px; opacity: .75; }
+.btn .ext-ic { margin-left: 0; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    CONSOLE SHELL — top bar, product tabs, left rail, main.

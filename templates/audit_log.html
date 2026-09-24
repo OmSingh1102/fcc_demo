@@ -26,7 +26,7 @@
         <tr data-kind="{{ r.kind }}" data-actor="{{ r.actor_name }}" data-action="{{ r.action }}" data-text="{{ (r.label ~ ' ' ~ r.record_id ~ ' ' ~ r.detail ~ ' ' ~ r.actor_name)|lower }}">
             <td class="nowrap">{{ r.at }}</td>
             <td class="nowrap">{{ r.actor_name }}</td>
-            <td class="nowrap"><a href="{{ url_for(r.endpoint, **r.args) }}">{{ r.kind_label }}</a><br><span class="tiny muted mono">{{ r.record_id[:19] }}</span></td>
+            <td class="nowrap">{% set elsewhere = r.kind in ('alert', 'wc') %}<a href="{{ url_for(r.endpoint, **r.args) }}"{% if elsewhere %} target="_blank" rel="noopener" title="Opens in a new tab"{% endif %}>{{ r.kind_label }}{% if elsewhere %}<span class="ext-ic">{{ icon('external-link') }}</span>{% endif %}</a><br><span class="tiny muted mono">{{ r.record_id[:19] }}</span></td>
             <td class="strong nowrap">{{ r.label }}</td>
             <td class="nowrap">{{ r.action }}</td>
             <td><span class="ellipsis" title="{{ r.detail }}" style="max-width:520px">{{ r.detail }}</span></td>

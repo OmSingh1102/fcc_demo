@@ -25,10 +25,10 @@
             <td class="nowrap">{{ it.at }}</td>
             <td class="nowrap">{{ it.by|who }}</td>
             <td>
-                {% if it.kind == 'export' %}<a class="btn btn-outline btn-xs" href="{{ url_for('wc_export_pdf', wc_case_id=it.ref) }}" target="_blank" rel="noopener">Open PDF</a>
-                {% elif it.kind == 'skopenow' %}<a class="btn btn-outline btn-xs" href="{{ url_for('kyc_skopenow', case_id=case.id) }}">Open</a>
-                {% elif it.kind == 'document' %}<a class="btn btn-outline btn-xs" href="{{ url_for('document_svg', case_id=case.id, doc_id=it.ref) }}" target="_blank" rel="noopener">Open</a>
-                {% elif it.kind == 'audit' %}<a class="btn btn-outline btn-xs" href="{{ url_for('kyc_audit', case_id=case.id) }}">Open</a>
+                {% if it.kind == 'export' %}<a class="btn btn-outline btn-xs" href="{{ url_for('wc_export_pdf', wc_case_id=it.ref) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open PDF<span class="ext-ic">{{ icon('external-link') }}</span></a>
+                {% elif it.kind == 'skopenow' %}<a class="btn btn-outline btn-xs" href="{{ url_for('kyc_skopenow', case_id=case.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open<span class="ext-ic">{{ icon('external-link') }}</span></a>
+                {% elif it.kind == 'document' %}<a class="btn btn-outline btn-xs" href="{{ url_for('document_svg', case_id=case.id, doc_id=it.ref) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open<span class="ext-ic">{{ icon('external-link') }}</span></a>
+                {% elif it.kind == 'audit' %}<a class="btn btn-outline btn-xs" href="{{ url_for('kyc_audit', case_id=case.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open<span class="ext-ic">{{ icon('external-link') }}</span></a>
                 {% elif it.kind == 'summary' %}<span class="small muted">{{ it.ref }}</span>
                 {% else %}<span class="small muted">filename only — the demo stores no upload bytes</span>{% endif %}
             </td>

@@ -16,6 +16,11 @@ All people, companies, documents and screening records are fictional. The
 identity documents are drawn as SVGs from the seed data and carry a
 "SPECIMEN" watermark. Vendor names appear as text labels only.
 
+Links that cross into another system — the in-house CMS, the World-Check
+console, the Skopenow report, identity documents and PDFs — open in a new tab,
+marked with a small arrow-box icon, so the case the analyst started from stays
+where they left it. Moving around inside one system stays in the same tab.
+
 ## Run
 
 ```
@@ -35,12 +40,12 @@ Python 3.13 has no Flask.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-30 end-to-end tests on the Flask test client: the golden path, resubmit,
+End-to-end tests on the Flask test client: the golden path, resubmit,
 escalate, segregation of duties, L2/EDD decisions, Skopenow, TT Shop risk
 recalculation, routing by skill and capacity, case on-demand, immediate
 hand-offs, capacity overrides, trackers and CSV, the investigation-file ZIP,
 the global audit log, QC sampling, Checker 2, role enforcement at EDD, POA
-checks and fraud typology.
+checks, fraud typology, and links into other systems opening in a new tab.
 
 ## Analyst profiles
 

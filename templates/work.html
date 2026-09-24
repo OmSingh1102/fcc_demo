@@ -84,7 +84,7 @@
             <td>{{ outcome_badge(r.alert.status) }}</td>
             <td class="num">{{ r.pending }}</td>
             <td>{{ sla_chip(r.sla) }}</td>
-            <td><a class="btn btn-outline btn-xs" href="{{ url_for('ns_case', alert_case_id=r.alert.id) }}">Open</a></td>
+            <td><a class="btn btn-outline btn-xs" href="{{ url_for('ns_case', alert_case_id=r.alert.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
         </tr>
         {% else %}
         <tr><td colspan="7"><div class="no-data">{{ icon('search') }}No screening case in hand.</div></td></tr>
