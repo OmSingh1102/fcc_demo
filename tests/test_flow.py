@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from html.parser import HTMLParser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -29,6 +30,27 @@ AMARA, JON, MARIO, NISHA, RYAN, LEAH = ("amara.iyer@straive.com", "jon.miranda@s
 def flash_text(response):
     return " | ".join(re.findall(r'role="status"[^>]*>\s*<span[^>]*>[^<]*</span>\s*<span>([^<]+)</span>',
                                  response.data.decode("utf-8")))
+
+
+class _Anchors(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.found = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self.found.append(dict(attrs))
+
+
+def anchors(response):
+    """Every <a> on the page as an attribute dict."""
+    p = _Anchors()
+    p.feed(response.data.decode("utf-8"))
+    return p.found
+
+
+def new_tab(a):
+    return a.get("target") == "_blank" and "noopener" in (a.get("rel") or "")
 
 
 class FlowTestCase(unittest.TestCase):
@@ -231,6 +253,34 @@ class FlowTestCase(unittest.TestCase):
         poa = self.c.get(f"/documents/{self.K['sidorov']['id']}/d3.svg").data.decode("utf-8")
         self.assertIn("Cyprus", poa)
         self.assertIn(self.K["sidorov"]["documents"][2]["issued_on"][:4], poa)
+
+    def test_world_check_links_open_new_tab(self):
+        """Only links into the World-Check console open a new tab; the CMS,
+        case and other links keep opening in the same tab."""
+        def hrefs(page, *parts):
+            return [a for a in page if any(x in (a.get("href") or "") for x in parts)]
+
+        t = self.K["taylor"]
+        aid = t["screening"]["alert_case_id"]
+        self.login("amara.iyer")
+        cms = anchors(self.c.get(f"/name_screening/case/{aid}"))
+        to_wc = hrefs(cms, "/wc/")
+        self.assertGreaterEqual(len(to_wc), 2)          # the console link and the per-match button
+        self.assertTrue(all(new_tab(a) for a in to_wc), [a["href"] for a in to_wc if not new_tab(a)])
+        popup = [a for a in cms if a.get("id") == "ao-wc-link"]   # its address is set by the page script
+        self.assertTrue(popup and new_tab(popup[0]))
+        others = [a.get("href") for a in cms if new_tab(a) and "/wc/" not in (a.get("href") or "") and a.get("id") != "ao-wc-link"]
+        self.assertEqual(others, [])
+        self.assertFalse(any(new_tab(a) for a in hrefs(cms, "/kyc/detail/")))
+
+        case_links = hrefs(anchors(self.c.get(f"/kyc/detail/{t['id']}")), "/name_screening/case/")
+        self.assertTrue(case_links and not any(new_tab(a) for a in case_links))
+
+        audit = anchors(self.c.get("/audit"))
+        self.assertTrue(hrefs(audit, "/wc/") and all(new_tab(a) for a in hrefs(audit, "/wc/")))
+        self.assertFalse(any(new_tab(a) for a in hrefs(audit, "/name_screening/case/", "/kyc/detail/")))
+
+        self.assertEqual([a.get("href") for a in anchors(self.c.get(f"/wc/{aid}")) if new_tab(a)], [])
 
     def test_wc_pagination_and_facets(self):
         self.login("amara.iyer")

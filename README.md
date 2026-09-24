@@ -16,6 +16,11 @@ All people, companies, documents and screening records are fictional. The
 identity documents are drawn as SVGs from the seed data and carry a
 "SPECIMEN" watermark. Vendor names appear as text labels only.
 
+Links that open the World-Check console, from the in-house CMS case, its
+Alert Outcome dialog and the Audit Log, open it in a new tab marked with a
+small arrow-box icon, so the screening case stays where the analyst left it.
+Every other link stays in the same tab.
+
 ## Run
 
 ```
@@ -35,12 +40,12 @@ Python 3.13 has no Flask.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-30 end-to-end tests on the Flask test client: the golden path, resubmit,
+31 end-to-end tests on the Flask test client: the golden path, resubmit,
 escalate, segregation of duties, L2/EDD decisions, Skopenow, TT Shop risk
 recalculation, routing by skill and capacity, case on-demand, immediate
 hand-offs, capacity overrides, trackers and CSV, the investigation-file ZIP,
 the global audit log, QC sampling, Checker 2, role enforcement at EDD, POA
-checks and fraud typology.
+checks, fraud typology, and World-Check links opening in a new tab.
 
 ## Analyst profiles
 
