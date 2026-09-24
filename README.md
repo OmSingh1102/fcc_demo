@@ -89,6 +89,11 @@ The header's analyst switcher jumps between profiles without signing out.
    quality scorecard. *Audit Log*: one stream across every record.
 9. **Reset demo** in the header brings the seeded case book back.
 
+Any section header folds with the small arrow on its right, on the case page,
+the in-house CMS and every hub page. A folded section stays folded on that
+page through reloads and live refreshes, and Reset demo unfolds everything.
+The simulated World-Check console is left as the vendor ships it.
+
 ## Layout
 
 | Path | What lives there |

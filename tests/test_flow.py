@@ -576,5 +576,20 @@ class FlowTestCase(unittest.TestCase):
         self.assertIn("Forged or altered document", page)
 
 
+    def test_foldable_sections_wired(self):
+        """The fold script is on the case manager, CMS and hub pages, and not on
+        the simulated World-Check console, which copies a vendor product."""
+        self.login("amara.iyer")
+        p = self.K["petrova"]
+        aid = p["screening"]["alert_case_id"]
+        for path in (f"/kyc/detail/{p['id']}", f"/name_screening/case/{aid}", "/analytics", "/work"):
+            body = self.c.get(path).get_data(as_text=True)
+            self.assertIn('id="fold-caret"', body, path)
+            self.assertIn("fcc-folded:", body, path)
+        wc = self.c.get(f"/wc/{aid}").get_data(as_text=True)
+        self.assertNotIn('id="fold-caret"', wc)
+        self.assertNotIn("fcc-folded:", wc)
+
+
 if __name__ == "__main__":
     unittest.main()

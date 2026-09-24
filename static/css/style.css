@@ -297,6 +297,25 @@ button { font-family: inherit; }
 .section-body { padding: 12px 14px; }
 .section-body.flush { padding: 0; }
 
+/* ─── Foldable section headers (client feedback): an arrow at the top right
+   of every titled card head, see templates/_collapsible.html. The chevron
+   follows the <details> caret above: it points up while the section is open.
+   Absolute so a head that wraps onto two lines keeps its own layout. ─── */
+.card-head.has-fold { position: relative; padding-right: 48px; cursor: pointer; }
+.fold-btn {
+    position: absolute; top: 8px; right: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--radius-sm);
+    background: transparent; color: var(--muted-foreground); cursor: pointer;
+}
+.card-head.has-fold:hover .fold-btn, .fold-btn:hover { background: var(--muted); color: var(--foreground); }
+.fold-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.fold-btn .nav-ic { transition: transform .18s; transform: rotate(180deg); }
+.card.is-folded .fold-btn .nav-ic { transform: none; }
+.card.is-folded > :not(.card-head) { display: none; }
+.card.is-folded > .card-head { padding-bottom: 12px; }
+.card.is-folded { align-self: flex-start; }   /* analytics rows stretch their cards */
+
 /* ─── Description grid — label / value pairs, 3 or 4 across ─── */
 .desc { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
 .desc.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }

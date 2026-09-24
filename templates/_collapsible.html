@@ -1,0 +1,93 @@
+{# Foldable section headers (client feedback, 2026-09-24).
+
+   Every .card with a titled .card-head gets a small arrow at its top right;
+   the native <details class="section"> panels on the case page and the CMS
+   case already fold. Whatever the analyst folds stays folded on that page
+   through reloads and live refreshes (localStorage, one key per path, so a
+   fold on one case does not hide the section on the next); Reset demo
+   unfolds everything. Nothing is ever forced open, so a section the server
+   renders closed stays closed.
+
+   Included by base.html BEFORE _live_refresh.html, so the folds are in place
+   before live refresh restores the scroll position. The simulated
+   World-Check console (wc_base.html) does not include it: it copies a vendor
+   product, so it stays as the vendor ships it. #}
+<template id="fold-caret">{{ icon('chevron-down') }}</template>
+<script>
+(function () {
+    var PREFIX = 'fcc-folded:';
+    var KEY = PREFIX + location.pathname;
+    var folded = [];
+    try { folded = JSON.parse(localStorage.getItem(KEY) || '[]') || []; } catch (e) { folded = []; }
+
+    function remember(key, isFolded) {
+        folded = folded.filter(function (k) { return k !== key; });
+        if (isFolded) { folded.push(key); }
+        try {
+            if (folded.length) { localStorage.setItem(KEY, JSON.stringify(folded)); }
+            else { localStorage.removeItem(KEY); }
+        } catch (e) { /* storage blocked: the arrows still work, they just do not stick */ }
+    }
+
+    // One stable key per section: the title without counts or punctuation,
+    // so "List Screening (212 matches found)" survives a new match; a title
+    // that repeats on the page gets #2, #3 in page order.
+    var seen = {};
+    function keyFor(text) {
+        var k = (text || '').toLowerCase().replace(/[^a-z]+/g, ' ').trim() || 'section';
+        seen[k] = (seen[k] || 0) + 1;
+        return seen[k] > 1 ? k + ' #' + seen[k] : k;
+    }
+
+    var caret = document.getElementById('fold-caret');
+    document.querySelectorAll('.card').forEach(function (card) {
+        var head = card.querySelector(':scope > .card-head');
+        var title = head && head.querySelector('.card-title');
+        if (!title) { return; }
+        var name = title.textContent.replace(/\s+/g, ' ').trim();
+        var key = keyFor(name);
+        var btn = document.createElement('button');
+        btn.type = 'button';                    // some heads sit inside a form
+        btn.className = 'fold-btn';
+        btn.appendChild(caret.content.cloneNode(true));
+        head.appendChild(btn);
+        head.classList.add('has-fold');
+
+        function show(isFolded) {
+            card.classList.toggle('is-folded', isFolded);
+            btn.setAttribute('aria-expanded', isFolded ? 'false' : 'true');
+            btn.setAttribute('aria-label', (isFolded ? 'Expand ' : 'Collapse ') + name);
+            btn.title = isFolded ? 'Show this section' : 'Hide this section';
+        }
+        show(folded.indexOf(key) >= 0);
+
+        head.addEventListener('click', function (e) {
+            // Links, buttons and fields inside the head keep their own job.
+            var hit = e.target.closest('a, button, input, select, textarea, label');
+            if (hit && hit !== btn) { return; }
+            var now = !card.classList.contains('is-folded');
+            show(now);
+            remember(key, now);
+        });
+    });
+
+    document.querySelectorAll('details.section').forEach(function (d) {
+        var summary = d.querySelector(':scope > summary');
+        var key = keyFor(summary ? summary.textContent : '');
+        if (folded.indexOf(key) >= 0) { d.open = false; }
+        d.addEventListener('toggle', function () { remember(key, !d.open); });
+    });
+
+    // Reset demo unfolds everything, unless its confirm dialog was cancelled.
+    document.querySelectorAll('form[action$="/reset"]').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            if (e.defaultPrevented) { return; }
+            try {
+                Object.keys(localStorage).forEach(function (k) {
+                    if (k.indexOf(PREFIX) === 0) { localStorage.removeItem(k); }
+                });
+            } catch (err) { /* nothing stored */ }
+        });
+    });
+})();
+</script>
