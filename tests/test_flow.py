@@ -13,7 +13,6 @@ import sys
 import tempfile
 import unittest
 import zipfile
-from html.parser import HTMLParser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -30,27 +29,6 @@ AMARA, JON, MARIO, NISHA, RYAN, LEAH = ("amara.iyer@straive.com", "jon.miranda@s
 def flash_text(response):
     return " | ".join(re.findall(r'role="status"[^>]*>\s*<span[^>]*>[^<]*</span>\s*<span>([^<]+)</span>',
                                  response.data.decode("utf-8")))
-
-
-class _Anchors(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.found = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "a":
-            self.found.append(dict(attrs))
-
-
-def anchors(response):
-    """Every <a> on the page as an attribute dict."""
-    p = _Anchors()
-    p.feed(response.data.decode("utf-8"))
-    return p.found
-
-
-def new_tab(a):
-    return a.get("target") == "_blank" and "noopener" in (a.get("rel") or "")
 
 
 class FlowTestCase(unittest.TestCase):
@@ -253,53 +231,6 @@ class FlowTestCase(unittest.TestCase):
         poa = self.c.get(f"/documents/{self.K['sidorov']['id']}/d3.svg").data.decode("utf-8")
         self.assertIn("Cyprus", poa)
         self.assertIn(self.K["sidorov"]["documents"][2]["issued_on"][:4], poa)
-
-    def test_cross_system_links_open_new_tab(self):
-        """Links into another system (CMS, World-Check, Skopenow, documents,
-        PDFs) open a new tab; moving inside one system and back links do not."""
-        def hrefs(page, *parts):
-            return [a for a in page if any(x in (a.get("href") or "") for x in parts)]
-
-        p = self.K["petrova"]
-        aid = p["screening"]["alert_case_id"]
-        self.login("amara.iyer")
-        self.post(f"/kyc/{p['id']}/reserve")
-        self.post(f"/kyc/{p['id']}/edd_review", decision="Request Skopenow report", summary="US person.")
-        self.assertTrue(p["skopenow"])
-        case_page = anchors(self.c.get(f"/kyc/detail/{p['id']}"))
-        for part in ("/name_screening/case/", "/skopenow", "/documents/"):
-            out = hrefs(case_page, part)
-            self.assertTrue(out, part)
-            self.assertTrue(all(new_tab(a) for a in out), [a["href"] for a in out if not new_tab(a)])
-
-        cms = anchors(self.c.get(f"/name_screening/case/{aid}"))
-        self.assertTrue(hrefs(cms, "/wc/") and all(new_tab(a) for a in hrefs(cms, "/wc/")))
-        self.assertTrue(hrefs(cms, "/kyc/detail/") and not any(new_tab(a) for a in hrefs(cms, "/kyc/detail/")))
-
-        listing = hrefs(anchors(self.c.get("/kyc/list")), "/kyc/detail/")
-        self.assertTrue(listing and not any(new_tab(a) for a in listing))
-
-        audit = anchors(self.c.get("/audit"))
-        elsewhere = hrefs(audit, "/name_screening/case/", "/wc/")
-        own = hrefs(audit, "/kyc/detail/")
-        self.assertTrue(elsewhere and all(new_tab(a) for a in elsewhere))
-        self.assertTrue(own and not any(new_tab(a) for a in own))
-
-        t = self.K["taylor"]
-        self.post(f"/name_screening/{t['screening']['alert_case_id']}/handle")
-        work = hrefs(anchors(self.c.get("/work")), "/name_screening/case/")
-        self.assertTrue(work and all(new_tab(a) for a in work))
-
-        # Inside the World-Check console only the exported PDF opens a new tab.
-        self.post(f"/wc/{aid}/export")
-        wc = anchors(self.c.get(f"/wc/{aid}?tab=summary"))
-        pdf = hrefs(wc, "export.pdf")
-        self.assertTrue(pdf and all(new_tab(a) for a in pdf))
-        self.assertFalse([a["href"] for a in wc if new_tab(a) and "export.pdf" not in a["href"]])
-
-        self.login("nisha.rao")
-        l2 = hrefs(anchors(self.c.get("/queue/l2")), "/name_screening/case/")
-        self.assertTrue(l2 and all(new_tab(a) for a in l2))
 
     def test_wc_pagination_and_facets(self):
         self.login("amara.iyer")

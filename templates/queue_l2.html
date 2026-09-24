@@ -27,7 +27,7 @@
             <td>{{ sla_chip(r.sla) }}</td>
             <td class="nowrap">{{ c.previous_reviewer or '-' }}</td>
             <td class="nowrap">{% if r.mine %}<b>you</b>{% else %}{{ c.current_reviewer|who if c.current_reviewer else '-' }}{% endif %}{% if r.routed %} <span class="tiny muted" title="{{ c.routing.reason }}">auto-routed</span>{% endif %}</td>
-            <td>{% if c.screening.hit %}<a href="{{ url_for('ns_case', alert_case_id=c.screening.alert_case_id) }}" target="_blank" rel="noopener" title="Opens in a new tab">screening case<span class="ext-ic">{{ icon('external-link') }}</span></a>{% else %}-{% endif %}</td>
+            <td>{% if c.screening.hit %}<a href="{{ url_for('ns_case', alert_case_id=c.screening.alert_case_id) }}">screening case</a>{% else %}-{% endif %}</td>
             <td><a class="btn btn-primary btn-xs" href="{{ url_for('kyc_detail', case_id=c.id) }}">Open</a></td>
         </tr>
         {% else %}

@@ -127,7 +127,7 @@
             {% endfor %}
         </div>
         <h4>Exports</h4>
-        {% for e in wc.exports %}<div class="small">{{ icon('paperclip') }} <a href="{{ url_for('wc_export_pdf', wc_case_id=wc.id, ref=e.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ e.filename }}<span class="ext-ic">{{ icon('external-link') }}</span></a> · {{ e.at }} · {{ e.by }}</div>
+        {% for e in wc.exports %}<div class="small">{{ icon('paperclip') }} <a href="{{ url_for('wc_export_pdf', wc_case_id=wc.id, ref=e.id) }}">{{ e.filename }}</a> · {{ e.at }} · {{ e.by }}</div>
         {% else %}<div class="small muted">No export yet. Use EXPORT after resolving the matches.</div>{% endfor %}
     </section>
     {% elif tab == 'audit' %}
