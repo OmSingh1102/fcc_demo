@@ -113,9 +113,10 @@ class FlowTestCase(unittest.TestCase):
         self.post(f"/name_screening/{aid}/handle")
         self.assertEqual(alert["status"], "Handling")
         unresolved = next(x for x in wc["matches"] if x["resolution"]["status"] == "Unresolved")
-        r = self.post(f"/wc/{aid}/match/{unresolved['id']}/resolve", status="False positive", risk="Low",
+        r = self.post(f"/wc/{aid}/match/{unresolved['id']}/resolve", status="False positive",
                       reason="Location mismatch", comment="Different person: a West Midlands record; the client is a US resident with no UK footprint.")
         self.assertEqual(unresolved["resolution"]["by"], AMARA, flash_text(r))
+        self.assertEqual(unresolved["resolution"]["risk"], "Low")             # follows the status
         self.post(f"/wc/{aid}/export")
         self.assertEqual(len(wc["exports"]), 1)
         pdf = self.c.get(f"/wc/{aid}/export.pdf")
@@ -124,8 +125,9 @@ class FlowTestCase(unittest.TestCase):
 
         pending = next(a for a in alert["alerts"] if a["outcome"] == "Pending")
         r = self.post(f"/name_screening/{aid}/alert_outcome", alert_id=pending["id"], review_mode="Manual Review",
-                      result_label="False Positive", rationale="Different Person - Public Records", comment="Not the same person.", risk_level="Low")
+                      result_label="False Positive", rationale="Different Person - Public Records", comment="Not the same person.")
         self.assertEqual(pending["outcome"], "False Positive", flash_text(r))
+        self.assertEqual(pending["risk_level"], "Low")                         # follows the label
         page = self.c.get(f"/name_screening/case/{aid}").data
         self.assertIn("Approve - False Positive · Recommended".encode("utf-8"), page)
         r = self.post(f"/name_screening/{aid}/case_outcome", outcome="Approve - False Positive", comment="All FP.")
@@ -164,7 +166,7 @@ class FlowTestCase(unittest.TestCase):
         self.post(f"/name_screening/{aid}/handle")
         wc = fcc.WC_BY_ID[aid]
         mid = wc["matches"][0]["id"]
-        self.post(f"/wc/{aid}/match/{mid}/resolve", status="True positive", risk="High", reason="Confirmed by identification", comment="")
+        self.post(f"/wc/{aid}/match/{mid}/resolve", status="True positive", reason="Confirmed by identification", comment="")
         self.assertEqual(wc["matches"][0]["resolution"]["status"], "Unresolved")
 
     def test_confirm_flags_required(self):
@@ -463,6 +465,40 @@ class FlowTestCase(unittest.TestCase):
         analytics = self.c.get("/analytics").data.decode("utf-8")
         self.assertIn("AI screening rules fired", analytics)
         self.assertIn("Auto-verified vs human-in-the-loop", analytics)
+
+    def test_risk_follows_outcome(self):
+        """The risk level is never picked: it follows the outcome in the
+        watchlist console and on the screening case, and the seed agrees."""
+        self.login("amara.iyer")
+        sd = self.K["sidorov"]
+        aid = sd["screening"]["alert_case_id"]
+        alert, wc = fcc.ALERT_BY_ID[aid], fcc.WC_BY_ID[aid]
+        mid = wc["matches"][0]["id"]
+        self.post(f"/name_screening/{aid}/handle")
+        for status, expected in (("True positive", "High"), ("Potential match", "Medium"), ("False positive", "Low")):
+            r = self.post(f"/wc/{aid}/match/{mid}/resolve", status=status, reason="Confirmed by identification", comment="Checked.")
+            self.assertEqual(wc["matches"][0]["resolution"]["risk"], expected, flash_text(r))
+        r = self.post(f"/wc/{aid}/match/{mid}/resolve", status="Unspecified", comment="Parked.")
+        self.assertEqual(wc["matches"][0]["resolution"]["risk"], "", flash_text(r))
+        row = alert["alerts"][0]
+        for label, expected in (("True Positive", "High"), ("Potential Match", "Medium"), ("False Positive", "Low")):
+            r = self.post(f"/name_screening/{aid}/alert_outcome", alert_id=row["id"], review_mode="Manual Review",
+                          result_label=label, rationale="Confirmed Identity", comment="Checked.", risk_level="Low")
+            self.assertEqual(row["risk_level"], expected, flash_text(r))         # a posted risk is ignored
+        self.assertIn("High risk", next(e["detail"] for e in alert["audit"] if e["action"] == "Alert outcome: True Positive"))
+        # Every resolution in the seed, by an analyst or by the rules, follows the same map.
+        for w in fcc.WC_CASES:
+            for m in w["matches"]:
+                res = m["resolution"]
+                if res["status"] != "Unresolved":
+                    self.assertEqual(res["risk"], fcc.vocab.RISK_FOR_OUTCOME[res["status"]], (w["key"], m["name"]))
+        for a in fcc.ALERT_CASES:
+            for x in a["alerts"]:
+                if x["outcome"] != "Pending":
+                    self.assertEqual(x["risk_level"], fcc.vocab.RISK_FOR_LABEL[x["outcome"]], (a["key"], x["name"]))
+        page = self.c.get(f"/wc/{aid}/match/{mid}").data.decode("utf-8")
+        self.assertIn("set from the status", page)
+        self.assertNotIn('name="risk"', page)
 
     def test_wc_pagination_and_facets(self):
         self.login("amara.iyer")

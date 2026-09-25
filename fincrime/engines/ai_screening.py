@@ -292,12 +292,13 @@ def apply(kyc, alert, wc, *, at, run="intake", enabled=None, guards=None):
                 continue
             rule = RULE_BY_KEY[key]
             comment = f"Auto-resolved by AI screening rule: {rule['label']} ({detail})."
-            m["resolution"] = {"status": "False positive", "risk": "Low", "reason": rule["wc_reason"],
-                               "remark": rule["wc_reason"], "comment": comment, "by": SYSTEM_USER, "at": at}
+            m["resolution"] = {"status": "False positive", "risk": vocab.RISK_FOR_OUTCOME["False positive"],
+                               "reason": rule["wc_reason"], "remark": rule["wc_reason"], "comment": comment,
+                               "by": SYSTEM_USER, "at": at}
             row = by_match.get(m["id"])
             if row is not None:
                 row.update(outcome="False Positive", review_mode="Smart Review", result_label="False Positive",
-                           rationale=rule["rationale"], comment=comment, risk_level="Low",
+                           rationale=rule["rationale"], comment=comment, risk_level=vocab.RISK_FOR_LABEL["False Positive"],
                            resolved_by=SYSTEM_USER, resolved_at=at, smart_strategy=rule["label"])
             fired[rule["label"]] += 1
         if fired:

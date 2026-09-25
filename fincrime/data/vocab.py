@@ -136,6 +136,10 @@ SCREENING_PLATFORMS = ["In-house CMS", "Internal_blacklist"]
 # ── World-Check (simulated) ──────────────────────────────────────────────────
 WC_STATUSES = ["True positive", "Potential match", "False positive", "Unspecified"]
 WC_RISKS = ["High", "Medium", "Low"]
+# The risk level is not a choice: it follows the outcome, in the watchlist
+# console (by status) and on the screening case (by result label) alike.
+RISK_FOR_OUTCOME = {"False positive": "Low", "Potential match": "Medium", "True positive": "High", "Unspecified": ""}
+RISK_FOR_LABEL = {"False Positive": "Low", "Potential Match": "Medium", "True Positive": "High"}
 WC_REASONS = [
     "Date of Birth mismatch", "Nationality mismatch", "Gender mismatch", "Name mismatch", "Age mismatch",
     "Identification mismatch", "Location mismatch", "Confirmed by identification", "Confirmed by adverse media",

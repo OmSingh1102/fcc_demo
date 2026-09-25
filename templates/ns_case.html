@@ -213,7 +213,8 @@
         document.getElementById('ao-alert-id').value = picked.value;
         document.getElementById('ao-alert-label').textContent = picked.value;
         var sel = function (id, val) { var el = document.getElementById(id); if (el && val) { el.value = val; } };
-        sel('ao-label', picked.dataset.label); sel('ao-rationale', picked.dataset.rationale); sel('ao-risk', picked.dataset.risk);
+        sel('ao-label', picked.dataset.label); sel('ao-rationale', picked.dataset.rationale);
+        if (window.aoPaintRisk) { aoPaintRisk(); }
         var link = document.getElementById('ao-wc-link'); if (link) { link.href = link.dataset.base + picked.dataset.match; }
         openModal('alert-outcome');
     };

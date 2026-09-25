@@ -77,7 +77,9 @@
                     <input type="hidden" name="status_filter" value="{{ status }}"><input type="hidden" name="type_filter" value="{{ mtype }}">
                     <div class="opts">
                         <div><h5>Status</h5>{% for s in vocab.WC_STATUSES %}<label><input type="radio" name="status" value="{{ s }}" {% if r.status == s %}checked{% endif %} required>{{ s }}</label>{% endfor %}</div>
-                        <div><h5>Risk level</h5>{% for s in vocab.WC_RISKS %}<label><input type="radio" name="risk" value="{{ s }}" {% if r.risk == s %}checked{% endif %}>{{ s }}</label>{% endfor %}</div>
+                        <div><h5>Risk level</h5>
+                            <div class="small" style="line-height:1.8">{% for s, level in vocab.RISK_FOR_OUTCOME.items() if level %}<span class="muted">{{ s }}</span> → <b>{{ level }}</b><br>{% endfor %}</div>
+                            <div class="tiny muted mt-8">set from the status, not chosen</div></div>
                         <div><h5>Reason</h5>
                             <select class="input input-sm" name="reason"><option value="">Select a Reason</option>{% for s in vocab.WC_REASONS %}<option {% if r.reason == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
                             <textarea class="textarea mt-8" name="comment" rows="3" placeholder="Review comment (required)" required>{{ r.comment if r.by != vocab.SYSTEM_USER else '' }}</textarea>

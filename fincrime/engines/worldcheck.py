@@ -21,14 +21,16 @@ def find_match(wc, match_id):
     return next((m for m in wc["matches"] if m["id"] == match_id), None)
 
 
-def resolve_match(wc, actor, match_id, status, risk, reason, comment):
+def resolve_match(wc, actor, match_id, status, reason, comment):
+    """The risk level is set from the status (vocab.RISK_FOR_OUTCOME), never
+    picked: a true positive is always High, a false positive always Low."""
     m = find_match(wc, match_id)
     _require(m is not None, "Unknown match.")
     _require(status in vocab.WC_STATUSES, "Pick a status.")
-    _require(risk in vocab.WC_RISKS or status == "Unspecified", "Pick a risk level.")
     _require(reason in vocab.WC_REASONS or status == "Unspecified", "Select a reason.")
     comment = (comment or "").strip()
     _require(comment, "A review comment is required.")
+    risk = vocab.RISK_FOR_OUTCOME[status]
     m["resolution"] = {"status": status, "risk": risk, "reason": reason, "remark": reason, "comment": comment,
                        "by": actor, "at": dates.now_str()}
     wc["last_updated"] = dates.now_str()
