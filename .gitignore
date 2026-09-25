@@ -29,8 +29,3 @@ server.log
 .idea/
 Thumbs.db
 .DS_Store
-
-# Public-link helper (public_link.ps1): the tunnel binary, its logs and the public copy's state
-cloudflared.exe
-public_*.log
-public_state.db*
