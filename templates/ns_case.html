@@ -15,6 +15,11 @@
         {% else %}
         <span class="badge slate">Closed</span>
         {% endif %}
+        {% if alert.case_outcome and alert.case_outcome.by == vocab.SYSTEM_USER %}
+        <span class="badge violet" title="{{ alert.case_outcome.comment }}">{{ icon('check-circle') }} Auto-resolved by the AI screening rules</span>
+        {% elif counts.Pending %}
+        <span class="badge amber" title="alerts the AI screening rules left for an analyst">{{ counts.Pending }} for review</span>
+        {% endif %}
         <a class="small" href="{{ url_for('kyc_detail', case_id=alert.kyc_case_id) }}">{{ icon('arrow-left') }} KYC case</a>
     </div>
     <a class="btn btn-ghost btn-sm btn-icon" title="Export (not part of this demo)">{{ icon('download') }}</a>
@@ -87,7 +92,7 @@
             <div class="f" style="grid-template-columns:1fr"><select class="input" id="af-auto"><option value="">Search by Auto Solved</option><option value="Smart Review">Auto solved</option><option value="Manual Review">Manual</option></select></div>
             <div class="f" style="grid-template-columns:1fr"><input class="input" id="af-wl" placeholder="Search by Watch List ID"></div>
             <div class="f" style="grid-template-columns:1fr"><select class="input" id="af-type"><option value="">Search by Type</option>{% for t in types %}<option>{{ t }}</option>{% endfor %}</select></div>
-            <div class="f" style="grid-template-columns:1fr"><select class="input" id="af-smart"><option value="">Search by Smart Strategy</option><option>DOB mismatch</option></select></div>
+            <div class="f" style="grid-template-columns:1fr"><select class="input" id="af-smart"><option value="">Search by Smart Strategy</option>{% for s in strategies %}<option>{{ s }}</option>{% endfor %}</select></div>
         </div>
         <button type="button" class="btn btn-primary btn-sm mb-8" onclick="afApply()">Search</button>
         <div class="row mb-8">

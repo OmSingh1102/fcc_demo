@@ -33,6 +33,11 @@
 {%- if chip %}<span class="sla {{ chip.tone }}" title="{{ chip.title }}">{{ chip.text }}</span>{% endif -%}
 {%- endmacro %}
 
+{% macro workflow_badge(workflow, title='') -%}
+{%- if workflow == 'auto-verified' %}<span class="badge emerald" title="{{ title or 'Every screening alert was cleared by the AI screening rules, or there was no match' }}">{{ icon('shield-check') }} Auto-verified</span>
+{%- elif workflow == 'human-in-the-loop' %}<span class="badge blue" title="{{ title or 'An analyst has to clear at least one screening alert' }}">{{ icon('user-check') }} Human-in-the-loop</span>{% endif -%}
+{%- endmacro %}
+
 {% macro hit_mark(result) -%}
 {%- if result == 'Hit' %}<span class="hit">Hit</span>{% else %}<span class="nohit">{{ result }}</span>{% endif -%}
 {%- endmacro %}

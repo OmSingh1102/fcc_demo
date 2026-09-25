@@ -119,6 +119,7 @@
             <summary>Screening Result <span class="caret">{{ icon('chevron-down') }}</span></summary>
             <div class="section-body">
                 <div class="small mb-8">Screening Alert Hit: {{ hit_mark('Hit' if case.screening.hit else 'No Match') }}</div>
+                <div class="small mb-8 muted">AI screening rules: {{ ai_summary(case) }} <a href="{{ url_for('ai_screening_page') }}">The rules</a></div>
                 <table class="tbl dense">
                     <thead><tr><th>Platform Name</th><th>User Name</th><th>Screen time</th><th>Name screening list</th><th>Screening result</th><th>Alert ID</th></tr></thead>
                     <tbody>

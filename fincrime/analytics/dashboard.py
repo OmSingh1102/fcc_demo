@@ -51,8 +51,14 @@ class AnalyticsConsole:
         tenant_ids = {c["id"] for c in cases}
         alerts = [a for ac in alert_cases if ac["kyc_case_id"] in tenant_ids for a in ac["alerts"]]
         outcome_counts = [(o, sum(1 for a in alerts if a["outcome"] == o)) for o in vocab.ALERT_OUTCOMES]
-        auto = sum(1 for a in alerts if a["review_mode"] == "Smart Review")
-        manual = sum(1 for a in alerts if a["outcome"] != "Pending" and a["review_mode"] != "Smart Review")
+        auto = sum(1 for a in alerts if a.get("resolved_by") == vocab.SYSTEM_USER)
+        manual = sum(1 for a in alerts if a["outcome"] != "Pending" and a.get("resolved_by") != vocab.SYSTEM_USER)
+        # The two workflows (auto-verified vs human-in-the-loop) and what the rules fired on.
+        hit = [c for c in cases if c["screening"]["hit"]]
+        auto_hit = [c for c in hit if c["screening"].get("workflow") == "auto-verified"]
+        human = [c for c in hit if c["screening"].get("workflow") == "human-in-the-loop"]
+        no_hit = len(cases) - len(hit)
+        rules_fired = Counter(a.get("smart_strategy") or "rule" for a in alerts if a.get("resolved_by") == vocab.SYSTEM_USER).most_common()
         rationale_counts = Counter(a["rationale"] for a in alerts if a["rationale"]).most_common(6)
 
         reasons = Counter(r for c in open_cases for r in c["manual_review_reason"]).most_common(6)
@@ -101,7 +107,11 @@ class AnalyticsConsole:
                 ("Escalated", len(escalations), "waiting at L2 / EDD", ""),
                 ("Waiting on user", len(waiting), "resubmission requested", ""),
                 ("Closed", len(closed), f"avg turnaround {tat_avg} h", "success"),
+                ("Auto-verified", len(auto_hit), f"of {len(hit)} cases with a hit; {no_hit} more had no match", "success"),
             ],
+            "workflow_split": [("Auto-verified (hit)", len(auto_hit)),
+                               ("Human-in-the-loop", len(human)), ("No match", no_hit)],
+            "rules_fired": rules_fired,
             "status_counts": status_counts,
             "throughput": throughput,
             "outcome_counts": outcome_counts,

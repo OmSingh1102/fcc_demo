@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-head">
     <div><h2>Audit log — {{ tenants[tenant].label }}</h2>
-        <p>Every action on every KYC, screening and World-Check record, in one stream (SOP 5.2.4: audit logs within a single platform). Nothing here is written on an analyst's behalf; the router signs its own rows.</p></div>
+        <p>Every action on every KYC, screening and World-Check record, in one stream (SOP 5.2.4: audit logs within a single platform). Nothing here is written on an analyst's behalf; the router and the AI screening rules sign their own rows.</p></div>
     <a class="btn btn-outline btn-sm" href="{{ url_for('audit_log', format='csv') }}">{{ icon('download') }} Download CSV</a>
 </div>
 

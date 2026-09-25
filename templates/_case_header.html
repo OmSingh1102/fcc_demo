@@ -1,7 +1,7 @@
 {# The case header: id + tags + status on the first line, the client block
    with the ownership buttons under it. Included (not imported) so it sees the
    page context: case, levels, is_mine, closed, sla, analysts. #}
-{% from "_badges.html" import status_badge, tag_chip, sla_chip %}
+{% from "_badges.html" import status_badge, tag_chip, sla_chip, workflow_badge %}
 {% from "_modals.html" import modal_open, modal_close, confirm_dialog %}
 
 <div class="row between mb-12">
@@ -24,6 +24,7 @@
         {% if case.pending_reason %}<span class="badge amber">{{ case.pending_reason }}</span>{% endif %}
         {% if case.routing and case.routing.status == 'routed' and case.current_reviewer %}<span class="badge blue" title="{{ case.routing.reason }} · {{ vocab.ROUTING_TRIGGERS.get(case.routing.trigger, case.routing.trigger) }} · {{ case.routing.at }}">{{ icon('sliders') }} Auto-routed</span>
         {% elif case.routing and case.routing.status == 'queued' and not case.current_reviewer %}<span class="badge amber" title="{{ case.routing.reason }}">Waiting for capacity</span>{% endif %}
+        {% if case.screening.get('workflow') %}{{ workflow_badge(case.screening.workflow, ai_summary(case)) }}{% endif %}
     </div>
     <a href="{{ url_for('kyc_audit', case_id=case.id) }}" class="btn btn-link btn-sm">Audit History</a>
 </div>

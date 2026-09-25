@@ -32,6 +32,7 @@ class CaseListConsole:
                 "gifter": next((t for t in c["tags"] if t.startswith("Gifter")), ""),
                 "edd_rfi": "Yes" if c["pending_reason"] in ("Pending EDD", "RFI Sent") else "No",
                 "sla": sla.chip(c, now), "mine": bool(analyst_email) and c["current_reviewer"] == analyst_email,
+                "workflow": c["screening"].get("workflow", ""),
             })
         rows.sort(key=lambda r: r["created_at"], reverse=True)
 

@@ -67,5 +67,6 @@
     <div class="f"><label for="f-qcreason">QC Reason</label><input class="input" id="f-qcreason" placeholder="QC Reason"></div>
     <div class="f"><label for="f-qcresult">QC Result</label>
         <select class="input" id="f-qcresult"><option value="">Select</option>{% for q in filters.qc_results %}<option>{{ q }}</option>{% endfor %}</select></div>
-    <div class="f"></div>
+    <div class="f"><label for="f-workflow">Review workflow</label>
+        <select class="input" id="f-workflow"><option value="">Select</option>{% for k, label in vocab.REVIEW_WORKFLOWS.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select></div>
 </div>

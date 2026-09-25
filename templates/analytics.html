@@ -27,6 +27,11 @@
     <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Top rationales</div></div><div class="card-body">{{ hbars(vm.rationales, '#0f766e') }}</div></div>
 </div>
 
+<div class="row mt-12" style="align-items:stretch;gap:12px">
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Auto-verified vs human-in-the-loop</div><div class="card-sub">every case, by what the AI screening rules left for an analyst</div></div><div class="card-body">{{ hbars(vm.workflow_split, '#7c3aed') }}</div></div>
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">AI screening rules fired</div><div class="card-sub">watchlist records each rule cleared · <a href="{{ url_for('ai_screening_page') }}">the rules</a></div></div><div class="card-body">{{ hbars(vm.rules_fired, '#7c3aed') }}</div></div>
+</div>
+
 <div class="card mt-12 pad-0">
     <div class="card-head" style="padding-bottom:10px"><div class="card-title">SLA watch</div><div class="card-sub">breached or due within 12 hours, most urgent first</div></div>
     <table class="tbl">

@@ -9,6 +9,16 @@ capacity, a live tier pipeline with hand-off lag, tracker views that replace
 the spreadsheets, an investigation file per escalation, a global audit log,
 QC sampling with a scorecard, and a four-eyes Checker 2 on seller approvals.
 
+Screening runs in two workflows. **Auto-verified**: no match on any list, or
+every watchlist record cleared by the *AI screening rules*, so the screening
+case closes itself and a TT Live case completes with no analyst step.
+**Human-in-the-loop**: at least one record the rules could not clear, so an
+analyst handles only what is left. The "AI" is a deterministic rule book, not
+a model — date-of-birth mismatch, gender mismatch, an optional nationality
+rule and a sanctions guard, each switchable by the team lead on the AI
+Screening page — because a compliance team must be able to read and audit
+why a record was cleared.
+
 Built the same way as the ChargeShield demo: one Flask `app.py`, Jinja
 templates, a single stylesheet, a SQLite state store, no JS framework.
 
@@ -40,12 +50,15 @@ Python 3.13 has no Flask.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-31 end-to-end tests on the Flask test client: the golden path, resubmit,
+37 end-to-end tests on the Flask test client: the golden path, resubmit,
 escalate, segregation of duties, L2/EDD decisions, Skopenow, TT Shop risk
 recalculation, routing by skill and capacity, case on-demand, immediate
 hand-offs, capacity overrides, trackers and CSV, the investigation-file ZIP,
 the global audit log, QC sampling, Checker 2, role enforcement at EDD, POA
-checks, fraud typology, and World-Check links opening in a new tab.
+checks, fraud typology, World-Check links opening in a new tab, the AI
+screening rules (the rule book, what it did at intake, auto-verification on
+Data Confirm, sellers keeping the human close, rule switches that persist)
+and the workflow labels across the screens.
 
 ## Analyst profiles
 
@@ -69,9 +82,16 @@ The header's analyst switcher jumps between profiles without signing out.
    *Review*: the Data Confirm modal shows the POA checks; two fail, OK stays
    off, **Escalate** preselects the sanctioned-country reason. Escalate with
    a fraud typology → the case is handed to L2 at once; the flash names who.
-3. Open **Daniel Mercer** for the as-is golden path: Reserve → confirm the
-   three fields and the POA → screening case → World-Check resolve + export
-   → alert and case outcome → EDD Review → Verified.
+3. Open **Michael James Taylor** for the auto-verified workflow: the header
+   already says *Auto-verified* — the AI screening rules cleared his two
+   namesakes at intake (a 23-year date-of-birth gap, a female record) and
+   the screening case closed itself. Reserve → confirm the three fields →
+   the case is Verified with no analyst step, signed by System User, the
+   export attached. Then open **Daniel Mercer** for the human-in-the-loop
+   golden path: six of seven records cleared by the rules, one record with
+   no listed date of birth left for Amara → Reserve → confirm → screening
+   case → World-Check resolve + export → alert and case outcome → EDD
+   Review → Verified.
 4. **Nisha** → *My Work* shows the hand-off; *Pipeline* shows the L2 column
    and the hand-off feed with lag 0 s against the bot-era history.
 5. **Jon**, tenant TT Shop → a seller in Data Screening → Recalculate Risk
@@ -84,9 +104,12 @@ The header's analyst switcher jumps between profiles without signing out.
 7. **Leah** → *QC Sampling* → fail one sampled case with a reason → the
    closing analyst's My Work shows the feedback to acknowledge. *Routing*:
    lower an L2's capacity to 1, escalate another case, watch it wait for
-   capacity, raise it, **Route selected now**.
+   capacity, raise it, **Route selected now**. *AI Screening*: switch the
+   nationality rule on, then confirm Mercer's data as Amara — the seventh
+   record clears and the case auto-verifies; the change sits in the history.
 8. *Analytics*: tier pipeline, backlog ageing, shift progress, hand-off lag,
-   quality scorecard. *Audit Log*: one stream across every record.
+   quality scorecard, auto-verified vs human-in-the-loop, rules fired.
+   *Audit Log*: one stream across every record; the rules sign their own.
 9. **Reset demo** in the header brings the seeded case book back.
 
 ## Layout
@@ -95,9 +118,9 @@ The header's analyst switcher jumps between profiles without signing out.
 |---|---|
 | `app.py` | Flask app: sign-in, tenant switch, thin routes, state glue, the Operations Hub routes |
 | `fincrime/data/` | vocabularies, seed builders, the 19 scenarios, loader, SQLite state store |
-| `fincrime/engines/` | KYC workflow state machine, routing (skill book, capacity, hand-offs), work log, name-screening, World-Check logic, SLA, segregation, QC sampling, investigation file, PDF export |
+| `fincrime/engines/` | KYC workflow state machine, AI screening rules, routing (skill book, capacity, hand-offs), work log, name-screening, World-Check logic, SLA, segregation, QC sampling, investigation file, PDF export |
 | `fincrime/documents/` | synthetic ID / proof-of-address SVG cards |
-| `fincrime/analytics/` | view-model builders: case list, queues, My Work, pipeline, trackers, audit log, routing console, dashboard |
+| `fincrime/analytics/` | view-model builders: case list, queues, My Work, pipeline, trackers, audit log, routing console, AI screening, dashboard |
 | `fincrime/adapters/` | mock IDV vendor, in-house CMS and Skopenow |
 | `templates/` | flat Jinja templates; `_name.html` are partials/macros |
 | `static/css/style.css` | the one stylesheet (light console + dark `body.wc-theme`) |
@@ -111,6 +134,7 @@ The header's analyst switcher jumps between profiles without signing out.
 | §3.1 SLAs 48 h / 14 d | SLA chips, breach KPIs, pipeline flags |
 | §4.1.2 Data Confirming, POA checks, resubmit reasons | Data Confirm modal |
 | §4.1.3 screening, WC export, Skopenow, escalation, fraud typology, EDD tracker, investigation folder | screening case, World-Check console, EDD Review, Escalate dialog, Trackers, Investigation File |
+| §5.1 current automation: rule-based disposition of screening hits; the auto-verified and human-in-the-loop workflows | AI screening rules at intake and at the re-screen, auto-verification on Data Confirm, AI Screening page, workflow badge and filter |
 | §4.2 TT Shop Checker 1 / Checker 2, risk rating, Pending EDD | Agency panel, EDD Review, Checker 2 sign-off, L2 / EDD queue |
 | §5.2.1 automated routing, no spreadsheets | routing engine on every hand-off, Routing console, Trackers |
 | §5.2.2 dynamic capacity, case on-demand | My Work (Get next case / Request cases), capacity per analyst |

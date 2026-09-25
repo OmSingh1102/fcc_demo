@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_badges.html" import status_badge, tag_chip, sla_chip %}
+{% from "_badges.html" import status_badge, tag_chip, sla_chip, workflow_badge %}
 {% block title %}Case List - Due Diligence (KYC/KYB){% endblock %}
 
 {% block content %}
@@ -39,6 +39,7 @@
                 <th>Date Of Birth</th>
                 <th>Status</th>
                 <th>Pending Reason</th>
+                <th>Workflow</th>
                 <th>Tag</th>
                 <th>Previous Reviewer</th>
                 <th>Current Reviewer</th>
@@ -56,7 +57,7 @@
                 data-nat="{{ r.nationality }}" data-issuing="{{ r.issuing }}" data-idnum="{{ r.id_number }}" data-poa="{{ r.poa }}"
                 data-level="{{ r.level }}" data-mrr="{{ r.mrr }}" data-gifter="{{ r.gifter }}" data-edd="{{ r.edd_rfi }}"
                 data-qcrev="{{ r.qc_reviewer }}" data-qcreason="{{ r.qc_reason|lower }}" data-qcresult="{{ r.qc_result }}"
-                data-priority="{{ 'Priority Review' in r.tags }}">
+                data-priority="{{ 'Priority Review' in r.tags }}" data-workflow="{{ r.workflow }}">
                 <td><input type="checkbox" class="row-check" value="{{ r.id }}"></td>
                 <td class="nowrap"><span class="cell-id">{{ r.id }}</span> {% for t in r.tags %}{{ tag_chip(t) }}{% endfor %}</td>
                 <td class="cell-id">{{ r.client_id }}</td>
@@ -64,6 +65,7 @@
                 <td class="nowrap">{{ r.dob or '-' }}</td>
                 <td>{{ status_badge(r.status) }}</td>
                 <td>{{ r.pending_reason or '-' }}</td>
+                <td class="nowrap">{% if r.workflow %}{{ workflow_badge(r.workflow) }}{% else %}-{% endif %}</td>
                 <td>{% if r.tags %}{{ r.tags|join(', ') }}{% else %}-{% endif %}</td>
                 <td class="nowrap">{{ r.previous_reviewer or '-' }}</td>
                 <td class="nowrap">{% if r.mine %}<b>{{ r.current_reviewer }}</b>{% else %}{{ r.current_reviewer or '-' }}{% endif %}</td>
@@ -134,7 +136,7 @@
         var nat = v('f-nat'), issuing = v('f-issuing'), tags = v('f-tags'), poa = v('f-poa'), level = v('f-level');
         var pending = v('f-pending'), edd = v('f-edd'), mrr = v('f-mrr'), qcrev = v('f-qcrev'), qcresult = v('f-qcresult');
         var dobFrom = v('f-dob-from'), dobTo = v('f-dob-to'), cFrom = v('f-created-from'), cTo = v('f-created-to');
-        var sFrom = v('f-sub-from'), sTo = v('f-sub-to');
+        var sFrom = v('f-sub-from'), sTo = v('f-sub-to'), workflow = v('f-workflow');
         var shown = 0;
         rows.forEach(function (r) {
             var d = r.dataset, ok = true;
@@ -143,6 +145,7 @@
             ok = ok && equals(d.reviewer, reviewer) && equals(d.prev, prev) && equals(d.source, source) && equals(d.vendor, vendor);
             ok = ok && equals(d.gifter, gifter) && equals(d.nat, nat) && equals(d.issuing, issuing) && equals(d.poa, poa) && equals(d.level, level);
             ok = ok && equals(d.pending, pending) && equals(d.edd, edd) && equals(d.qcrev, qcrev) && equals(d.qcresult, qcresult);
+            ok = ok && equals(d.workflow, workflow);
             ok = ok && (!tags || d.tags.split('|').indexOf(tags) >= 0);
             ok = ok && (!mrr || d.mrr.indexOf(mrr) >= 0);
             ok = ok && contains(d.qcreason, qcreason);

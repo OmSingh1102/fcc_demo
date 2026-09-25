@@ -68,7 +68,7 @@
                     <div><span class="l">Reason</span><span class="v">{{ r.reason or '' }}</span></div>
                     <div><span class="l">Resolution Remark</span><span class="v">{{ r.remark or '' }}</span></div>
                     <div><span class="l">Review Comment</span><span class="v">{{ r.comment or '' }}</span></div>
-                    <div><span class="l">Last Updated</span><span class="v">{{ r.at|wc_dt if r.at else '' }}{% if r.by %} · {{ r.by }}{% endif %}</span></div>
+                    <div><span class="l">Last Updated</span><span class="v">{{ r.at|wc_dt if r.at else '' }}{% if r.by %} · {{ r.by }}{% endif %}{% if r.by == vocab.SYSTEM_USER %} <span class="badge violet">AI screening rule</span>{% endif %}</span></div>
                 </div>
             </div>
             <div class="wc-panel">

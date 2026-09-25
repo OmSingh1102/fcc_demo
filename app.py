@@ -70,7 +70,8 @@ def _who(value):
 # {% from "_badges.html" import ... %} does not see the render context, but it
 # does see globals, and the badge macros need the status colour map.
 app.jinja_env.globals.update(status_tone=vocab.STATUS_TONE, vocab=vocab,
-                             icon=app.jinja_env.get_template("_icon.html").module.icon)
+                             icon=app.jinja_env.get_template("_icon.html").module.icon,
+                             ai_summary=ai_screening.summary)
 app.jinja_env.filters.update(wc_date=dates.wc_date, wc_dt=dates.wc_datetime, who=_who, translit=translit)
 
 # ─── Sign-in, analysts and roles ───────────────────────────────────────────────
@@ -693,13 +694,16 @@ def ns_queue():
     mine = request.args.get("mine") == "1"
     # Row copies, not the records: "pending" is a view field and must not be
     # persisted into the store the next time the record is saved.
-    alerts = [dict(a, pending=sum(1 for x in a["alerts"] if x["outcome"] == "Pending")) for a in _tenant_alerts()]
+    alerts = [dict(a, pending=sum(1 for x in a["alerts"] if x["outcome"] == "Pending"),
+                   auto=bool(a["case_outcome"] and a["case_outcome"].get("by") == vocab.SYSTEM_USER)) for a in _tenant_alerts()]
     queues = []
     for lv in ("L1", "L2"):
         rows = [a for a in alerts if a["case_level"] == lv]
+        auto_closed = sum(1 for a in rows if a["auto"])
         queues.append({"level": lv, "name": f"{vocab.TENANTS[_tenant()]['cms_queue']}_{lv}", "total": len(rows),
                        "pending": sum(1 for a in rows if a["status"] != "Closed"),
-                       "completed": sum(1 for a in rows if a["status"] == "Closed")})
+                       "completed": sum(1 for a in rows if a["status"] == "Closed"),
+                       "auto_closed": auto_closed, "human": len(rows) - auto_closed})
     rows = [a for a in alerts if a["case_level"] == level and (not mine or a["assigned_to"] == _actor())]
     rows.sort(key=lambda a: (a["status"] == "Closed", a["created_at"]), reverse=False)
     return render_template("ns_queue.html", level=level, mine_only=mine, queues=queues, rows=rows)
@@ -727,7 +731,7 @@ def ns_case(alert_case_id):
     wc = WC_BY_ID.get(alert["id"])
     types = sorted({a["type"] for a in alert["alerts"] if a["type"]})
     return render_template("ns_case.html", alert=alert, wc=wc, actor=_actor(), types=types,
-                           counts=screening.tab_counts(alert["alerts"]),
+                           counts=screening.tab_counts(alert["alerts"]), strategies=[r["label"] for r in ai_screening.RULES],
                            recommendation=recommendation.recommend_case_outcome(alert, wc))
 
 

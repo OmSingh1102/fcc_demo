@@ -438,6 +438,32 @@ class FlowTestCase(unittest.TestCase):
         self.assertEqual(fcc.AI_SETTINGS["history"], [])
         self.assertEqual(StateStore.count(), 0)
 
+    def test_workflow_shown_across_screens(self):
+        """The two workflows are visible wherever a case is listed."""
+        self.login("amara.iyer")
+        t, m = self.K["taylor"], self.K["mercer"]
+        self.assertIn(b"Auto-verified", self.c.get(f"/kyc/detail/{t['id']}").data)
+        page = self.c.get(f"/kyc/detail/{m['id']}").data.decode("utf-8")
+        self.assertIn("Human-in-the-loop", page)
+        self.assertIn("6 of 7 match(es) auto-resolved", page)
+        listing = self.c.get("/kyc/list").data.decode("utf-8")
+        self.assertIn('data-workflow="auto-verified"', listing)
+        self.assertIn('data-workflow="human-in-the-loop"', listing)
+        self.assertIn('id="f-workflow"', listing)
+        cms = self.c.get(f"/name_screening/case/{t['screening']['alert_case_id']}").data.decode("utf-8")
+        self.assertIn("Auto-resolved by the AI screening rules", cms)
+        self.assertIn("<option>Gender mismatch</option>", cms)
+        cms = self.c.get(f"/name_screening/case/{m['screening']['alert_case_id']}").data.decode("utf-8")
+        self.assertIn("1 for review", cms)
+        queue = self.c.get("/name_screening/queue").data.decode("utf-8")
+        self.assertIn("Auto-resolved :", queue)
+        self.assertIn('title="closed by the AI screening rules">auto</span>', queue)
+        wc = self.c.get(f"/wc/{m['screening']['alert_case_id']}/match/{fcc.WC_BY_ID[m['screening']['alert_case_id']]['matches'][0]['id']}").data
+        self.assertIn(b"AI screening rule", wc)
+        analytics = self.c.get("/analytics").data.decode("utf-8")
+        self.assertIn("AI screening rules fired", analytics)
+        self.assertIn("Auto-verified vs human-in-the-loop", analytics)
+
     def test_wc_pagination_and_facets(self):
         self.login("amara.iyer")
         aid = self.K["hassan"]["screening"]["alert_case_id"]

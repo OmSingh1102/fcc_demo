@@ -5,7 +5,7 @@
 {% block content %}
 <div class="crumbs"><a href="{{ url_for('kyc_list') }}">Case List</a><span class="sep">/</span><a href="{{ url_for('kyc_detail', case_id=case.id) }}">{{ case.id }}</a><span class="sep">/</span>{{ 'Change Log' if view == 'changes' else 'Audit History' }}</div>
 <div class="page-head">
-    <div><h2>{{ case.client.legal_name }} {{ status_badge(case.status) }}</h2><p>Every action on this case, in order, with who took it. Nothing here is written on an analyst's behalf.</p></div>
+    <div><h2>{{ case.client.legal_name }} {{ status_badge(case.status) }}</h2><p>Every action on this case, in order, with who took it. Nothing here is written on an analyst's behalf; the router and the AI screening rules sign their own rows.</p></div>
     <a class="btn btn-outline btn-sm" href="{{ url_for('kyc_detail', case_id=case.id) }}">{{ icon('arrow-left') }} Back to case</a>
 </div>
 
