@@ -811,7 +811,7 @@ def wc_resolve(wc_case_id, match_id):
     if not ctx["can_resolve"]:
         flash("Handle the screening case first — only its handler can resolve matches.", "error")
     else:
-        ok, _ = _run_action(worldcheck.resolve_match, wc, _actor(), match_id, f.get("status", ""),
+        ok, _ = _run_action(worldcheck.resolve_match, wc, _actor(), match_id, f.get("status", ""), f.get("risk", ""),
                             f.get("reason", ""), f.get("comment", ""))
         if ok:
             _save("wc", wc)

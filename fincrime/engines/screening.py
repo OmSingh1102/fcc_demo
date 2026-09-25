@@ -55,7 +55,8 @@ def alert_outcome(alert, actor, form):
     rationale = form.get("rationale", "")
     _require(rationale in vocab.RATIONALES, "Pick a rationale.")
     comment = _require_text(form.get("comment", ""), "A comment")
-    risk = vocab.RISK_FOR_LABEL[label]          # follows the label, never picked
+    risk = form.get("risk_level", "")
+    _require(risk in vocab.RISK_LEVELS, "Pick a risk level.")
     now = dates.now_str()
     row.update({"outcome": label, "review_mode": review_mode, "result_label": label, "rationale": rationale,
                 "comment": comment, "risk_level": risk, "attachment": (form.get("attachment") or "").strip(),

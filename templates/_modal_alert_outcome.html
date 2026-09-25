@@ -20,25 +20,16 @@
         <div class="field inline"><label><span class="req">*</span>Comment</label>
             <div><textarea class="textarea" name="comment" maxlength="10000" required oninput="document.getElementById('ao-count').textContent=this.value.length"></textarea><div class="counter"><span id="ao-count">0</span>/10000</div></div></div>
         <div class="field inline"><label><span class="req">*</span>RiskLevel</label>
-            <div><input class="input" id="ao-risk" readonly placeholder="Set by the result label" aria-label="Risk level, set by the result label">
-                <div class="tiny muted" style="margin-top:4px">{% for l, level in vocab.RISK_FOR_LABEL.items() %}{{ l }} → {{ level }}{% if not loop.last %} · {% endif %}{% endfor %}</div></div></div>
+            <select class="input" name="risk_level" id="ao-risk" required>
+                <option value="">Please select result label first</option>{% for r in vocab.RISK_LEVELS %}<option>{{ r }}</option>{% endfor %}</select></div>
         <div class="field inline"><label>Attachment</label>
             <div><label class="btn btn-primary btn-sm" style="cursor:pointer">{{ icon('upload') }} Upload File<input type="file" style="display:none" onchange="document.getElementById('ao-attach').value=this.files[0]?this.files[0].name:'';document.getElementById('ao-fname').textContent=this.files[0]?this.files[0].name:''"></label>
                 <input type="hidden" name="attachment" id="ao-attach"><span class="small" id="ao-fname"></span>
                 <div class="tiny muted">Supported format: pdf, xlsx, csv, jpg, jpeg, gif, png, docx, txt</div></div></div>
-        <div class="small muted">The prefilled label and rationale come from the resolution recorded in the watchlist console; the risk level follows the label. <a id="ao-wc-link" data-base="{{ url_for('wc_case', wc_case_id=alert.id) }}/match/" href="#" target="_blank" rel="noopener" title="Opens in a new tab">Review it there<span class="ext-ic">{{ icon('external-link') }}</span></a> before confirming.</div>
+        <div class="small muted">The prefilled label, rationale and risk come from the resolution recorded in the watchlist console. <a id="ao-wc-link" data-base="{{ url_for('wc_case', wc_case_id=alert.id) }}/match/" href="#" target="_blank" rel="noopener" title="Opens in a new tab">Review it there<span class="ext-ic">{{ icon('external-link') }}</span></a> before confirming.</div>
     </div>
     <div class="modal-foot"><span class="spacer"></span>
         <button type="button" class="btn btn-outline btn-sm" onclick="closeModal('alert-outcome')">Cancel</button>
         <button type="submit" class="btn btn-primary btn-sm">OK</button></div>
 </form>
 {{ modal_close() }}
-<script>
-(function () {
-    // The risk level is not a choice: it follows the result label.
-    var map = {{ vocab.RISK_FOR_LABEL|tojson }};
-    var label = document.getElementById('ao-label'), risk = document.getElementById('ao-risk');
-    window.aoPaintRisk = function () { risk.value = map[label.value] || ''; };
-    label.addEventListener('change', window.aoPaintRisk);
-})();
-</script>
