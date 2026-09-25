@@ -414,6 +414,20 @@ select.input, .select { appearance: auto; padding-right: 8px; }
 .mselect .menu .check { display: flex; padding: 4px 6px; border-radius: var(--radius-sm); }
 .mselect .menu .check:hover { background: var(--accent); }
 .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+
+/* ─── Case-list filter panel: folds behind an arrow at its top right (client
+   feedback); the buttons row stays so the list is still searchable ─── */
+.filters-toggle {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+    height: 24px; padding: 0 8px 0 6px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--card); color: var(--muted-foreground); font: inherit; font-size: 12px; cursor: pointer;
+}
+.filters-toggle:hover { background: var(--muted); color: var(--foreground); }
+.filters-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.filters-toggle .nav-ic { width: 13px; height: 13px; transition: transform .18s; }
+.filters-toggle.folded .nav-ic { transform: rotate(180deg); }
+.filters-card.folded #filters-grid { display: none; }
+.filters-card.folded .toolbar { margin-top: 0; }
 .toolbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
 /* ─── Badge / tag ─── */

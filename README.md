@@ -50,7 +50,7 @@ Python 3.13 has no Flask.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-37 end-to-end tests on the Flask test client: the golden path, resubmit,
+38 end-to-end tests on the Flask test client: the golden path, resubmit,
 escalate, segregation of duties, L2/EDD decisions, Skopenow, TT Shop risk
 recalculation, routing by skill and capacity, case on-demand, immediate
 hand-offs, capacity overrides, trackers and CSV, the investigation-file ZIP,
@@ -75,6 +75,9 @@ The header's analyst switcher jumps between profiles without signing out.
 
 ## A demo script
 
+0. The case list's filter panel folds behind the arrow at its top right and
+   stays folded through live refreshes; the buttons row keeps working and a
+   folded panel says how many filters are active.
 1. **Amara** → *Operations Hub › My Work* → **Get next case**: the router picks
    the most urgent case her skill book allows and opens it, reserved. The
    header shows the routing chip and the reason.

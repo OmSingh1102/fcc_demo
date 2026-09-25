@@ -464,6 +464,17 @@ class FlowTestCase(unittest.TestCase):
         self.assertIn("AI screening rules fired", analytics)
         self.assertIn("Auto-verified vs human-in-the-loop", analytics)
 
+    def test_case_list_filters_collapsible(self):
+        """The filter panel on the case list folds behind an arrow, keeps its
+        buttons row, and remembers the fold in the browser."""
+        self.login("amara.iyer")
+        page = self.c.get("/kyc/list").data.decode("utf-8")
+        for needle in ('id="filters-toggle"', 'aria-controls="filters-grid"', 'id="filters-grid"',
+                       'id="filters-summary"', "fcc-case-filters-folded", "toggleFilters"):
+            self.assertIn(needle, page, needle)
+        self.assertLess(page.index('id="filters-toggle"'), page.index('id="filters-grid"'))
+        self.assertLess(page.index('id="filters-grid"'), page.index('id="sort-btn"'))
+
     def test_wc_pagination_and_facets(self):
         self.login("amara.iyer")
         aid = self.K["hassan"]["screening"]["alert_case_id"]
