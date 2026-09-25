@@ -1,14 +1,11 @@
 """The "Recommended" tag on Change Case Outcome, and the prefill on Change
-Alert Outcome. Deterministic rules over what the analyst has already decided
-— no model, and it never decides for them: a Pending alert means no
-recommendation at all."""
+Alert Outcome. Deterministic rules over what has already been decided, by the
+analyst or by the AI screening rules — no model, and this module never
+decides anything itself: a Pending alert means no recommendation at all."""
+from fincrime.data import vocab
 
-_LABEL = {"False positive": "False Positive", "Potential match": "Potential Match", "True positive": "True Positive"}
-_RATIONALE = {"Date of Birth mismatch": "DOB Mismatch", "Nationality mismatch": "Nationality Mismatch",
-              "Gender mismatch": "Gender Mismatch", "Name mismatch": "Name Mismatch", "Age mismatch": "DOB Mismatch",
-              "Identification mismatch": "Different Person - Public Records", "Location mismatch": "Different Person - Public Records",
-              "Confirmed by identification": "Confirmed Identity", "Confirmed by adverse media": "Same Person - Adverse Media",
-              "Insufficient information": "Insufficient Information"}
+_LABEL = vocab.WC_STATUS_LABEL
+_RATIONALE = vocab.WC_REASON_RATIONALE
 
 
 def recommend_case_outcome(alert, wc=None):

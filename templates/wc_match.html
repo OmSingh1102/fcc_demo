@@ -80,7 +80,7 @@
                         <div><h5>Risk level</h5>{% for s in vocab.WC_RISKS %}<label><input type="radio" name="risk" value="{{ s }}" {% if r.risk == s %}checked{% endif %}>{{ s }}</label>{% endfor %}</div>
                         <div><h5>Reason</h5>
                             <select class="input input-sm" name="reason"><option value="">Select a Reason</option>{% for s in vocab.WC_REASONS %}<option {% if r.reason == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
-                            <textarea class="textarea mt-8" name="comment" rows="3" placeholder="Review comment (required)" required>{{ r.comment if r.by != 'System User' else '' }}</textarea>
+                            <textarea class="textarea mt-8" name="comment" rows="3" placeholder="Review comment (required)" required>{{ r.comment if r.by != vocab.SYSTEM_USER else '' }}</textarea>
                             <button type="submit" class="btn btn-sm mt-8" style="background:#3a3f4a;color:#fff;border:1px solid #4a5060" {% if not can_resolve %}disabled title="Handle the screening case first"{% endif %}>Resolve</button>
                         </div>
                     </div>

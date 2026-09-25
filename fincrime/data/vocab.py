@@ -123,6 +123,12 @@ RATIONALES = [
 ]
 RISK_LEVELS = ["Low", "Medium", "High"]
 REVIEW_MODES = ["Smart Review", "Manual Review"]
+# The actor the automation signs with: the AI screening rules on a match, the
+# screening case they close, the KYC case they auto-verify.
+SYSTEM_USER = "System User"
+# Every KYC case carries one of these once it has been screened (SOP: current
+# automation; the client's two workflows, 2026-09-24).
+REVIEW_WORKFLOWS = {"auto-verified": "Auto-verified", "human-in-the-loop": "Human-in-the-loop"}
 CASE_OUTCOMES = ["Approve - False Positive", "Escalate - Potential Match", "Escalate - True Positive", "Reject - True Positive"]
 CASE_OUTCOME_RATIONALES = ["All alerts resolved as false positive", "Unresolved potential match", "Confirmed true positive", "Other"]
 SCREENING_PLATFORMS = ["In-house CMS", "Internal_blacklist"]
@@ -135,6 +141,15 @@ WC_REASONS = [
     "Identification mismatch", "Location mismatch", "Confirmed by identification", "Confirmed by adverse media",
     "Insufficient information",
 ]
+# A watchlist resolution as the screening case labels it, and its rationale.
+WC_STATUS_LABEL = {"False positive": "False Positive", "Potential match": "Potential Match", "True positive": "True Positive"}
+WC_REASON_RATIONALE = {
+    "Date of Birth mismatch": "DOB Mismatch", "Nationality mismatch": "Nationality Mismatch",
+    "Gender mismatch": "Gender Mismatch", "Name mismatch": "Name Mismatch", "Age mismatch": "DOB Mismatch",
+    "Identification mismatch": "Different Person - Public Records", "Location mismatch": "Different Person - Public Records",
+    "Confirmed by identification": "Confirmed Identity", "Confirmed by adverse media": "Same Person - Adverse Media",
+    "Insufficient information": "Insufficient Information",
+}
 WC_TYPES = {
     "PEP": "Politically exposed person", "SIC": "Special interest category", "OB": "Other bodies",
     "LE": "Law enforcement", "RE": "Regulatory enforcement", "SAN": "Sanctions", "RCA": "Relative or close associate",

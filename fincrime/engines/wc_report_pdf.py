@@ -15,6 +15,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from fincrime.data import vocab
 from fincrime.utils import dates
 from fincrime.utils.text import translit
 
@@ -98,7 +99,7 @@ def render_wc_export(wc, alert=None, kyc=None, exported_by=""):
     story.append(t)
 
     for m in wc["matches"]:
-        if m["resolution"]["by"] == "System User":
+        if m["resolution"]["by"] == vocab.SYSTEM_USER:
             continue
         kd, fi = m["key_data"], m["further_info"]
         story += [Paragraph(_t(f"Record {m['wc_id']} — {m['name']}"), h2)]

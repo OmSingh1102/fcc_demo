@@ -106,11 +106,15 @@ class FlowTestCase(unittest.TestCase):
         self.assertGreater(len(m["audit"]), audit_len)
         audit_len = len(m["audit"])
 
+        # The AI screening rules cleared six of the seven records at intake;
+        # the seventh lists no date of birth, so it waits for Amara.
+        self.assertEqual(sum(1 for a in alert["alerts"] if a["resolved_by"] == "System User"), 6)
+        self.assertEqual(m["screening"]["workflow"], "human-in-the-loop")
         self.post(f"/name_screening/{aid}/handle")
         self.assertEqual(alert["status"], "Handling")
         unresolved = next(x for x in wc["matches"] if x["resolution"]["status"] == "Unresolved")
         r = self.post(f"/wc/{aid}/match/{unresolved['id']}/resolve", status="False positive", risk="Low",
-                      reason="Date of Birth mismatch", comment="Different person: UK national born 1962.")
+                      reason="Location mismatch", comment="Different person: a West Midlands record; the client is a US resident with no UK footprint.")
         self.assertEqual(unresolved["resolution"]["by"], AMARA, flash_text(r))
         self.post(f"/wc/{aid}/export")
         self.assertEqual(len(wc["exports"]), 1)
@@ -120,7 +124,7 @@ class FlowTestCase(unittest.TestCase):
 
         pending = next(a for a in alert["alerts"] if a["outcome"] == "Pending")
         r = self.post(f"/name_screening/{aid}/alert_outcome", alert_id=pending["id"], review_mode="Manual Review",
-                      result_label="False Positive", rationale="DOB Mismatch", comment="Not the same person.", risk_level="Low")
+                      result_label="False Positive", rationale="Different Person - Public Records", comment="Not the same person.", risk_level="Low")
         self.assertEqual(pending["outcome"], "False Positive", flash_text(r))
         page = self.c.get(f"/name_screening/case/{aid}").data
         self.assertIn("Approve - False Positive · Recommended".encode("utf-8"), page)
@@ -281,6 +285,78 @@ class FlowTestCase(unittest.TestCase):
         self.assertFalse(any(new_tab(a) for a in hrefs(audit, "/name_screening/case/", "/kyc/detail/")))
 
         self.assertEqual([a.get("href") for a in anchors(self.c.get(f"/wc/{aid}")) if new_tab(a)], [])
+
+    def test_ai_rules_evaluate(self):
+        """The rule book on synthetic records: fires only on present,
+        conflicting data; the exact date of birth vetoes everything."""
+        from fincrime.data.seed import wc_match
+        from fincrime.engines import ai_screening as ai
+        client = {"dob": "1988-02-11", "gender": "M", "nationality": "US"}
+        every = {"dob_mismatch": True, "gender_mismatch": True, "nationality_mismatch": True}
+
+        def rec(**kw):
+            kw.setdefault("gender", "Male")
+            return wc_match(key="t-" + str(len(kw)), name="X", **kw)
+
+        self.assertEqual(ai.evaluate(rec(dobs=["1962"]), client)[0], "dob_mismatch")
+        self.assertEqual(ai.evaluate(rec(dobs=["16-Aug-1960"]), client)[0], "dob_mismatch")
+        self.assertEqual(ai.evaluate(rec(dobs=["1988"]), client)[0], "")                 # same year, year only
+        self.assertEqual(ai.evaluate(rec(dobs=["1973", "1988"]), client)[0], "")         # one alternative matches
+        self.assertEqual(ai.evaluate(rec(dobs=["11-Feb-1988"], gender="Female", citizenship="Canada"), client, enabled=every)[0], "")
+        self.assertEqual(ai.evaluate(rec(dobs=[]), client)[0], "")
+        self.assertEqual(ai.evaluate(rec(dobs=["1962"]), {"dob": "", "gender": "", "nationality": "SG"})[0], "")
+        self.assertEqual(ai.evaluate(rec(dobs=["1988"], gender="Female"), client)[0], "gender_mismatch")
+        self.assertEqual(ai.evaluate(rec(dobs=[], gender="Female"), {"dob": "", "gender": "", "nationality": "SG"})[0], "")
+        san = rec(dobs=["1962"], types=("SAN",))
+        self.assertEqual(ai.evaluate(san, client, guards={"san_review": True})[0], "")
+        self.assertEqual(ai.evaluate(san, client, guards={"san_review": False})[0], "dob_mismatch")
+        self.assertEqual(ai.evaluate(rec(dobs=["1962"]), client, enabled={"dob_mismatch": False, "gender_mismatch": True})[0], "")
+        self.assertEqual(ai.evaluate(rec(dobs=["1988"], citizenship="United Kingdom"), client, enabled=every)[0], "nationality_mismatch")
+        self.assertEqual(ai.evaluate(rec(dobs=["1988"], citizenship="United States; Canada"), client, enabled=every)[0], "")
+        done = rec(dobs=["1962"])
+        done["resolution"].update(status="True positive", by=AMARA)
+        self.assertEqual(ai.evaluate(done, client)[0], "")
+
+    def test_seed_workflows(self):
+        """What the rules did at intake, case by case."""
+        m = self.K["mercer"]
+        alert, wc = fcc.ALERT_BY_ID[m["screening"]["alert_case_id"]], fcc.WC_BY_ID[m["screening"]["alert_case_id"]]
+        self.assertEqual(sum(1 for a in alert["alerts"] if a["resolved_by"] == "System User"), 6)
+        self.assertEqual(sum(1 for a in alert["alerts"] if a["outcome"] == "Pending"), 1)
+        self.assertEqual(m["screening"]["workflow"], "human-in-the-loop")
+        ai = m["screening"]["ai"]
+        self.assertEqual((ai["total"], ai["auto_resolved"], ai["for_review"], ai["rules"]), (7, 6, 1, {"dob_mismatch": 6}))
+        self.assertEqual(sum(1 for e in wc["audit"] if e["action"] == "AI screening rules applied"), 1)
+        self.assertEqual(m["review_decisions"][1]["by"], "System User")
+        self.assertEqual(alert["status"], "Init")
+        self.assertEqual(m["audit"], sorted(m["audit"], key=lambda e: e["at"]))
+
+        hw = fcc.WC_BY_ID[self.K["hassan"]["screening"]["alert_case_id"]]
+        statuses = [x["resolution"]["status"] for x in hw["matches"]]
+        self.assertEqual((statuses.count("False positive"), statuses.count("Unresolved")), (209, 3))
+
+        t = self.K["taylor"]
+        ta, tw = fcc.ALERT_BY_ID[t["screening"]["alert_case_id"]], fcc.WC_BY_ID[t["screening"]["alert_case_id"]]
+        self.assertEqual(t["status"], "DataConfirming")
+        self.assertEqual(t["screening"]["workflow"], "auto-verified")
+        self.assertEqual(ta["status"], "Closed")
+        self.assertEqual(ta["case_outcome"]["by"], "System User")
+        self.assertEqual(ta["case_outcome"]["attachment"], tw["exports"][0]["filename"])
+        self.assertEqual(tw["exports"][0]["by"], "System User")
+        self.assertEqual(sorted(a["smart_strategy"] for a in ta["alerts"]), ["DOB mismatch", "Gender mismatch"])
+        self.assertTrue(t["screening"]["ai"]["auto_closed"])
+
+        s = self.K["solis"]
+        self.assertEqual(s["screening"]["workflow"], "auto-verified")
+        self.assertEqual(s["screening"]["ai"]["total"], 0)
+        self.assertEqual(s["review_decisions"][1]["by"], "System User")
+
+        g = self.K["gomez"]
+        self.assertEqual(fcc.WC_BY_ID[g["screening"]["alert_case_id"]]["matches"][0]["resolution"]["by"], AMARA)
+        self.assertEqual(g["screening"]["workflow"], "human-in-the-loop")
+        for key in ("vanguard", "apex", "sidorov", "rahman", "petrova"):
+            rows = fcc.ALERT_BY_ID[self.K[key]["screening"]["alert_case_id"]]["alerts"]
+            self.assertTrue(all(a["outcome"] == "Pending" for a in rows), key)
 
     def test_wc_pagination_and_facets(self):
         self.login("amara.iyer")

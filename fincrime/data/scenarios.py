@@ -4,15 +4,23 @@ Each one exists to demonstrate a branch of the SOP. All people, companies,
 documents and watchlist records are fictional; adverse-media text and source
 links are invented and point at reserved example domains.
 """
-from fincrime.data.seed import (AMARA, JON, LEAH, MARIO, NISHA, RYAN, agency_info, alert_case, auto_fp,
-                                auto_fp_matches, doc, event, handoff, kyc_case, resolved, std_docs, wc_case, wc_match)
+from fincrime.data.seed import (AMARA, JON, LEAH, MARIO, NISHA, RYAN, agency_info, alert_case, common_name_matches,
+                                doc, event, handoff, kyc_case, resolved, std_docs, wc_case, wc_match)
+from fincrime.engines import ai_screening
 from fincrime.utils import dates
 
 
 def _pair(kyc, key, matches, **alert_kw):
-    """A screening case and its watchlist case for a KYC case with a hit."""
+    """A screening case and its watchlist case for a KYC case with a hit,
+    with the AI screening rules run at intake the way the real automation
+    runs them: a minute after the screening, before any analyst looks.
+    Records an analyst already resolved (seeded history) are left alone."""
     a = alert_case(kyc=kyc, key=key, matches=matches, **alert_kw)
     w = wc_case(alert=a, kyc=kyc, matches=matches)
+    screened_at = kyc["verification_points"][3]["at"]
+    ai_screening.apply(kyc, a, w, at=dates.add_minutes(screened_at, 1), run="intake",
+                       enabled=ai_screening.DEFAULT_ENABLED, guards=ai_screening.DEFAULT_GUARDS)
+    kyc["audit"].sort(key=lambda e: e["at"])      # kyc_case() sorted before the rules row existed
     return a, w
 
 
@@ -27,28 +35,30 @@ def build():
         docs=std_docs("driving_licence", poa=True), address="1842 Maple Ridge Drive, Columbus, OH 43215",
         country="United States", screening_hit=True,
     )
-    m_at = mercer["verification_points"][3]["at"]
+    # Six records list a year of birth that is not his: the DOB rule clears
+    # them at intake. The seventh lists no date of birth at all, so the rules
+    # leave it to the analyst — the golden path is the human-in-the-loop one.
     mercer_matches = [
-        auto_fp(wc_match(key="mercer-1", name="Daniel MERCER", strength=0.93, types=("LE", "SIC"), dobs=["1973", "1972"],
-                         citizenship="United States", country="United States", category="POST CONVICTION",
-                         special_interest=["Fraud"], entered="2003-07-31", updated="2022-06-08"), at=m_at),
-        auto_fp(wc_match(key="mercer-2", name="Daniel MERCER", strength=0.93, types=("LE", "SIC"), dobs=["1970", "1969"],
-                         citizenship="United States", country="United States", category="POST CONVICTION",
-                         special_interest=["Violent Crime"], entered="2023-05-29", updated="2023-05-29"), at=m_at),
-        auto_fp(wc_match(key="mercer-3", name="Daniel MERCER", strength=0.93, types=("LE", "SIC"), dobs=["16-Aug-1960"],
-                         citizenship="United States", country="United States", category="POST CONVICTION",
-                         special_interest=["Fraud"], entered="2005-10-25", updated="2022-08-19"), at=m_at),
-        auto_fp(wc_match(key="mercer-4", name="Daniel MERCER", strength=0.93, types=("SIC",), dobs=["1962", "1963"],
-                         citizenship="United Kingdom", country="United Kingdom", category="POST CONVICTION",
-                         special_interest=["Conspiracy or Collusion"], entered="2025-12-26", updated="2025-12-26"), at=m_at),
-        auto_fp(wc_match(key="mercer-5", name="Daniel MERCER", strength=0.93, types=("LE", "SIC"), dobs=["1973", "1972"],
-                         citizenship="United States", country="United States", category="POST CONVICTION",
-                         special_interest=["Fraud"], entered="2010-11-24", updated="2022-06-09"), at=m_at),
-        auto_fp(wc_match(key="mercer-6", name="Daniel Robert MERCER", alias="MERCER, Daniel", strength=0.9, types=("SIC", "RE"),
-                         dobs=["18-Feb-1958"], citizenship="United Kingdom", country="United Kingdom", category="REGULATORY",
-                         special_interest=["Fraud"], entered="2022-08-03", updated="2022-08-03"), at=m_at),
+        wc_match(key="mercer-1", name="Daniel MERCER", strength=0.93, types=("LE", "SIC"), dobs=["1973", "1972"],
+                 citizenship="United States", country="United States", category="POST CONVICTION",
+                 special_interest=["Fraud"], entered="2003-07-31", updated="2022-06-08"),
+        wc_match(key="mercer-2", name="Daniel MERCER", strength=0.93, types=("LE", "SIC"), dobs=["1970", "1969"],
+                 citizenship="United States", country="United States", category="POST CONVICTION",
+                 special_interest=["Violent Crime"], entered="2023-05-29", updated="2023-05-29"),
+        wc_match(key="mercer-3", name="Daniel MERCER", strength=0.93, types=("LE", "SIC"), dobs=["16-Aug-1960"],
+                 citizenship="United States", country="United States", category="POST CONVICTION",
+                 special_interest=["Fraud"], entered="2005-10-25", updated="2022-08-19"),
+        wc_match(key="mercer-4", name="Daniel MERCER", strength=0.93, types=("SIC",), dobs=["1962", "1963"],
+                 citizenship="United Kingdom", country="United Kingdom", category="POST CONVICTION",
+                 special_interest=["Conspiracy or Collusion"], entered="2025-12-26", updated="2025-12-26"),
+        wc_match(key="mercer-5", name="Daniel MERCER", strength=0.93, types=("LE", "SIC"), dobs=["1973", "1972"],
+                 citizenship="United States", country="United States", category="POST CONVICTION",
+                 special_interest=["Fraud"], entered="2010-11-24", updated="2022-06-09"),
+        wc_match(key="mercer-6", name="Daniel Robert MERCER", alias="MERCER, Daniel", strength=0.9, types=("SIC", "RE"),
+                 dobs=["18-Feb-1958"], citizenship="United Kingdom", country="United Kingdom", category="REGULATORY",
+                 special_interest=["Fraud"], entered="2022-08-03", updated="2022-08-03"),
         wc_match(
-            key="mercer-7", name="Daniel MERCER", strength=0.86, types=("SIC", "OB"), dobs=["1962"],
+            key="mercer-7", name="Daniel MERCER", strength=0.86, types=("SIC", "OB"), dobs=[],
             citizenship="United Kingdom", country="United Kingdom", category="POST CONVICTION",
             special_interest=["Conspiracy or Collusion", "Illegal Possession or Sale", "Narcotics Trafficking"],
             location={"city": "Wolverhampton", "region": "West Midlands", "country": "United Kingdom (GBR)"},
@@ -131,8 +141,7 @@ def build():
         tags=["Creator G2"], created_hours_ago=30, status="DataScreening", confirmed_hours_after=1.0,
         l1=[MARIO], previous_reviewer=MARIO, routed_to=MARIO, screening_hit=True, address="Block 7, Clifton, Karachi", country="Pakistan",
     )
-    h_at = hassan["verification_points"][3]["at"]
-    hassan_matches = auto_fp_matches(first="Ahmed", surname="Hassan", n=212, seed="hassan", keep_unresolved=3, screened_at=h_at)
+    hassan_matches = common_name_matches(first="Ahmed", surname="Hassan", client_year=2005, n=212, seed="hassan", keep_unresolved=3)
     top = hassan_matches[-3]
     top.update(name="Ahmed Bilal HASSAN", strength=0.91, types=["SIC", "OB"], dobs=["2005"])
     top["key_data"].update(category="POST CONVICTION",
@@ -144,12 +153,15 @@ def build():
     a, w = _pair(hassan, "hassan", hassan_matches)
     kyc.append(hassan); alerts.append(a); wc.append(w)
 
-    # 7 ── Michael James Taylor: wanted-notice namesake, 23-year DOB gap ───
+    # 7 ── Michael James Taylor: the auto-verified path ─────────────────────
+    # A wanted-notice namesake born 23 years earlier and a female namesake
+    # born the same year: the DOB rule clears one, the gender rule the other,
+    # and the screening case closes itself at intake. Once Amara confirms his
+    # data nothing is left for an analyst and the case verifies on its own.
     taylor = kyc_case(
         key="taylor", name="Michael James Taylor", nationality="GB", dob="1991-08-15", id_type="Passport",
-        tags=["Gifter G6"], created_hours_ago=11, status="DataScreening", confirmed_hours_after=0.7,
-        l1=[AMARA], previous_reviewer=AMARA, routed_to=AMARA, screening_hit=True, address="142 High Street, Kensington, London W8 7RG",
-        country="United Kingdom",
+        tags=["Gifter G6"], created_hours_ago=11, status="DataConfirming", routed_to=AMARA, screening_hit=True,
+        address="142 High Street, Kensington, London W8 7RG", country="United Kingdom",
     )
     taylor_matches = [wc_match(
         key="taylor-1", name="TAYLOR, Michael James", strength=0.81, types=("LE",), dobs=["10-Feb-1968"],
@@ -157,6 +169,12 @@ def build():
         special_interest=["Fraud", "Computer Misuse"], location={"city": "Toronto", "region": "Ontario", "country": "Canada (CAN)"},
         bio="Subject of an international wanted notice for wire fraud and computer misuse offences (issued 2019).",
         sources=[("03-Feb-2019", "https://notices.example/wanted/red/2019-0921")], entered="2019-02-03", updated="2024-01-15",
+    ), wc_match(
+        key="taylor-2", name="TAYLOR, Michele", alias="Michele J. TAYLOR", strength=0.74, types=("LE",), gender="Female", dobs=["1991"],
+        citizenship="United Kingdom", country="United Kingdom", category="LAW ENFORCEMENT", sub_category="Wanted - domestic notice",
+        special_interest=["Fraud"], location={"city": "Leeds", "region": "West Yorkshire", "country": "United Kingdom (GBR)"},
+        bio="Sought in connection with a benefit-fraud investigation (2021).",
+        sources=[("14-Sep-2021", "https://notices.example/wanted/domestic/2021-3377")], entered="2021-09-14", updated="2023-03-02",
     )]
     a, w = _pair(taylor, "taylor", taylor_matches)
     kyc.append(taylor); alerts.append(a); wc.append(w)

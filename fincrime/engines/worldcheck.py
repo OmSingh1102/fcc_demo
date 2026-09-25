@@ -8,8 +8,8 @@ from fincrime.utils import dates
 STATUS_ORDER = ["Unresolved", "True positive", "Potential match", "False positive", "Unspecified"]
 
 
-def _audit(record, actor, action, detail=""):
-    record.setdefault("audit", []).append({"at": dates.now_str(), "actor": actor, "action": action, "detail": detail})
+def _audit(record, actor, action, detail="", at=None):
+    record.setdefault("audit", []).append({"at": at or dates.now_str(), "actor": actor, "action": action, "detail": detail})
 
 
 def _require(cond, msg):
@@ -36,13 +36,15 @@ def resolve_match(wc, actor, match_id, status, risk, reason, comment):
     return m
 
 
-def record_export(wc, actor):
-    now = dates.now_str()
+def record_export(wc, actor, at=None):
+    """`at` lets the AI screening rules date an export at the moment they
+    closed the screening case (the seed builds cases in the past)."""
+    now = at or dates.now_str()
     stamp = now.replace("-", "").replace(":", "").replace(" ", "_")
     name = "".join(ch for ch in wc["primary_name"].title() if ch.isalnum())
     export = {"id": f"exp-{len(wc['exports']) + 1}", "filename": f"WorldCheck_{name}_{stamp}.pdf", "at": now, "by": actor}
     wc["exports"].append(export)
-    _audit(wc, actor, "Case exported", export["filename"])
+    _audit(wc, actor, "Case exported", export["filename"], at=now)
     return export
 
 

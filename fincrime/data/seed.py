@@ -30,7 +30,10 @@ KycCase
                       approve_reason, rejection_reason, id_summary, report,
                       operated_at, by}],
     screening{hit, alert_case_id, rows[{platform, user_name, screen_time,
-                                        list, result, alert_id}]},
+                                        list, result, alert_id}],
+              workflow ("auto-verified" | "human-in-the-loop"),
+              ai{total, auto_resolved, for_review, rules{}, labels, auto_closed,
+                 export, last_run{run, at, resolved}}},
     risk_rating, risk_recalculated_at, skopenow, attachments[], resubmit,
     fraud_typology, escalate_reason,
     routing{status, to, trigger, reason, at} | None,
@@ -65,6 +68,7 @@ import copy
 import random
 
 from fincrime.data import vocab
+from fincrime.engines import ai_screening
 from fincrime.utils import dates, ids
 
 # ── Analysts ────────────────────────────────────────────────────────────────
@@ -346,7 +350,7 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
         investigation_file = {"name": f"{ids.client_id(key)} ({ids.kyc_case_id(key)})", "created_at": escalated_at,
                               "created_by": confirmer}
 
-    return {
+    record = {
         "id": ids.kyc_case_id(key), "key": key, "client_id": ids.client_id(key), "tenant": tenant,
         "tags": list(tags), "status": status, "pending_reason": pending_reason, "source": source,
         "manual_review_reason": list(manual_review_reason), "poa_required": bool(poa_required),
@@ -373,7 +377,8 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
         "confirmations": confirmations,
         "verification_points": points,
         "review_decisions": review_decisions,
-        "screening": {"hit": bool(screening_hit), "alert_case_id": alert_case_id, "rows": rows},
+        "screening": {"hit": bool(screening_hit), "alert_case_id": alert_case_id, "rows": rows,
+                      "workflow": "human-in-the-loop" if screening_hit else "auto-verified", "ai": None},
         "risk_rating": risk_rating, "risk_recalculated_at": "",
         "skopenow": None, "attachments": [], "resubmit": resubmit,
         "fraud_typology": fraud_typology, "escalate_reason": escalate_reason if escalated_at else "",
@@ -381,6 +386,14 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
         "investigation_file": investigation_file, "checker1": None, "checker2": None,
         "audit": audit, "change_log": [],
     }
+    # The AI screening rules run at intake. A case with no hit is labelled
+    # here; one with a hit is labelled by scenarios._pair() once its
+    # watchlist records exist, because the rules need them.
+    if screening_hit:
+        record["screening"]["ai"] = ai_screening.stats(record, None, run="intake", at=screened_at)
+    else:
+        ai_screening.label_no_hit(record, screened_at)
+    return record
 
 
 def agency_info(*, company, registration_number, incorporation_country, address, representative,
@@ -414,42 +427,34 @@ def wc_match(*, key, name, alias="", strength=0.9, types=("SIC",), gender="Male"
     }
 
 
-def auto_fp(match, remark="Date of Birth mismatch", at=""):
-    """A match the screening rules cleared before any analyst saw it."""
-    match["resolution"] = {"status": "False positive", "risk": "Low", "reason": remark, "remark": remark,
-                           "comment": "Auto-resolved by screening rule.", "by": "System User", "at": at}
-    return match
-
-
 def resolved(match, status, risk, reason, by, at, comment=""):
+    """A match an analyst resolved before boot. The AI screening rules never
+    touch a resolved record, so this is how history stays history."""
     match["resolution"] = {"status": status, "risk": risk, "reason": reason, "remark": reason,
                            "comment": comment, "by": by, "at": at}
     return match
 
 
-_OUTCOME_FOR = {"False positive": "False Positive", "Potential match": "Potential Match",
-                "True positive": "True Positive"}
-_LABEL_FOR = {"False positive": "False Positive", "Potential match": "Potential Match",
-              "True positive": "True Positive"}
-_RATIONALE_FOR = {"Date of Birth mismatch": "DOB Mismatch", "Nationality mismatch": "Nationality Mismatch",
-                  "Gender mismatch": "Gender Mismatch", "Name mismatch": "Name Mismatch",
-                  "Confirmed by identification": "Confirmed Identity", "Confirmed by adverse media": "Same Person - Adverse Media"}
+def _gender_label(code):
+    return {"M": "Male", "F": "Female"}.get(code, "")
 
 
 def alert_from_match(key, i, match, screened_at):
+    """The screening case's alert row for one watchlist record. Rows for
+    records the AI screening rules clear are filled in by ai_screening.apply()
+    when scenarios._pair() runs the rules at intake."""
     res = match["resolution"]
-    auto = res["by"] == "System User"
-    outcome = _OUTCOME_FOR.get(res["status"], "Pending")
+    outcome = vocab.WC_STATUS_LABEL.get(res["status"], "Pending")
     return {
         "id": ids.alert_id(f"{key}-{i}"), "match_id": match["id"], "vendor": "WC",
         "watchlist_id": match["wc_id"], "outcome": outcome,
-        "review_mode": "Smart Review" if auto else ("Manual Review" if outcome != "Pending" else ""),
-        "result_label": _LABEL_FOR.get(res["status"], ""),
-        "rationale": _RATIONALE_FOR.get(res["reason"], res["reason"]) if outcome != "Pending" else "",
+        "review_mode": "Manual Review" if outcome != "Pending" else "",
+        "result_label": vocab.WC_STATUS_LABEL.get(res["status"], ""),
+        "rationale": vocab.WC_REASON_RATIONALE.get(res["reason"], res["reason"]) if outcome != "Pending" else "",
         "comment": res["comment"] if outcome != "Pending" else "",
         "risk_level": res["risk"] if outcome != "Pending" else "",
         "attachment": "", "resolved_by": res["by"], "resolved_at": res["at"],
-        "smart_strategy": "DOB mismatch" if auto else "",
+        "smart_strategy": "",
         "name": match["name"], "matched_alias": match["matched_alias"] or match["name"],
         "score": round(match["strength"] * 100, 2), "type": match["types"][0] if match["types"] else "",
         "dob": match["dobs"][0] if match["dobs"] else "", "gender": match["gender"],
@@ -479,7 +484,7 @@ def alert_case(*, kyc, key, matches, level=None, status="Init", assigned_to="", 
         "last_screen_time": screened_at, "latest_updated": handled_at or screened_at,
         "screening_info": {
             "search_type": "Individual" if kyc["agency"] is None else "Entity",
-            "name": c["legal_name"], "dob": c["dob"], "gender": "Female" if c["gender"] == "F" else "Male",
+            "name": c["legal_name"], "dob": c["dob"], "gender": _gender_label(c["gender"]),
             "country": c["country"], "registered_country": c["country"] if kyc["agency"] else "",
             "nationality": c["nationality"], "pob": "", "id_type": c["id_type"], "id_number": c["id_number"],
         },
@@ -494,11 +499,9 @@ def wc_case(*, alert, kyc, matches, assignee="Case Unassigned", rating="Not Rate
     screened_at = kyc["verification_points"][3]["at"]
     for m in matches:
         m["matched"] = m["matched"] or screened_at
-        if m["resolution"]["by"] == "System User" and not m["resolution"]["at"]:
-            m["resolution"]["at"] = screened_at
     return {
         "id": alert["id"], "key": alert["key"], "alert_case_id": alert["id"], "kyc_case_id": kyc["id"],
-        "primary_name": c["legal_name"], "gender": "Female" if c["gender"] == "F" else "Male", "dob": c["dob"],
+        "primary_name": c["legal_name"], "gender": _gender_label(c["gender"]), "dob": c["dob"],
         "group": t["wc_group"], "assignee": assignee, "rating": rating, "ongoing_screening": "Daily",
         "last_updated": screened_at,
         "case_details": {
@@ -523,11 +526,13 @@ _SIC_POOL = ["Fraud", "Violent Crime", "Terror Related", "Conspiracy or Collusio
              "Crimes Against the State", "Narcotics Trafficking", "Illegal Possession or Sale", "Organised Crime"]
 
 
-def auto_fp_matches(*, first, surname, n=212, seed="common", dob_years=(1958, 2008), citizenship="Pakistan",
-                    cities=None, keep_unresolved=3, screened_at=""):
+def common_name_matches(*, first, surname, client_year, n=212, seed="common", dob_years=(1958, 2008),
+                        citizenship="Pakistan", cities=None, keep_unresolved=3):
     """`n` watchlist records for a very common name. All but the last
-    `keep_unresolved` are auto-resolved as date-of-birth mismatches, the way a
-    screening rule clears the obvious ones before an analyst sees the case."""
+    `keep_unresolved` list a year of birth that is not the client's, so the
+    DOB rule clears them at intake; the kept ones list the client's own year
+    or no date at all, which the rules leave to an analyst. Data only: the
+    rules do the resolving."""
     rng = random.Random(seed)
     cities = cities or _PK_CITIES
     variants = _FIRST_VARIANTS.get(first, [first, f"{first} Ali", f"{first} Khan"])
@@ -539,9 +544,15 @@ def auto_fp_matches(*, first, surname, n=212, seed="common", dob_years=(1958, 20
         year = rng.randint(*dob_years)
         types = rng.choice([("SIC",), ("SIC", "OB"), ("LE",), ("LE", "SIC"), ("RE",), ("PEP",)])
         city = rng.choice(cities)
+        strength = round(rng.uniform(0.72, 0.99), 2)
+        has_dob = rng.random() < 0.85
+        if i < n - keep_unresolved:
+            dobs = [str(year + 1 if year == client_year else year)]
+        else:
+            dobs = [str(client_year)] if has_dob else []
         m = wc_match(
-            key=f"{seed}-{i}", name=name, alias=alias, strength=round(rng.uniform(0.72, 0.99), 2),
-            types=types, gender="Male", dobs=[str(year)] if rng.random() < 0.85 else [],
+            key=f"{seed}-{i}", name=name, alias=alias, strength=strength,
+            types=types, gender="Male", dobs=dobs,
             citizenship=citizenship, country=citizenship,
             category="POST CONVICTION" if "SIC" in types or "LE" in types else ("PEP" if "PEP" in types else "REGULATORY"),
             sub_category="PEP Sub-National Government" if "PEP" in types else "",
@@ -550,8 +561,6 @@ def auto_fp_matches(*, first, surname, n=212, seed="common", dob_years=(1958, 20
             entered=f"{rng.randint(2005, 2024)}-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}",
             updated=f"{rng.randint(2022, 2026)}-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}",
         )
-        if i < n - keep_unresolved:
-            auto_fp(m, at=screened_at)
         out.append(m)
     return out
 
@@ -586,12 +595,15 @@ _INTAKE = [("Sofia Bianchi", "IT", "Passport", "1995-09-12", "F"), ("Marcus Oyel
 def filler_cases(seed="filler"):
     """Background rows so the list paginates and the analytics have volume.
     Mostly closed; a few open with no screening hit, so nothing here needs a
-    screening or watchlist case. The open screening-stage ones are already
-    routed, so My Work and the pipeline have something to show at boot; the
-    Data Confirming ones are left for the presenter to pull."""
+    screening or watchlist case. Four of the open ones are already routed, so
+    My Work and the pipeline have something to show at boot; the rest of the
+    Data Confirming ones are left for the presenter to pull. None sits in
+    Data Screening: a TT Live case with no hit auto-verifies the moment its
+    data is confirmed (ai_screening), so that stage never holds one."""
     rng = random.Random(seed)
     out = []
-    statuses = ["Verified"] * 12 + ["DataScreening"] * 4 + ["DataConfirming"] * 4 + ["ResubmitID", "ResubmitPOA", "Rejected", "Verified"]
+    statuses = ["Verified"] * 12 + ["DataConfirming"] * 8 + ["ResubmitID", "ResubmitPOA", "Rejected", "Verified"]
+    routed = {12, 13, 14, 15}
     for i, (name, nat, id_type, dob, gender) in enumerate(_FILLER_PEOPLE):
         status = statuses[i % len(statuses)]
         hours = rng.uniform(6, 240) if status in vocab.CLOSED_STATUSES else rng.uniform(2, 40)
@@ -611,7 +623,7 @@ def filler_cases(seed="filler"):
             previous_reviewer=l1[0] if status not in ("DataConfirming",) else "",
             pending_reason="Pending Resubmission" if status.startswith("Resubmit") else "",
             docs=std_docs("passport" if id_type == "Passport" else ("driving_licence" if id_type == "DrivingLicense" else "national_id"), rng.random() < 0.3),
-            routed_to=l1[0] if status == "DataScreening" else "",
+            routed_to=l1[0] if i in routed else "",
             qc=qc,
         )
         out.append(case)
