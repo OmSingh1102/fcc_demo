@@ -1,0 +1,8 @@
+flask==3.1.1
+# World-Check export PDF the EDD Review modal attaches. reportlab ships only
+# the Vera fonts, so wc_report_pdf registers Arial from C:\Windows\Fonts when
+# it is there — without that a Cyrillic native name renders as boxes.
+reportlab>=4.0
+pillow>=10
+# .env loading for a deployed copy (see .env.example). Harmless when absent.
+python-dotenv>=1.0
