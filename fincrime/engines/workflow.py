@@ -8,9 +8,14 @@ the form, call one of these, save, redirect.
 
 Two rules the earlier prototype got wrong are enforced here on purpose:
 every outcome needs the analyst's own comment (nothing is ever written into
-the audit trail on their behalf), and `reviewers_by_level` is append-only so
+the audit trail on their behalf — the router and the AI screening rules sign
+their own rows as themselves), and `reviewers_by_level` is append-only so
 the segregation check still knows who touched a case at L1 after it has been
 returned and picked up by somebody else.
+
+The AI screening rules (engines/ai_screening) run again at the re-screen
+after Data Confirming. A TT Live case they leave nothing on is auto-verified
+here without an analyst step; a seller always keeps its human close.
 
 Ownership changes also keep the work log (engines/worklog) and, on every
 tier hand-off, ask the router (engines/routing) for the next analyst at
@@ -24,7 +29,7 @@ once — SOP 5.2.3, no bot lag.
 """
 from fincrime.adapters import cms, skopenow
 from fincrime.data import vocab
-from fincrime.engines import routing, segregation, worklog
+from fincrime.engines import ai_screening, routing, segregation, worklog
 from fincrime.engines.errors import WorkflowError
 from fincrime.utils import dates
 
@@ -235,11 +240,12 @@ def poa_failures(case, now=None):
     return [c for c in poa_checks(case, now) if not c["ok"]]
 
 
-def data_confirm(case, actor, form):
+def data_confirm(case, actor, form, alert_case=None, wc=None):
     """OK on the Data Confirm modal: all three fields confirmed (or edited and
     confirmed), the POA checks confirmed when a POA is required, optional
-    summary and attachment. Moves the case to Data Screening and re-runs the
-    name screen on the confirmed data."""
+    summary and attachment. Moves the case to Data Screening, re-runs the
+    name screen on the confirmed data and lets the AI screening rules act on
+    it; a TT Live case with nothing left for an analyst verifies itself."""
     _require(case["status"] == "DataConfirming", "Data confirming is only available while the case is in Data Confirming.")
     _require_reserved(case, actor)
     now = dates.now_str()
@@ -285,6 +291,42 @@ def data_confirm(case, actor, form):
     if summary:
         detail += f" Summary: {summary}"
     _audit(case, actor, "Data confirmed", detail)
+    ai_screening.apply(case, alert_case, wc, at=now, run="rescreen")
+    if _auto_verify_allowed(case) and case["screening"].get("workflow") == "auto-verified":
+        auto_verify(case, actor, now)
+
+
+def _auto_verify_allowed(case):
+    """Creators verify themselves when the rules leave nothing; sellers never
+    do (SOP 4.2: Checker 1 recalculates the risk, Checker 2 signs off)."""
+    return case["tenant"] == "ttlive"
+
+
+def auto_verify(case, actor, now):
+    """The auto-verified workflow's last step: Data Confirming is done and the
+    AI screening rules left no alert for a person, so the case completes with
+    no analyst step. System User signs the close; the analyst who confirmed
+    the data stays on record as the previous reviewer and keeps the credit."""
+    ai = case["screening"].get("ai") or {}
+    export = ai.get("export", "")
+    if case["screening"]["hit"]:
+        _require(ai.get("auto_closed") and export, "The screening case is still open; an analyst has to close it.")
+        reason = (f"All {ai['total']} alert(s) auto-resolved by the AI screening rules"
+                  f"{' (' + ai['labels'] + ')' if ai.get('labels') else ''}.")
+        decision = "False positive"
+    else:
+        reason, decision = "No screening hit — auto-verified by the AI screening rules.", "No match"
+    if export:
+        case["attachments"].append({"name": export, "at": now, "by": vocab.SYSTEM_USER, "ref": "auto_verify"})
+    _decision(case, "Data Screening", decision=decision, operated_at=now, by=vocab.SYSTEM_USER,
+              approve_reason=reason, id_summary=reason, report=export)
+    case["status"] = "Verified"
+    case["pending_reason"] = ""
+    case["closed_at"] = now
+    case["closed_by"] = vocab.SYSTEM_USER
+    _point(case, "Completed", now)
+    _hand_back(case, actor, "Auto-verified")
+    _audit(case, vocab.SYSTEM_USER, "Case verified", f"Auto-verified: {reason} Data confirmed by {actor}.")
 
 
 def resubmit(case, actor, decisions, id_reason, poa_reason, note):

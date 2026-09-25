@@ -22,6 +22,7 @@ def _today():
 def pool(cases, tenant, day=None):
     day = day or _today()
     return sorted((c for c in cases if c["tenant"] == tenant and c["status"] in vocab.CLOSED_STATUSES
+                   and c.get("closed_by") != vocab.SYSTEM_USER          # an auto-verified case has no closer to coach
                    and (not c.get("qc_at") or c["qc_at"][:10] == day)), key=lambda c: c["id"])
 
 

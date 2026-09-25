@@ -358,6 +358,86 @@ class FlowTestCase(unittest.TestCase):
             rows = fcc.ALERT_BY_ID[self.K[key]["screening"]["alert_case_id"]]["alerts"]
             self.assertTrue(all(a["outcome"] == "Pending" for a in rows), key)
 
+    def test_taylor_auto_verifies_on_confirm(self):
+        """The auto-verified workflow end to end: the rules cleared both of
+        Taylor's records at intake; confirming his data completes the case
+        with no analyst step, and Amara keeps the credit."""
+        self.login("amara.iyer")
+        t = self.K["taylor"]
+        aid = t["screening"]["alert_case_id"]
+        wc = fcc.WC_BY_ID[aid]
+        load_before = fcc.routing.load(AMARA, fcc.KYC_CASES)
+        r = self.confirm(t)
+        self.assertEqual(t["status"], "Verified", flash_text(r))
+        self.assertIn("auto-verified", flash_text(r))
+        self.assertEqual(t["closed_by"], "System User")
+        self.assertEqual(t["previous_reviewer"], AMARA)
+        self.assertEqual(t["current_reviewer"], "")
+        self.assertEqual(t["reviewers_by_level"]["L1"], [AMARA])
+        row = t["review_decisions"][4]
+        self.assertEqual((row["decision"], row["by"], row["report"]), ("False positive", "System User", wc["exports"][0]["filename"]))
+        self.assertEqual(len(fcc.workflow.verification_points(t)), 5)
+        self.assertEqual((t["work"][-1]["analyst"], t["work"][-1]["outcome"]), (AMARA, "Auto-verified"))
+        self.assertEqual((t["audit"][-1]["action"], t["audit"][-1]["actor"]), ("Case verified", "System User"))
+        self.assertEqual(fcc.routing.load(AMARA, fcc.KYC_CASES), load_before - 1)
+        self.assertNotIn(t, fcc.qc.pool(fcc.KYC_CASES, "ttlive"))
+        page = self.c.get("/ai-screening").data.decode("utf-8")
+        self.assertIn("MICHAEL JAMES TAYLOR", page)
+        self.assertIn("Cases closed by the rules", page)
+        # A re-screen that finds nothing new writes no rules row of its own.
+        self.assertEqual(sum(1 for e in wc["audit"] if e["action"] == "AI screening rules applied"), 1)
+
+    def test_ttshop_never_auto_closes(self):
+        """A seller keeps the human close: Data Confirm labels it, Checker 1
+        still recalculates the risk and approves, Checker 2 still signs."""
+        self.login("jon.miranda")
+        self.c.post("/tenant", data={"tenant": "ttshop", "next": "/kyc/list"})
+        f = self.K["filler-shop-3"]                                        # DataConfirming, no hit
+        self.post(f"/kyc/{f['id']}/reserve")
+        c = f["client"]
+        r = self.post(f"/kyc/{f['id']}/data_confirm", name=c["legal_name"], name_ok="1", id_number=c["id_number"], id_number_ok="1",
+                      nationality=c["nationality"], nationality_ok="1", poa_ok="1", summary="Registry checked.")
+        self.assertEqual(f["status"], "DataScreening", flash_text(r))
+        self.assertEqual(f["screening"]["workflow"], "auto-verified")
+        self.assertIn("approve the seller", flash_text(r))
+        self.post(f"/kyc/{f['id']}/recalculate_risk")
+        r = self.post(f"/kyc/{f['id']}/edd_review", decision="No match - Approve", summary="Clean seller.")
+        self.assertEqual(f["pending_reason"], "Pending Checker 2", flash_text(r))
+
+    def test_ai_rules_toggle_persists(self):
+        """The team lead switches the nationality rule on; it survives a
+        restart, changes the next re-screen, and reset puts the defaults back."""
+        self.login("amara.iyer")
+        r = self.c.post("/ai-screening/rules", data={"key": "nationality_mismatch", "enabled": "1"})
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(fcc.AI_SETTINGS["enabled"]["nationality_mismatch"])   # L1 cannot switch rules
+        self.login("leah.fernandez")
+        r = self.post("/ai-screening/rules", key="nationality_mismatch", enabled="1")
+        self.assertTrue(fcc.AI_SETTINGS["enabled"]["nationality_mismatch"], flash_text(r))
+        self.assertEqual(fcc.AI_SETTINGS["history"][-1]["by"], LEAH)
+        self.assertIn("Nationality mismatch: off", flash_text(r))
+        fcc._load_seed()                                                   # simulated restart
+        self.assertTrue(fcc.AI_SETTINGS["enabled"]["nationality_mismatch"])
+        self.assertTrue(fcc.ai_screening.rules_enabled()["nationality_mismatch"])
+        r = self.post("/ai-screening/rules", key="no_such_rule", enabled="1")
+        self.assertIn("Unknown rule", flash_text(r))
+        # Mercer's seventh record is a UK national with no listed date of birth:
+        # with the nationality rule on, the re-screen clears it and the case
+        # verifies itself instead of waiting for Amara.
+        self.login("amara.iyer")
+        m = fcc.KYC_BY_ID[self.K["mercer"]["id"]]
+        alert = fcc.ALERT_BY_ID[m["screening"]["alert_case_id"]]
+        r = self.confirm(m)
+        self.assertEqual(m["status"], "Verified", flash_text(r))
+        self.assertEqual(m["closed_by"], "System User")
+        self.assertEqual(alert["status"], "Closed")
+        self.assertEqual(sorted({a["smart_strategy"] for a in alert["alerts"]}), ["DOB mismatch", "Nationality mismatch"])
+        self.assertEqual(m["screening"]["ai"]["last_run"], {"run": "rescreen", "at": m["closed_at"], "resolved": 1})
+        self.post("/reset")
+        self.assertFalse(fcc.AI_SETTINGS["enabled"]["nationality_mismatch"])
+        self.assertEqual(fcc.AI_SETTINGS["history"], [])
+        self.assertEqual(StateStore.count(), 0)
+
     def test_wc_pagination_and_facets(self):
         self.login("amara.iyer")
         aid = self.K["hassan"]["screening"]["alert_case_id"]
@@ -376,10 +456,13 @@ class FlowTestCase(unittest.TestCase):
 
     def test_persistence_and_reset(self):
         self.login("amara.iyer")
-        s = self.K["solis"]
-        self.confirm(s)
-        self.post(f"/kyc/{s['id']}/edd_review", decision="No match - Approve", summary="Clean.")
-        self.assertEqual(s["status"], "Verified")
+        s = self.K["solis"]                                                # TT Live, no hit
+        r = self.confirm(s)
+        # No match on any list: the case verifies itself once the data is confirmed.
+        self.assertEqual(s["status"], "Verified", flash_text(r))
+        self.assertEqual(s["closed_by"], "System User")
+        self.assertEqual(s["review_decisions"][4]["decision"], "No match")
+        self.assertIn("auto-verified", flash_text(r))
         self.assertGreaterEqual(StateStore.count(), 1)
         fcc._load_seed()                                                   # simulated restart
         self.assertEqual(fcc.KYC_BY_ID[s["id"]]["status"], "Verified")
@@ -389,10 +472,12 @@ class FlowTestCase(unittest.TestCase):
 
     def test_analytics_and_queue_render(self):
         self.login("nisha.rao")
-        for path in ("/analytics", "/queue/l2", "/name_screening/queue", "/work", "/pipeline", "/trackers", "/audit", "/routing"):
+        for path in ("/analytics", "/queue/l2", "/name_screening/queue", "/work", "/pipeline", "/trackers", "/audit", "/routing",
+                     "/ai-screening"):
             self.assertEqual(self.c.get(path).status_code, 200, path)
         self.login("leah.fernandez")
         self.assertEqual(self.c.get("/qc").status_code, 200)
+        self.assertIn(b"Switch off", self.c.get("/ai-screening").data)
 
     # phase 8: routing, capacity and hand-offs (SOP 5.2.1–5.2.3) -------------
     def test_routing_skill_capacity_segregation(self):

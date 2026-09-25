@@ -5,6 +5,13 @@ from fincrime.engines import qc, routing, sla, worklog
 from fincrime.utils import dates
 
 
+def _closer(case):
+    """Who gets the credit: the closer, or the analyst who confirmed the data
+    on a case the AI screening rules then verified."""
+    closed_by = case.get("closed_by") or ""
+    return case.get("previous_reviewer") or closed_by if closed_by == vocab.SYSTEM_USER else closed_by
+
+
 class WorkConsole:
 
     @staticmethod
@@ -21,7 +28,7 @@ class WorkConsole:
         wip = len(mine)
         headroom = max(0, capacity - wip)
         due_soon = sum(1 for r in rows if r["remaining"] <= 4)
-        completed_today = sum(1 for c in cases if c.get("closed_by") == email and (c.get("closed_at") or "")[:10] == today)
+        completed_today = sum(1 for c in cases if _closer(c) == email and (c.get("closed_at") or "")[:10] == today)
         handled = [worklog.hours(w, now) for c in cases for w in c.get("work", [])
                    if w["analyst"] == email and w.get("to")]
         avg_handle = round(sum(handled) / len(handled), 1) if handled else 0.0

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}AI Screening{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div><h2>AI screening rules — {{ vm.tenant_label }}</h2>
+        <p>The preset automation that clears a watchlist record without an analyst, and what it did on this tenant's cases. A deterministic rule book, not a model: every rule is a check a compliance team can read and audit. A case where the rules clear every alert is <b>auto-verified</b>; a case with anything left over is <b>human-in-the-loop</b>, and the analyst handles only what is left.</p></div>
+    <div class="row">{% if can_edit %}<span class="badge blue">team lead: switches live</span>{% else %}<span class="badge slate">switches: team lead only</span>{% endif %}</div>
+</div>
+
+<div class="kpi-strip">
+    {% for label, value, hint, tone in vm.tiles %}
+    <div class="kpi {% if tone %}tone-{{ tone }}{% endif %}"><div class="l">{{ label }}</div><div class="v">{{ value }}</div><div class="hint">{{ hint }}</div></div>
+    {% endfor %}
+</div>
+
+<div class="card mt-12 pad-0">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Rules</div><div class="card-sub">first rule that fires wins; a switch applies to the next screening run, never to a record already resolved</div></div>
+    <table class="tbl">
+        <thead><tr><th>Rule</th><th>What it checks</th><th>Resolution written</th><th class="num">Fired</th><th>Status</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+        <tbody>
+        {% for r in vm.rules %}
+        <tr>
+            <td class="strong nowrap">{{ r.label }}</td>
+            <td class="small">{{ r.checks }}</td>
+            <td class="small nowrap">False positive · Low · {{ r.wc_reason }}<br><span class="muted">alert rationale: {{ r.rationale }}</span></td>
+            <td class="num tabular">{{ r.fired }}</td>
+            <td>{% if r.on %}<span class="badge emerald">on</span>{% else %}<span class="badge slate">off</span>{% endif %}</td>
+            {% if can_edit %}
+            <td><form method="post" action="{{ url_for('ai_screening_rules') }}" style="margin:0">
+                <input type="hidden" name="key" value="{{ r.key }}"><input type="hidden" name="enabled" value="{{ '0' if r.on else '1' }}">
+                <button type="submit" class="btn btn-outline btn-xs">{{ 'Switch off' if r.on else 'Switch on' }}</button></form></td>
+            {% endif %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="row mt-12" style="align-items:stretch;gap:12px">
+    <div class="card grow pad-0" style="min-width:320px">
+        <div class="card-head" style="padding-bottom:10px"><div class="card-title">Guards</div><div class="card-sub">policy switches that hold a record back from the rules</div></div>
+        <table class="tbl">
+            <thead><tr><th>Guard</th><th>What it does</th><th>Status</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+            <tbody>
+            {% for g in vm.guards %}
+            <tr>
+                <td class="strong">{{ g.label }}</td>
+                <td class="small">{{ g.checks }}</td>
+                <td>{% if g.on %}<span class="badge emerald">on</span>{% else %}<span class="badge slate">off</span>{% endif %}</td>
+                {% if can_edit %}
+                <td><form method="post" action="{{ url_for('ai_screening_rules') }}" style="margin:0">
+                    <input type="hidden" name="key" value="{{ g.key }}"><input type="hidden" name="enabled" value="{{ '0' if g.on else '1' }}">
+                    <button type="submit" class="btn btn-outline btn-xs">{{ 'Switch off' if g.on else 'Switch on' }}</button></form></td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card grow" style="min-width:320px">
+        <div class="card-head"><div class="card-title">Rails that never switch</div><div class="card-sub">what keeps the automation safe to audit</div></div>
+        <div class="card-body">
+            <ul class="small" style="margin:0;padding-left:18px;line-height:1.6">
+                {% for line in vm.rails %}<li>{{ line }}</li>{% endfor %}
+            </ul>
+            <div class="note info mt-12">The seeded case book was screened with the default rules. A switch changes what happens at the next intake or re-screen after Data Confirming; the rules never revisit a resolution that is already recorded, by an analyst or by themselves.</div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-12 pad-0">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">What the rules did</div><div class="card-sub">newest first — every run signs its own audit row as {{ vocab.SYSTEM_USER }}</div></div>
+    <table class="tbl dense">
+        <thead><tr><th>When</th><th>Record</th><th>Client</th><th>Detail</th></tr></thead>
+        <tbody>
+        {% for f in vm.feed %}
+        <tr>
+            <td class="nowrap">{{ f.at }}</td>
+            <td class="nowrap"><a href="{{ url_for(f.endpoint, **f.args) }}"{% if f.new_tab %} target="_blank" rel="noopener" title="Opens in a new tab"{% endif %}>{{ f.kind }}{% if f.new_tab %}<span class="ext-ic">{{ icon('external-link') }}</span>{% endif %}</a></td>
+            <td class="strong nowrap">{{ f.name }}</td>
+            <td class="small">{{ f.detail }}</td>
+        </tr>
+        {% else %}<tr><td colspan="4"><div class="no-data">{{ icon('info') }}The rules have not resolved anything on this tenant yet.</div></td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card mt-12 pad-0">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Rule changes</div><div class="card-sub">who switched what, and when</div></div>
+    <table class="tbl dense">
+        <thead><tr><th>When</th><th>By</th><th>Rule</th><th>Change</th></tr></thead>
+        <tbody>
+        {% for h in vm.history %}
+        <tr><td class="nowrap">{{ h.at }}</td><td class="nowrap">{{ h.by|who }}</td><td>{{ h.label }}</td><td>{{ 'on' if h['from'] else 'off' }} → {{ 'on' if h.to else 'off' }}</td></tr>
+        {% else %}<tr><td colspan="4"><div class="no-data">{{ icon('check-circle') }}No changes; the defaults are in force.</div></td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

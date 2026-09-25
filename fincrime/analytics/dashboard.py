@@ -33,7 +33,10 @@ class AnalyticsConsole:
         # Throughput: closures per reviewer.
         per_reviewer = Counter()
         for c in closed:
-            per_reviewer[c.get("closed_by") or c["previous_reviewer"] or "system"] += 1
+            closer = c.get("closed_by") or ""
+            if closer == vocab.SYSTEM_USER:           # auto-verified: credit whoever confirmed the data
+                closer = c.get("previous_reviewer") or closer
+            per_reviewer[closer or c["previous_reviewer"] or "system"] += 1
         throughput = [(display_name(e) if "@" in e else e, n) for e, n in per_reviewer.most_common(8)]
 
         # Turnaround for closed cases (hours from submission to close).
@@ -82,7 +85,9 @@ class AnalyticsConsole:
                 "wip": len(held), "capacity": int(a.get("capacity") or 0),
                 "pct": int(100 * len(held) / a["capacity"]) if a.get("capacity") else 0,
                 "routed_today": routing.routed_today(email, kyc_cases, today),
-                "completed_today": sum(1 for c in kyc_cases if c.get("closed_by") == email and (c.get("closed_at") or "")[:10] == today),
+                "completed_today": sum(1 for c in kyc_cases if (c.get("closed_at") or "")[:10] == today
+                                       and (c.get("closed_by") == email
+                                            or (c.get("closed_by") == vocab.SYSTEM_USER and c.get("previous_reviewer") == email))),
                 "at_risk": sum(1 for c in held if sla.remaining_hours(c, now) <= 12),
                 "avg_handle_h": round(sum(handled) / len(handled), 1) if handled else 0.0,
             })

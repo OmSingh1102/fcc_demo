@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover
 from fincrime.adapters import idv_vendor
 from fincrime.analytics.audit_log import AuditLogConsole
 from fincrime.analytics.case_list import CaseListConsole
+from fincrime.analytics.ai_console import AiScreeningConsole
 from fincrime.analytics.dashboard import AnalyticsConsole
 from fincrime.analytics.pipeline import PipelineConsole
 from fincrime.analytics.queues import QueueConsole
@@ -38,7 +39,7 @@ from fincrime.data import vocab
 from fincrime.data.loader import SEED_VERSION, index_by_id, load_seed
 from fincrime.data.state_store import StateStore
 from fincrime.documents import svg_cards
-from fincrime.engines import (investigation, qc, recommendation, routing, screening, segregation, sla,
+from fincrime.engines import (ai_screening, investigation, qc, recommendation, routing, screening, segregation, sla,
                               worldcheck, workflow)
 from fincrime.engines.errors import WorkflowError
 from fincrime.engines.wc_report_pdf import render_wc_export
@@ -166,8 +167,8 @@ TOP_TABS = [
 _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"), ("wc_", "ns_queue"),
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
-              ("qc_", "qc_sampling"), ("routing_", "routing_console"))
-HUB_OWNERS = {"work", "pipeline", "trackers", "audit_log", "qc_sampling", "routing_console"}
+              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"))
+HUB_OWNERS = {"work", "pipeline", "trackers", "audit_log", "ai_screening", "qc_sampling", "routing_console"}
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -209,6 +210,7 @@ def _side_nav():
         {"label": "Pipeline", "icon": "trending-up", "endpoint": "pipeline", "active": owner == "pipeline"},
         {"label": "Trackers", "icon": "list", "endpoint": "trackers", "active": owner == "trackers"},
         {"label": "Audit Log", "icon": "book", "endpoint": "audit_log", "active": owner == "audit_log"},
+        {"label": "AI Screening", "icon": "check-circle", "endpoint": "ai_screening_page", "active": owner == "ai_screening"},
     ]
     if "QC" in levels:
         hub.append({"label": "QC Sampling", "icon": "shield-check", "endpoint": "qc_sampling", "active": owner == "qc_sampling",
@@ -227,6 +229,7 @@ STATE_VERSION = 0
 
 KYC_CASES, ALERT_CASES, WC_CASES = [], [], []
 KYC_BY_ID, ALERT_BY_ID, WC_BY_ID = {}, {}, {}
+AI_SETTINGS = {}         # the AI screening rules' switches; one stored record, kind "settings"
 
 
 def _bump_state():
@@ -258,6 +261,9 @@ def _load_seed():
     WC_CASES[:] = wc
     _rebuild_indexes()
     routing.configure(ANALYSTS, KYC_CASES)
+    AI_SETTINGS.clear()
+    AI_SETTINGS.update(ai_screening.default_settings())
+    ai_screening.configure(AI_SETTINGS)
 
     in_serving_process = (not DEBUG) or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
     stored = StateStore.seed_version()
@@ -269,7 +275,8 @@ def _load_seed():
         StateStore.set_seed_version(SEED_VERSION)
 
     restored = (StateStore.restore("kyc", KYC_BY_ID) + StateStore.restore("alert", ALERT_BY_ID)
-                + StateStore.restore("wc", WC_BY_ID) + StateStore.restore("analyst", ANALYST_BY_KEY))
+                + StateStore.restore("wc", WC_BY_ID) + StateStore.restore("analyst", ANALYST_BY_KEY)
+                + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS}))
     if restored:
         app.logger.info("Restored %d stored record(s) onto the seed.", restored)
 
@@ -532,11 +539,26 @@ def kyc_status(case_id):
                         success="Status changed.", open_modal="status-modal")
 
 
+def _confirmed_message(case):
+    """What Data Confirm led to, now that the AI screening rules run on it."""
+    screening = case["screening"]
+    if case["status"] == "Verified":
+        return "Data confirmed — the AI screening rules left nothing for an analyst, so the case is auto-verified."
+    if screening.get("workflow") == "auto-verified" and screening["hit"]:
+        return ("Data confirmed — the AI screening rules cleared every alert and the screening case closed itself; "
+                "recalculate the risk rating and run the EDD Review to approve the seller.")
+    if screening.get("workflow") == "auto-verified":
+        return "Data confirmed — no screening hit; recalculate the risk rating and run the EDD Review to approve the seller."
+    left = (screening.get("ai") or {}).get("for_review", 0)
+    return f"Data confirmed — the case moved to Data Screening and was re-screened; {left} alert(s) are left for you to review."
+
+
 @app.route("/kyc/<case_id>/data_confirm", methods=["POST"])
 @role_required("L1")
 def kyc_data_confirm(case_id):
-    return _case_action(case_id, workflow.data_confirm, request.form,
-                        success="Data confirmed — the case moved to Data Screening and was re-screened.", open_modal="dc-modal")
+    alert, wc = _linked(_kyc(case_id))
+    return _case_action(case_id, workflow.data_confirm, request.form, alert_case=alert, wc=wc,
+                        extra=(("alert", alert), ("wc", wc)), success=_confirmed_message, open_modal="dc-modal")
 
 
 @app.route("/kyc/<case_id>/resubmit", methods=["POST"])
@@ -948,6 +970,26 @@ def routing_run():
         flash(f"Routed {len(routed)} case(s){' — ' + detail if detail else ''}."
               + (f" {queued} still waiting for capacity." if queued else ""), "success" if routed else "error")
     return redirect(url_for("routing_console"))
+
+
+# ─── AI Screening (the preset automation and its switches) ──────────────────
+@app.route("/ai-screening")
+def ai_screening_page():
+    vm = AiScreeningConsole.compute(KYC_CASES, ALERT_CASES, WC_CASES, _tenant(), AI_SETTINGS)
+    return render_template("ai_screening.html", vm=vm, can_edit="QC" in _levels())
+
+
+@app.route("/ai-screening/rules", methods=["POST"])
+@role_required("QC")
+def ai_screening_rules():
+    key = request.form.get("key", "")
+    ok, res = _run_action(ai_screening.set_rule, AI_SETTINGS, _actor(), key, request.form.get("enabled", ""))
+    if ok:
+        _save("settings", AI_SETTINGS)
+        rule = ai_screening.RULE_BY_KEY.get(key) or ai_screening.GUARD_BY_KEY.get(key) or {}
+        flash(f"{rule.get('label', key)}: {'on' if res[0] else 'off'} → {'on' if res[1] else 'off'}. "
+              "Applies to the next screening run.", "success")
+    return redirect(url_for("ai_screening_page"))
 
 
 @app.route("/routing/capacity", methods=["POST"])

@@ -88,11 +88,13 @@ def settings():
     return _BOUND["settings"] if _BOUND["settings"] is not None else default_settings()
 
 
-def enabled():
+def rules_enabled():
+    """The live switches (the keyword arguments of evaluate/apply override
+    them, which is how the seed screens with the defaults)."""
     return settings().get("enabled", DEFAULT_ENABLED)
 
 
-def guards():
+def guards_enabled():
     return settings().get("guards", DEFAULT_GUARDS)
 
 
@@ -172,8 +174,8 @@ def evaluate(match, client, *, enabled=None, guards=None):
     ("", "") when it stays with an analyst."""
     if match.get("resolution", {}).get("status", "Unresolved") != "Unresolved":
         return "", ""
-    en = DEFAULT_ENABLED if enabled is None else enabled
-    gd = DEFAULT_GUARDS if guards is None else guards
+    en = rules_enabled() if enabled is None else enabled
+    gd = guards_enabled() if guards is None else guards
     if gd.get("san_review") and "SAN" in (match.get("types") or []):
         return "", ""
     state = dob_state(client.get("dob", ""), match.get("dobs") or [])
