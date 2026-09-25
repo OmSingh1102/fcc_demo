@@ -44,6 +44,31 @@ password shown on the card (`1234`). Always run through the project `.venv`:
 the Anaconda Python on this machine has a broken `_sqlite3` and the plain
 Python 3.13 has no Flask.
 
+## Deploy — a link anyone can open
+
+**Permanent, free (Render).** Push the repo to GitHub, then in Render choose
+*New → Blueprint*, connect the repo and create: `render.yaml` sets it up
+(one gunicorn worker, debug off, a generated secret key). The free plan
+sleeps after 15 minutes idle, so the first visit after a pause takes about
+a minute, and its disk is wiped on every deploy or restart, which only
+brings the seeded case book back. `Procfile` covers Railway and similar
+hosts the same way. Keep the repository private: the demo copies the
+client's internal screens.
+
+**Right now, from this laptop.** Run a production copy (debug off, its own
+state file) and open a Cloudflare quick tunnel to it. No account needed;
+the link lives while both commands run, and changes on every restart.
+
+```
+set DEBUG=0 & set SECRET_KEY=<any long random string> & set FCC_STATE_DB=%TEMP%\fcc_public.db
+.venv\Scripts\python.exe -m waitress --listen=127.0.0.1:8020 --threads=8 app:app
+cloudflared tunnel --url http://127.0.0.1:8020
+```
+
+Either way the sign-in card shows the demo password. Set
+`STRAIVE_DEMO_PASSWORD` (see `.env.example`) to hide it behind a password of
+your own.
+
 ## Tests
 
 ```
