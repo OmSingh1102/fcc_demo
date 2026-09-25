@@ -475,6 +475,31 @@ class FlowTestCase(unittest.TestCase):
         self.assertLess(page.index('id="filters-toggle"'), page.index('id="filters-grid"'))
         self.assertLess(page.index('id="filters-grid"'), page.index('id="sort-btn"'))
 
+    def test_comparison_shows_location(self):
+        """The World-Check comparison table shows the client's country and
+        nationality beside the record's and ticks them when they agree."""
+        def rows(key):
+            c = self.K[key]
+            wc = fcc.WC_BY_ID[c["screening"]["alert_case_id"]]
+            return {r["field"]: (r["submitted"], r["matched"], r["match"])
+                    for r in fcc.worldcheck.comparison_rows(wc, wc["matches"][0], c["client"])}
+
+        sidorov = rows("sidorov")
+        self.assertEqual(sidorov["Country"], ("Cyprus", "Russian Federation; Cyprus", True))
+        self.assertEqual(sidorov["Citizenship"], ("Russian Federation", "Russian Federation", True))
+        taylor = rows("taylor")
+        self.assertEqual(taylor["Country"], ("United Kingdom", "Canada", False))
+        self.assertEqual(taylor["Citizenship"], ("United Kingdom", "Canada", False))
+        # An ISO code on the client is printed as a name; a record with no data never ticks.
+        wc = fcc.WC_BY_ID[self.K["sidorov"]["screening"]["alert_case_id"]]
+        r = {x["field"]: x for x in fcc.worldcheck.comparison_rows(wc, dict(wc["matches"][0], country="", citizenship=""),
+                                                                   {"country": "IN", "nationality": "IN"})}
+        self.assertEqual((r["Country"]["submitted"], r["Country"]["match"]), ("India", False))
+        self.login("amara.iyer")
+        aid = self.K["sidorov"]["screening"]["alert_case_id"]
+        page = self.c.get(f"/wc/{aid}/match/{wc['matches'][0]['id']}").data.decode("utf-8")
+        self.assertIn("&#10003;</span> Cyprus", page)
+
     def test_wc_pagination_and_facets(self):
         self.login("amara.iyer")
         aid = self.K["hassan"]["screening"]["alert_case_id"]

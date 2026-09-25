@@ -85,14 +85,33 @@ def match_nav(wc, match_id, status="", mtype=""):
             "prev": ordered[i - 1] if i > 0 else "", "next": ordered[i + 1] if i + 1 < len(ordered) else ""}
 
 
-def comparison_rows(wc, m):
+def _country_name(value):
+    """A country as the console prints it: an ISO-2 code becomes its name."""
+    v = (value or "").strip()
+    return vocab.COUNTRY_NAMES.get(v.upper(), v) if len(v) == 2 else v
+
+
+def _place_match(submitted, listed):
+    """The client's country is one the record lists ("Russian Federation; Cyprus")."""
+    s = (submitted or "").strip().lower()
+    parts = [p.strip().lower() for p in (listed or "").replace(",", ";").split(";") if p.strip()]
+    return bool(s) and s in parts
+
+
+def comparison_rows(wc, m, client=None):
+    """Submitted vs matched, one row per identifier. The client's country and
+    nationality come from the KYC case (`client`), which the watchlist case
+    itself does not carry."""
+    client = client or {}
     sub_dob = dates.wc_date(wc["dob"] + " 00:00:00") if wc.get("dob") else ""
+    country = _country_name(client.get("country")) or _country_name(client.get("nationality"))
+    citizenship = _country_name(client.get("nationality"))
     rows = [
         ("Name", wc["primary_name"], m["name"], _names_match(wc["primary_name"], m["name"])),
         ("Gender", wc["gender"], m["gender"], bool(m["gender"]) and wc["gender"].lower() == m["gender"].lower()),
         ("Date of Birth", sub_dob, ", ".join(m["dobs"]), _dob_match(wc.get("dob", ""), m["dobs"])),
-        ("Country", wc["case_details"].get("Country", ""), m["country"], False),
-        ("Citizenship", "", m["citizenship"], False),
+        ("Country", country, m["country"], _place_match(country, m["country"])),
+        ("Citizenship", citizenship, m["citizenship"], _place_match(citizenship, m["citizenship"])),
     ]
     return [{"field": f, "submitted": s, "matched": md, "match": ok} for f, s, md, ok in rows]
 

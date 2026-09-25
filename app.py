@@ -798,7 +798,7 @@ def wc_match(wc_case_id, match_id):
     status, mtype = request.args.get("status", ""), request.args.get("type", "")
     return render_template("wc_match.html", m=m, status=status, mtype=mtype,
                            nav=worldcheck.match_nav(wc, match_id, status, mtype),
-                           comparison=worldcheck.comparison_rows(wc, m),
+                           comparison=worldcheck.comparison_rows(wc, m, (KYC_BY_ID.get(wc["kyc_case_id"]) or {}).get("client")),
                            unresolved=worldcheck.facets(wc["matches"])["status"]["Unresolved"], **_wc_context(wc))
 
 
