@@ -14,6 +14,7 @@ QC, Routing) · Analytics · Demo affordances · Main.
 import hmac
 import os
 from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import (Flask, Response, abort, flash, g, jsonify, redirect, render_template, request,
                    session, url_for)
@@ -123,10 +124,22 @@ def _safe_next(target: str, fallback=None) -> str:
     return fallback or url_for("kyc_list")
 
 
+def _back(fallback=None) -> str:
+    """The page the request came from, when it is one of ours; else home. A
+    refused action leaves the analyst where they were, with the reason shown
+    as a notification (see _flashes.html)."""
+    ref = urlsplit(request.referrer or "")
+    if ref.scheme in ("http", "https") and ref.netloc == request.host and ref.path.startswith("/"):
+        return ref.path + (f"?{ref.query}" if ref.query else "")
+    return fallback or url_for("kyc_list")
+
+
 def role_required(*levels):
     """Restrict a view to analysts holding one of the given levels. A
-    signed-in analyst without the level is sent home rather than shown an
-    error — the nav never offered them the link."""
+    signed-in analyst without the level is sent back to the page they came
+    from (home when unknown) with the reason as a notification — the nav
+    never offered them the link, but a shared button such as Reserve can
+    still be pressed."""
     allowed = set(levels)
 
     def decorator(view):
@@ -136,7 +149,7 @@ def role_required(*levels):
                 return redirect(url_for("login", next=request.path))
             if allowed and not (_levels() & allowed):
                 flash(f"That action needs {' or '.join(sorted(allowed))} access.", "error")
-                return redirect(url_for("kyc_list"))
+                return redirect(_back())
             return view(*args, **kwargs)
         return wrapper
     return decorator

@@ -524,6 +524,35 @@ class FlowTestCase(unittest.TestCase):
         self.assertEqual(s["status"], "Verified")
         self.assertEqual(why(), "Case is closed")
 
+    def test_refused_action_stays_on_the_page(self):
+        """A refused action leaves the analyst where they were, with the error
+        as a notification: Leah (QC) cannot reserve, and lands back on the
+        case page rather than the case list. The notification sits in a
+        fixed layer, so it shows over a reopened modal."""
+        m = self.K["mercer"]
+        page = f"/kyc/detail/{m['id']}"
+        self.login("leah.fernandez")
+        r = self.c.post(f"/kyc/{m['id']}/reserve", headers={"Referer": "http://localhost" + page + "?open=x"})
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(r.headers["Location"].endswith(page + "?open=x"), r.headers["Location"])
+        r = self.c.get(page)
+        self.assertEqual(flash_text(r), "That action needs EDD or L1 or L2 access.")
+        html = r.data.decode("utf-8")
+        for needle in ('id="toasts"', 'class="toast error"', "data-linger=", 'class="toast-x"', "toastClose"):
+            self.assertIn(needle, html, needle)
+        self.assertEqual(m["current_reviewer"], "")
+        r = self.c.post(f"/kyc/{m['id']}/reserve")                                   # no referrer: home
+        self.assertTrue(r.headers["Location"].endswith("/kyc/list"), r.headers["Location"])
+        r = self.c.post(f"/kyc/{m['id']}/reserve", headers={"Referer": "https://evil.example" + page})
+        self.assertTrue(r.headers["Location"].endswith("/kyc/list"), r.headers["Location"])   # another site: home
+        # A validation error inside a modal also stays put, modal reopened, message as a toast.
+        self.login("amara.iyer")
+        self.post(f"/kyc/{m['id']}/reserve")
+        r = self.c.post(f"/kyc/{m['id']}/data_confirm", data={"summary": ""})
+        self.assertTrue(r.headers["Location"].endswith(page + "?open=dc-modal"), r.headers["Location"])
+        html = self.c.get(page + "?open=dc-modal").data.decode("utf-8")
+        self.assertIn('class="toast error"', html)
+
     def test_comparison_shows_location(self):
         """The World-Check comparison table shows the client's country and
         nationality beside the record's and ticks them when they agree."""

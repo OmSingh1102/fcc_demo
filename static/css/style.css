@@ -618,7 +618,20 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 .hbar .bar > i { display: block; height: 100%; background: var(--primary); }
 .hbar .n { text-align: right; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 
-/* ─── Flash (see _flashes.html, inline-styled) & live bar (see _live_refresh.html) ─── */
+/* ─── Notifications (flash messages, see _flashes.html): fixed top right, above modals, each lingers then fades; live bar in _live_refresh.html ─── */
+.toasts { position: fixed; top: 62px; right: 22px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; width: min(92vw, 440px); pointer-events: none; }
+body.wc-theme .toasts { top: 104px; }
+.toast { position: relative; display: flex; gap: 10px; align-items: flex-start; padding: 11px 36px 12px 15px; border-radius: 10px; font-size: 13px; line-height: 1.55; background: #f7efe9; color: #7a6558; border: 1px solid rgba(0, 0, 0, .08); border-left: 3px solid currentColor; box-shadow: 0 10px 30px rgba(0, 0, 0, .18); pointer-events: auto; overflow: hidden; animation: toast-in .22s ease-out; }
+.toast.error { background: #fdecea; color: #c62828; }
+.toast.success { background: #eaf6ec; color: #2e7d32; }
+.toast.hide { opacity: 0; transform: translateY(-6px); transition: opacity .3s, transform .3s; }
+.toast-x { position: absolute; right: 6px; top: 6px; width: 24px; height: 24px; border: 0; background: transparent; color: inherit; font-size: 17px; line-height: 1; cursor: pointer; border-radius: 6px; opacity: .65; }
+.toast-x:hover { opacity: 1; background: rgba(0, 0, 0, .07); }
+.toast-bar { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: currentColor; opacity: .3; transform-origin: left; animation: toast-run linear forwards; }
+.toast:hover .toast-bar { animation-play-state: paused; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } }
+@keyframes toast-run { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (max-width: 560px) { .toasts { right: 12px; left: 12px; width: auto; } }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    AUTH PAGES — portal.html / login.html (standalone documents)

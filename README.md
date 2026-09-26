@@ -75,13 +75,14 @@ your own.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-41 end-to-end tests on the Flask test client: the golden path, resubmit,
+42 end-to-end tests on the Flask test client: the golden path, resubmit,
 escalate, segregation of duties, L2/EDD decisions, Skopenow, TT Shop risk
 recalculation, routing by skill and capacity, case on-demand, immediate
 hand-offs, capacity overrides, trackers and CSV, the investigation-file ZIP,
 the global audit log, QC sampling, Checker 2, role enforcement at EDD, POA
 checks, fraud typology, World-Check links opening in a new tab, the
-document viewer's controls, the greyed Review button's reasons, the AI
+document viewer's controls, the greyed Review button's reasons, refused
+actions staying on the page with the error as a notification, the AI
 screening rules (the rule book, what it did at intake, auto-verification on
 Data Confirm, sellers keeping the human close, rule switches that persist)
 and the workflow labels across the screens.
