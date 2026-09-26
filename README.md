@@ -75,13 +75,13 @@ your own.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-39 end-to-end tests on the Flask test client: the golden path, resubmit,
+40 end-to-end tests on the Flask test client: the golden path, resubmit,
 escalate, segregation of duties, L2/EDD decisions, Skopenow, TT Shop risk
 recalculation, routing by skill and capacity, case on-demand, immediate
 hand-offs, capacity overrides, trackers and CSV, the investigation-file ZIP,
 the global audit log, QC sampling, Checker 2, role enforcement at EDD, POA
-checks, fraud typology, World-Check links opening in a new tab, the AI
-screening rules (the rule book, what it did at intake, auto-verification on
+checks, fraud typology, World-Check links opening in a new tab, the
+document viewer's controls, the AI screening rules (the rule book, what it did at intake, auto-verification on
 Data Confirm, sellers keeping the human close, rule switches that persist)
 and the workflow labels across the screens.
 
@@ -110,6 +110,9 @@ The header's analyst switcher jumps between profiles without signing out.
    *Review*: the Data Confirm modal shows the POA checks; two fail, OK stays
    off, **Escalate** preselects the sanctioned-country reason. Escalate with
    a fraud typology → the case is handed to L2 at once; the flash names who.
+   The document panel here, and the **Preview** dialog on the case page,
+   zoom with the mouse wheel, pan by drag, and have zoom, fit and rotate
+   buttons.
 3. Open **Michael James Taylor** for the auto-verified workflow: the header
    already says *Auto-verified* — the AI screening rules cleared his two
    namesakes at intake (a 23-year date-of-birth gap, a female record) and

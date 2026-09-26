@@ -5,21 +5,16 @@
    — the server re-checks the same flags. Resubmit, Escalate and RFI open
    their own dialogs one layer above this one, each with its own form. #}
 {% from "_modals.html" import modal_open, modal_close %}
+{% from "_viewer.html" import viewer_tools %}
 
 {{ modal_open('dc-modal', 'Data Confirm Modal', 'xl') }}
 <form method="post" action="{{ url_for('kyc_data_confirm', case_id=case.id) }}" id="dc-form">
     <div class="modal-body">
         <div class="viewer">
             <div>
-                <div class="viewer-stage">
+                <div class="viewer-stage" id="dc-stage">
                     <img id="dc-img" src="{{ url_for('document_svg', case_id=case.id, doc_id=case.documents[0].id) }}" alt="Document">
-                    <div class="viewer-tools">
-                        <button type="button" onclick="dcZoom(1.25)" title="Zoom in">{{ icon('zoom-in') }}</button>
-                        <button type="button" onclick="dcZoom(0.8)" title="Zoom out">{{ icon('zoom-out') }}</button>
-                        <button type="button" onclick="dcReset()" title="Fit">{{ icon('maximize') }}</button>
-                        <button type="button" onclick="dcRotate()" title="Rotate">{{ icon('rotate-cw') }}</button>
-                        <a id="dc-open" href="{{ url_for('document_svg', case_id=case.id, doc_id=case.documents[0].id) }}" target="_blank" rel="noopener" title="Open in new tab" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:24px;color:#333">{{ icon('external-link') }}</a>
-                    </div>
+                    {{ viewer_tools(url_for('document_svg', case_id=case.id, doc_id=case.documents[0].id)) }}
                 </div>
                 <div class="thumbs">
                     {% for d in case.documents %}
@@ -135,8 +130,6 @@
 <script>
 (function () {
     var fields = [{% for field, key, label, itype in confirm_fields %}'{{ field }}'{% if not loop.last %}, {% endif %}{% endfor %}]{% if case.poa_required %}.concat(['poa']){% endif %};
-    var scale = 1, angle = 0;
-    var img = document.getElementById('dc-img');
 
     function paintOk() {
         var all = fields.every(function (f) { return document.getElementById('cf-' + f + '-ok').value === '1'; });
@@ -154,14 +147,9 @@
         }
         paintOk();
     };
-    function apply() { img.style.transform = 'scale(' + scale + ') rotate(' + angle + 'deg)'; }
-    window.dcZoom = function (k) { scale = Math.min(4, Math.max(0.4, scale * k)); apply(); };
-    window.dcRotate = function () { angle = (angle + 90) % 360; apply(); };
-    window.dcReset = function () { scale = 1; angle = 0; apply(); };
     window.dcShow = function (btn) {
-        img.src = btn.dataset.src; document.getElementById('dc-open').href = btn.dataset.src;
+        viewerInit(document.getElementById('dc-stage')).show(btn.dataset.src);   /* templates/_viewer.html */
         document.querySelectorAll('.thumb').forEach(function (t) { t.classList.toggle('on', t === btn); });
-        dcReset();
     };
     window.dcCount = function () { document.getElementById('dc-count').textContent = document.getElementById('dc-summary').value.length; };
     window.dcFile = function (input) {

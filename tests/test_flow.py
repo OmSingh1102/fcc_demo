@@ -475,6 +475,27 @@ class FlowTestCase(unittest.TestCase):
         self.assertLess(page.index('id="filters-toggle"'), page.index('id="filters-grid"'))
         self.assertLess(page.index('id="filters-grid"'), page.index('id="sort-btn"'))
 
+    def test_document_viewer_zooms_and_pans(self):
+        """The Preview dialog and the Data Confirm viewer share one controller:
+        wheel zoom, drag to pan, double-click, zoom / fit / rotate buttons and
+        an open-in-new-tab link, with the script rendered once per page."""
+        t = self.K["taylor"]
+        self.login("amara.iyer")
+        self.c.post(f"/kyc/{t['id']}/reserve")
+        r = self.c.get(f"/kyc/detail/{t['id']}")
+        page = r.data.decode("utf-8")
+        for needle in ('id="doc-stage"', 'id="dc-stage"', "addEventListener('wheel'", "addEventListener('pointerdown'",
+                       "addEventListener('dblclick'", "setPointerCapture", 'class="viewer-hint"'):
+            self.assertIn(needle, page, needle)
+        self.assertEqual(page.count("window.viewerInit = function"), 1)          # one script serves both stages
+        for act in ("in", "out", "fit", "rotate"):
+            self.assertEqual(page.count(f'data-act="{act}"'), 2, act)             # one button strip per stage
+        self.assertNotIn("dcZoom", page)
+        opens = [a for a in anchors(r) if "data-open" in a]
+        self.assertEqual(len(opens), 2)
+        self.assertTrue(all(new_tab(a) for a in opens))
+        self.assertTrue(any((a.get("href") or "").startswith("/documents/") for a in opens))
+
     def test_comparison_shows_location(self):
         """The World-Check comparison table shows the client's country and
         nationality beside the record's and ticks them when they agree."""

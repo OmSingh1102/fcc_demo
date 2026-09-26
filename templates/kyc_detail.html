@@ -2,6 +2,7 @@
 {% from "_badges.html" import status_badge, outcome_badge, hit_mark %}
 {% from "_stepper.html" import stepper %}
 {% from "_modals.html" import modal_open, modal_close %}
+{% from "_viewer.html" import viewer_tools %}
 {% block title %}{{ case.client.legal_name }} - KYC Case{% endblock %}
 
 {% block content %}
@@ -207,10 +208,11 @@
 {% if review == 'l2' %}{% include "_modal_l2_decision.html" %}{% endif %}
 {% if review == 'checker2' %}{% include "_modal_checker2.html" %}{% endif %}
 
+{% include "_viewer.html" %}
 {{ modal_open('doc-modal', 'Document Preview', 'lg') }}
 <div class="modal-body">
-    <div class="viewer-stage" style="min-height:420px"><img id="doc-modal-img" src="" alt="Document preview"></div>
-    <div class="small muted mt-8" id="doc-modal-cap"></div>
+    <div class="viewer-stage" id="doc-stage" style="min-height:420px"><img id="doc-modal-img" src="" alt="Document preview">{{ viewer_tools() }}</div>
+    <div class="small muted mt-8"><span id="doc-modal-cap"></span><span class="viewer-hint">Scroll to zoom · drag to move · double-click to zoom in or fit</span></div>
 </div>
 <div class="modal-foot"><span class="spacer"></span><button type="button" class="btn btn-outline btn-sm" onclick="closeModal('doc-modal')">Close</button></div>
 {{ modal_close() }}
@@ -256,9 +258,11 @@
 {% block extra_js %}
 <script>
 function docPreview(src, caption) {
-    document.getElementById('doc-modal-img').src = src;
+    var stage = document.getElementById('doc-stage');
+    viewerInit(stage).show(src);   /* templates/_viewer.html: wheel zoom, drag, buttons */
     document.getElementById('doc-modal-cap').textContent = caption || '';
     openModal('doc-modal');
+    try { stage.focus({ preventScroll: true }); } catch (e) {}
 }
 </script>
 {% endblock %}
