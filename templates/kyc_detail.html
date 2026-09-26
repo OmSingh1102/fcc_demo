@@ -130,7 +130,7 @@
                         <td>{{ r.user_name }}</td><td class="nowrap">{{ r.screen_time }}</td><td>{{ r.list }}</td>
                         <td>{{ hit_mark(r.result) }}</td>
                         <td>{% if r.alert_id %}<span class="cell-hex" title="{{ r.alert_id }}">{{ r.alert_id }}</span>
-                            <a class="btn btn-outline btn-xs" href="{{ url_for('ns_case', alert_case_id=r.alert_id) }}">Details</a>
+                            <a class="btn btn-outline btn-xs" href="{{ url_for('ns_case', alert_case_id=r.alert_id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a>
                             {% else %}<button type="button" class="btn btn-outline btn-xs" disabled>Details</button>{% endif %}</td>
                     </tr>
                     {% endfor %}

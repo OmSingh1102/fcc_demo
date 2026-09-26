@@ -259,8 +259,10 @@ class FlowTestCase(unittest.TestCase):
         self.assertIn(self.K["sidorov"]["documents"][2]["issued_on"][:4], poa)
 
     def test_world_check_links_open_new_tab(self):
-        """Only links into the World-Check console open a new tab; the CMS,
-        case and other links keep opening in the same tab."""
+        """Links into the World-Check console open a new tab, and so does the
+        Screening Result's Details button on the case page (the client asked
+        for that one); the CMS's other links, the audit log and the rest keep
+        the same tab."""
         def hrefs(page, *parts):
             return [a for a in page if any(x in (a.get("href") or "") for x in parts)]
 
@@ -277,8 +279,12 @@ class FlowTestCase(unittest.TestCase):
         self.assertEqual(others, [])
         self.assertFalse(any(new_tab(a) for a in hrefs(cms, "/kyc/detail/")))
 
-        case_links = hrefs(anchors(self.c.get(f"/kyc/detail/{t['id']}")), "/name_screening/case/")
-        self.assertTrue(case_links and not any(new_tab(a) for a in case_links))
+        case_page = anchors(self.c.get(f"/kyc/detail/{t['id']}"))
+        details = hrefs(case_page, "/name_screening/case/")
+        self.assertTrue(details and all(new_tab(a) for a in details))          # the Details buttons
+        other = [a.get("href") for a in case_page if new_tab(a) and "/name_screening/case/" not in (a.get("href") or "")
+                 and "/documents/" not in (a.get("href") or "") and a.get("href")]
+        self.assertEqual(other, [])                                              # nothing else on the case page
 
         audit = anchors(self.c.get("/audit"))
         self.assertTrue(hrefs(audit, "/wc/") and all(new_tab(a) for a in hrefs(audit, "/wc/")))
