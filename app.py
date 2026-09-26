@@ -779,7 +779,9 @@ def ns_handle(alert_case_id):
 @app.route("/name_screening/<alert_case_id>/alert_outcome", methods=["POST"])
 @role_required("L1", "L2")
 def ns_alert_outcome(alert_case_id):
-    return _alert_action(alert_case_id, screening.alert_outcome, request.form, success="Alert outcome recorded.",
+    n = len([i for i in request.form.getlist("alert_id") if i])
+    return _alert_action(alert_case_id, screening.alert_outcome, request.form,
+                         success="Alert outcome recorded." if n < 2 else f"Alert outcome recorded for {n} alerts.",
                          open_modal="alert-outcome")
 
 

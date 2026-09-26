@@ -107,13 +107,13 @@
         <div class="tbl-scroll">
             <table class="tbl dense" id="alert-table">
                 <thead><tr>
-                    <th style="width:40px"></th><th>Alert ID</th><th>Vendor</th><th>Watch List ID</th><th>Alert Outcome</th><th>Smart Strategy</th><th>Name</th><th>Matched Alias</th>
+                    <th style="width:40px"><input type="checkbox" id="pick-all" title="Tick every alert shown" aria-label="Tick every alert shown" onchange="afPickAll(this)"></th><th>Alert ID</th><th>Vendor</th><th>Watch List ID</th><th>Alert Outcome</th><th>Smart Strategy</th><th>Name</th><th>Matched Alias</th>
                     <th>Score</th><th>Type</th><th>Date of Birth (DD-MM-YYYY)</th><th>Gender</th><th>Last Resolved By</th><th>Last Resolved Time</th><th>Rationale</th><th>Risk</th><th></th>
                 </tr></thead>
                 <tbody>
                 {% for a in alert.alerts %}
                 <tr data-outcome="{{ a.outcome }}" data-mode="{{ a.review_mode }}" data-wl="{{ a.watchlist_id }}" data-type="{{ a.type }}" data-smart="{{ a.smart_strategy }}">
-                    <td><span class="muted">+</span> <input type="radio" name="pick" value="{{ a.id }}" data-name="{{ a.name }}" data-label="{{ a.result_label }}" data-rationale="{{ a.rationale }}" data-risk="{{ a.risk_level }}" data-match="{{ a.match_id }}" onchange="afPick(this)"></td>
+                    <td><span class="muted">+</span> <input type="checkbox" name="pick" value="{{ a.id }}" aria-label="Tick {{ a.name }}" data-name="{{ a.name }}" data-label="{{ a.result_label }}" data-rationale="{{ a.rationale }}" data-risk="{{ a.risk_level }}" data-match="{{ a.match_id }}" onchange="afPick()"></td>
                     <td><span class="cell-hex" title="{{ a.id }}">{{ a.id }}</span></td>
                     <td><span class="badge emerald">{{ a.vendor }}</span></td>
                     <td class="mono">{{ a.watchlist_id }}</td>
@@ -174,7 +174,7 @@
 <script>
 (function () {
     var rows = Array.prototype.slice.call(document.querySelectorAll('#alert-table tbody tr[data-outcome]'));
-    var tab = 'All', page = 1, SIZE = 50, picked = null;
+    var tab = 'All', page = 1, SIZE = 50;
     function v(id) { return (document.getElementById(id).value || '').trim(); }
     function visible() {
         var auto = v('af-auto'), wl = v('af-wl'), type = v('af-type'), smart = v('af-smart');
@@ -196,6 +196,7 @@
         html += '<a href="#" data-p="' + (page + 1) + '" class="' + (page === pages ? 'dis' : '') + '">&rsaquo;</a>';
         pg.innerHTML = html;
         pg.querySelectorAll('a').forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); page = parseInt(a.dataset.p, 10); paint(); }); });
+        if (window.afPick) { afPick(); }
     }
     window.afApply = function () { page = 1; paint(); };
     window.afTab = function (btn) {
@@ -203,18 +204,38 @@
         document.querySelectorAll('#alert-tabs .tab').forEach(function (t) { t.classList.toggle('active', t === btn); });
         paint();
     };
-    window.afPick = function (radio) {
-        picked = radio;
-        document.getElementById('sel-outcome').textContent = radio.dataset.name;
-        document.getElementById('sel-outcome').classList.remove('muted');
+    /* Row check boxes: tick any number of alerts (ticks survive paging and
+       filters), untick them, or tick every alert shown from the header box;
+       Change Alert Outcome writes one outcome to all of them. */
+    function boxes() { return rows.map(function (r) { return r.querySelector('input[name=pick]'); }); }
+    function shownBoxes() { return boxes().filter(function (b) { return !b.closest('tr').classList.contains('hidden'); }); }
+    function pickedBoxes() { return boxes().filter(function (b) { return b.checked; }); }
+    window.afPick = function () {
+        var p = pickedBoxes(), out = document.getElementById('sel-outcome'), shown = shownBoxes(), all = document.getElementById('pick-all');
+        out.textContent = p.length === 0 ? 'Select Alert Outcome' : p.length === 1 ? p[0].dataset.name : p.length + ' alerts selected';
+        out.classList.toggle('muted', p.length === 0);
+        all.checked = shown.length > 0 && shown.every(function (b) { return b.checked; });
+        all.indeterminate = !all.checked && shown.some(function (b) { return b.checked; });
+    };
+    window.afPickAll = function (box) {
+        shownBoxes().forEach(function (b) { b.checked = box.checked; });
+        afPick();
     };
     window.openAlertOutcome = function () {
-        if (!picked) { alert('Select an alert (the radio button at the left of the row) first.'); return; }
-        document.getElementById('ao-alert-id').value = picked.value;
-        document.getElementById('ao-alert-label').textContent = picked.value;
+        var p = pickedBoxes();
+        if (!p.length) { alert('Tick at least one alert (the check box at the left of its row) first.'); return; }
+        var ids = document.getElementById('ao-alert-ids');
+        ids.innerHTML = '';
+        p.forEach(function (b) { var h = document.createElement('input'); h.type = 'hidden'; h.name = 'alert_id'; h.value = b.value; ids.appendChild(h); });
+        document.getElementById('ao-alert-label').textContent = p.length === 1 ? p[0].value
+            : p.length + ' alerts: ' + p.map(function (b) { return b.dataset.name; }).join(', ');
+        var note = document.getElementById('ao-multi');
+        note.style.display = p.length > 1 ? '' : 'none';
+        note.textContent = 'The label, rationale, comment and risk below are written to all ' + p.length + ' ticked alerts.';
+        var first = p[0];
         var sel = function (id, val) { var el = document.getElementById(id); if (el && val) { el.value = val; } };
-        sel('ao-label', picked.dataset.label); sel('ao-rationale', picked.dataset.rationale); sel('ao-risk', picked.dataset.risk);
-        var link = document.getElementById('ao-wc-link'); if (link) { link.href = link.dataset.base + picked.dataset.match; }
+        sel('ao-label', first.dataset.label); sel('ao-rationale', first.dataset.rationale); sel('ao-risk', first.dataset.risk);
+        var link = document.getElementById('ao-wc-link'); if (link) { link.href = link.dataset.base + first.dataset.match; }
         openModal('alert-outcome');
     };
     paint();

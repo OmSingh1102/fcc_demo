@@ -44,10 +44,15 @@ def _require_handler(alert, actor):
 
 
 def alert_outcome(alert, actor, form):
+    """One outcome written to every ticked alert: the form carries one
+    alert_id per ticked row (a single id still works). Everything is checked
+    before anything is written, so a refusal leaves no alert half-done."""
     _require_handler(alert, actor)
-    alert_id = form.get("alert_id", "")
-    row = next((a for a in alert["alerts"] if a["id"] == alert_id), None)
-    _require(row is not None, "Select an alert first.")
+    ids = [i for i in (form.getlist("alert_id") if hasattr(form, "getlist") else [form.get("alert_id", "")]) if i]
+    _require(ids, "Tick at least one alert first.")
+    by_id = {a["id"]: a for a in alert["alerts"]}
+    picked = [by_id.get(i) for i in ids]
+    _require(all(r is not None for r in picked), "One of the ticked alerts is not on this case.")
     review_mode = form.get("review_mode", "Manual Review")
     _require(review_mode in vocab.REVIEW_MODES, "Pick a review mode.")
     label = form.get("result_label", "")
@@ -58,12 +63,13 @@ def alert_outcome(alert, actor, form):
     risk = form.get("risk_level", "")
     _require(risk in vocab.RISK_LEVELS, "Pick a risk level.")
     now = dates.now_str()
-    row.update({"outcome": label, "review_mode": review_mode, "result_label": label, "rationale": rationale,
-                "comment": comment, "risk_level": risk, "attachment": (form.get("attachment") or "").strip(),
-                "resolved_by": actor, "resolved_at": now})
+    for row in picked:
+        row.update({"outcome": label, "review_mode": review_mode, "result_label": label, "rationale": rationale,
+                    "comment": comment, "risk_level": risk, "attachment": (form.get("attachment") or "").strip(),
+                    "resolved_by": actor, "resolved_at": now})
+        _audit(alert, actor, f"Alert outcome: {label}", f"{row['name']} (WL {row['watchlist_id']}) — {rationale}, {risk} risk. {comment}")
     alert["latest_updated"] = now
-    _audit(alert, actor, f"Alert outcome: {label}", f"{row['name']} (WL {row['watchlist_id']}) — {rationale}, {risk} risk. {comment}")
-    return row
+    return picked
 
 
 def case_outcome(alert, actor, form, kyc=None):

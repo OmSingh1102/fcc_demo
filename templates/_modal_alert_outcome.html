@@ -1,7 +1,7 @@
 {% from "_modals.html" import modal_open, modal_close %}
 {{ modal_open('alert-outcome', 'Change Alert Outcome', '') }}
 <form method="post" action="{{ url_for('ns_alert_outcome', alert_case_id=alert.id) }}">
-    <input type="hidden" name="alert_id" id="ao-alert-id" value="">
+    <div id="ao-alert-ids"></div>{# one hidden alert_id per ticked row, filled by the page script #}
     <div class="modal-body">
         <div class="field inline"><label>Review Mode</label>
             <div class="radio-row">
@@ -9,6 +9,7 @@
                 <label class="check"><input type="radio" name="review_mode" value="Manual Review" checked> Manual Review</label>
             </div></div>
         <div class="field inline"><label>Alert ID</label><div class="mono small" id="ao-alert-label">—</div></div>
+        <div class="small muted mb-8" id="ao-multi" style="display:none"></div>
         <div class="field inline"><label><span class="req">*</span>Outcome</label>
             <select class="input" name="outcome_display" disabled><option>Set by Result Label</option></select></div>
         <div class="field inline"><label><span class="req">*</span>Result Label</label>

@@ -559,6 +559,38 @@ class FlowTestCase(unittest.TestCase):
         html = self.c.get(page + "?open=dc-modal").data.decode("utf-8")
         self.assertIn('class="toast error"', html)
 
+    def test_alert_outcome_multi_select(self):
+        """The List Screening rows are check boxes: several alerts can be ticked
+        and given one outcome at once, a single alert still works, and none
+        or a foreign id is refused before anything is written."""
+        h = self.K["hassan"]
+        aid = h["screening"]["alert_case_id"]
+        self.login("mario.kim")
+        page = self.c.get(f"/name_screening/case/{aid}").data.decode("utf-8")
+        for needle in ('type="checkbox" name="pick"', 'id="pick-all"', 'id="ao-alert-ids"', 'id="ao-multi"', "afPickAll"):
+            self.assertIn(needle, page, needle)
+        self.assertNotIn('type="radio" name="pick"', page)
+        self.post(f"/name_screening/{aid}/handle")
+        a = fcc.ALERT_BY_ID[aid]
+        pending = [x for x in a["alerts"] if x["outcome"] == "Pending"]
+        self.assertEqual(len(pending), 3)
+        two = [pending[0]["id"], pending[1]["id"]]
+        r = self.post(f"/name_screening/{aid}/alert_outcome", alert_id=two, review_mode="Manual Review",
+                      result_label="False Positive", rationale="Different Person - Public Records",
+                      comment="Two namesakes, both cleared.", risk_level="Low")
+        self.assertEqual(flash_text(r), "Alert outcome recorded for 2 alerts.")
+        done = [x for x in a["alerts"] if x["id"] in two]
+        self.assertTrue(all(x["outcome"] == "False Positive" and x["resolved_by"] == MARIO for x in done))
+        self.assertEqual(sum(1 for x in a["alerts"] if x["outcome"] == "Pending"), 1)
+        self.assertEqual(sum(1 for row in a["audit"] if row["action"] == "Alert outcome: False Positive"), 2)
+        r = self.post(f"/name_screening/{aid}/alert_outcome", review_mode="Manual Review", result_label="False Positive",
+                      rationale="Different Person - Public Records", comment="x", risk_level="Low")
+        self.assertIn("Tick at least one alert", flash_text(r))
+        r = self.post(f"/name_screening/{aid}/alert_outcome", alert_id=[pending[2]["id"], "nope"], review_mode="Manual Review",
+                      result_label="False Positive", rationale="Different Person - Public Records", comment="x", risk_level="Low")
+        self.assertIn("not on this case", flash_text(r))
+        self.assertEqual(sum(1 for x in a["alerts"] if x["outcome"] == "Pending"), 1)      # nothing half-written
+
     def test_comparison_shows_location(self):
         """The World-Check comparison table shows the client's country and
         nationality beside the record's and ticks them when they agree."""
