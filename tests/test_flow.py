@@ -496,6 +496,34 @@ class FlowTestCase(unittest.TestCase):
         self.assertTrue(all(new_tab(a) for a in opens))
         self.assertTrue(any((a.get("href") or "").startswith("/documents/") for a in opens))
 
+    def test_review_button_explains_itself(self):
+        """A greyed Review button says why in text beside it: nothing to
+        review yet, the level the stage needs, who holds the case, or closed."""
+        s = self.K["filler-intake-0"]                     # an intake case; only L2 / QC can move it by hand
+        def why():
+            page = self.c.get(f"/kyc/detail/{s['id']}").data.decode("utf-8")
+            m = re.search(r'id="review-why">([^<]*)<', page)
+            return m.group(1) if m else ("ENABLED" if "openModal('dc-modal')\">Review" in page else "")
+
+        self.login("amara.iyer")
+        self.assertEqual(why(), "Nothing to review at this stage")
+        self.login("nisha.rao")
+        self.post(f"/kyc/{s['id']}/status", status="DataConfirming", comment="ID verification done.")
+        self.assertEqual(why(), "Data Confirming needs L1 — sign in as Amara Iyer, Jon Miranda or Mario Kim")
+        self.post(f"/kyc/{s['id']}/reserve")
+        self.assertEqual(why(), "Data Confirming needs L1 — sign in as Amara Iyer, Jon Miranda or Mario Kim")
+        self.login("amara.iyer")
+        self.assertEqual(why(), "Reserved by nisha.rao@straive.com — ask them to release it, or use Assign to Others")
+        self.login("nisha.rao")
+        self.post(f"/kyc/{s['id']}/release")
+        self.login("amara.iyer")
+        self.assertEqual(why(), "Reserve the case first (top right)")
+        self.post(f"/kyc/{s['id']}/reserve")
+        self.assertEqual(why(), "ENABLED")
+        self.confirm(s)                                    # no hit, TT Live: auto-verifies
+        self.assertEqual(s["status"], "Verified")
+        self.assertEqual(why(), "Case is closed")
+
     def test_comparison_shows_location(self):
         """The World-Check comparison table shows the client's country and
         nationality beside the record's and ticks them when they agree."""

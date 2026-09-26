@@ -146,6 +146,19 @@ def review_action(case, levels, actor=""):
     return ""
 
 
+def review_needs(case):
+    """(stage, levels) the Review button wants at this stage — the text shown
+    beside the greyed button when the signed-in analyst lacks the level, e.g.
+    after a team lead moved an intake case by hand. ("", []) when the stage
+    has no review step at all."""
+    s = case["status"]
+    if s == "DataScreening" and case.get("pending_reason") == "Pending Checker 2":
+        return "Checker 2 (not the Checker 1 reviewer)", ["L1", "L2"]
+    return {"DataConfirming": ("Data Confirming", ["L1"]),
+            "DataScreening": ("Data Screening", ["L1", "L2"]),
+            "DataEscalatingL2": ("The L2 / EDD review", ["L2", "EDD"])}.get(s, ("", []))
+
+
 # ── ownership ────────────────────────────────────────────────────────────────
 
 def reserve(case, actor):

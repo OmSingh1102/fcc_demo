@@ -103,6 +103,15 @@ def _levels() -> set:
     return set(session.get("roles") or [])
 
 
+def _analysts_with(levels, tenant) -> str:
+    """'Amara Iyer, Jon Miranda or Mario Kim': who holds one of `levels` on
+    `tenant`, for the hints that say who can act."""
+    names = [a["name"] for a in ANALYSTS if set(levels) & set(a["roles"]) and tenant in a["tenants"]]
+    if len(names) < 2:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " or " + names[-1]
+
+
 def _check_password(password: str) -> bool:
     return hmac.compare_digest((password or "").encode("utf-8"), DEMO_PASSWORD.encode("utf-8"))
 
@@ -457,6 +466,7 @@ def kyc_detail(case_id):
     alert, wc = _linked(case)
     levels, actor = _levels(), _actor()
     l2_level = "EDD" if case["pending_reason"] == "Pending EDD" else "L2"
+    stage, needed = workflow.review_needs(case)
     hit = case["screening"]["hit"]
     checks = workflow.poa_checks(case)
     failed = [c for c in checks if not c["ok"]]
@@ -464,6 +474,7 @@ def kyc_detail(case_id):
         "kyc_detail.html", case=case, alert=alert, wc=wc, levels=levels, actor=actor,
         points=workflow.verification_points(case), review=workflow.review_action(case, levels, actor),
         is_mine=case["current_reviewer"] == actor, closed=case["status"] in vocab.CLOSED_STATUSES,
+        review_needs=(stage, needed), level_names=_analysts_with(needed, case["tenant"]),
         sla=sla.chip(case), vendor=idv_vendor.details(case), confirm_fields=workflow.confirm_fields(case),
         pending_alerts=sum(1 for a in (alert or {}).get("alerts", []) if a["outcome"] == "Pending"),
         exports=(wc or {}).get("exports", []), l2_level=l2_level,

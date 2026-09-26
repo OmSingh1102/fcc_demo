@@ -193,12 +193,16 @@
     <a class="btn btn-outline btn-sm" href="{{ url_for('kyc_audit', case_id=case.id, view='changes') }}">{{ icon('list') }} Change Log</a>
     {% if review and is_mine %}
     <button type="button" class="btn btn-primary btn-sm" onclick="openModal('{{ {'dc': 'dc-modal', 'edd': 'edd-modal', 'l2': 'l2-modal', 'checker2': 'checker2-modal'}[review] }}')">Review</button>
-    {% elif review %}
-    <button type="button" class="btn btn-primary btn-sm" disabled title="Reserve the case first">Review</button>
-    {% elif closed %}
-    <button type="button" class="btn btn-primary btn-sm" disabled title="Case is closed">Review</button>
     {% else %}
-    <button type="button" class="btn btn-primary btn-sm" disabled title="No review action for your level at this stage">Review</button>
+    {# A greyed Review says why, in text — a tooltip alone was missed. #}
+    {% set stage, needed = review_needs %}
+    {% if review and case.current_reviewer %}{% set why = 'Reserved by ' ~ case.current_reviewer ~ ' — ask them to release it, or use Assign to Others' %}
+    {% elif review %}{% set why = 'Reserve the case first (top right)' %}
+    {% elif closed %}{% set why = 'Case is closed' %}
+    {% elif stage %}{% set why = stage ~ ' needs ' ~ needed|join(' or ') ~ ' — sign in as ' ~ level_names %}
+    {% else %}{% set why = 'Nothing to review at this stage' %}{% endif %}
+    <span class="small muted" id="review-why">{{ why }}</span>
+    <button type="button" class="btn btn-primary btn-sm" disabled title="{{ why }}">Review</button>
     {% endif %}
 </div>
 
