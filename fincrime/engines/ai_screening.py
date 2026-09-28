@@ -57,6 +57,13 @@ GUARDS = [
     {"key": "san_review", "label": "Sanctions records always go to an analyst", "default": False,
      "checks": "When on, a record from a sanctions list (type SAN) is never auto-resolved, whatever the rules say."},
 ]
+# Assistance that is switchable but resolves nothing by itself.
+SWITCHES = [
+    {"key": "model_review", "label": "Model assessment", "default": True,
+     "checks": "The AI assessment button on a screening case: Claude, through Straive's LLM Foundry, reads the client "
+               "and the watchlist record side by side and gives a verdict with its reasons. Advisory only: the analyst "
+               "still records every outcome."},
+]
 RAILS = [
     "A rule only fires when both values are present. Missing data always goes to an analyst.",
     "A record that shares the client's exact date of birth always goes to an analyst, whatever else differs.",
@@ -68,6 +75,8 @@ GUARD_BY_KEY = {g["key"]: g for g in GUARDS}
 KEY_BY_LABEL = {r["label"]: r["key"] for r in RULES}
 DEFAULT_ENABLED = {r["key"]: r["default"] for r in RULES}
 DEFAULT_GUARDS = {g["key"]: g["default"] for g in GUARDS}
+SWITCH_BY_KEY = {s["key"]: s for s in SWITCHES}
+DEFAULT_SWITCHES = {s["key"]: s["default"] for s in SWITCHES}
 
 _BOUND = {"settings": None}
 
@@ -76,7 +85,8 @@ _BOUND = {"settings": None}
 
 def default_settings():
     """The stored record: one row of kind "settings", id "ai_rules"."""
-    return {"id": "ai_rules", "enabled": dict(DEFAULT_ENABLED), "guards": dict(DEFAULT_GUARDS), "history": []}
+    return {"id": "ai_rules", "enabled": dict(DEFAULT_ENABLED), "guards": dict(DEFAULT_GUARDS),
+            "switches": dict(DEFAULT_SWITCHES), "history": []}
 
 
 def configure(record):
@@ -98,6 +108,10 @@ def guards_enabled():
     return settings().get("guards", DEFAULT_GUARDS)
 
 
+def switches_enabled():
+    return settings().get("switches", DEFAULT_SWITCHES)
+
+
 def set_rule(record, actor, key, on):
     """Switch a rule or guard; returns (before, after). The change is logged
     on the record so the page can show who changed what."""
@@ -106,6 +120,8 @@ def set_rule(record, actor, key, on):
         table, label = record.setdefault("enabled", dict(DEFAULT_ENABLED)), RULE_BY_KEY[key]["label"]
     elif key in GUARD_BY_KEY:
         table, label = record.setdefault("guards", dict(DEFAULT_GUARDS)), GUARD_BY_KEY[key]["label"]
+    elif key in SWITCH_BY_KEY:
+        table, label = record.setdefault("switches", dict(DEFAULT_SWITCHES)), SWITCH_BY_KEY[key]["label"]
     else:
         raise WorkflowError("Unknown rule.")
     before = bool(table.get(key))

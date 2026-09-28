@@ -69,13 +69,24 @@ Either way the sign-in card shows the demo password. Set
 `STRAIVE_DEMO_PASSWORD` (see `.env.example`) to hide it behind a password of
 your own.
 
+**Model assessment (a real model).** Set `LLM_FOUNDRY_KEY` (and, if
+needed, `LLM_FOUNDRY_URL` and `LLM_MODEL`; see `.env.example`) and every
+screening case gains an **AI assessment** button: Claude, reached through
+Straive's LLM Foundry gateway, reads the client record and the watchlist
+record side by side and writes a verdict, a confidence, its reasons and the
+data it found missing on the ticked alerts (or every pending one), with an
+audit row on each case. It is advisory: it resolves nothing, never runs at
+intake, and the AI Screening page shows its status and a switch. On Render
+the blueprint asks for the key; leave it blank to run without the feature.
+The case data is fictional, so nothing sensitive leaves the demo.
+
 ## Tests
 
 ```
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-43 end-to-end tests on the Flask test client: the golden path, resubmit,
+44 end-to-end tests on the Flask test client: the golden path, resubmit,
 escalate, segregation of duties, L2/EDD decisions, Skopenow, TT Shop risk
 recalculation, routing by skill and capacity, case on-demand, immediate
 hand-offs, capacity overrides, trackers and CSV, the investigation-file ZIP,
@@ -85,8 +96,9 @@ button opening in a new tab, the document viewer's controls, the greyed Review b
 actions staying on the page with the error as a notification, the AI
 screening rules (the rule book, what it did at intake, auto-verification on
 Data Confirm, sellers keeping the human close, rule switches that persist),
-the workflow labels across the screens, and one outcome written to several
-ticked alerts at once.
+the workflow labels across the screens, one outcome written to several
+ticked alerts at once, and the model assessment (with the model stood in
+for; the suite never calls the gateway).
 
 ## Analyst profiles
 

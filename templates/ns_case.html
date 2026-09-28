@@ -98,6 +98,9 @@
         <div class="row mb-8">
             <div class="input input-sm" style="width:220px;display:inline-flex;align-items:center;justify-content:space-between;background:var(--muted)"><span class="muted" id="sel-outcome">Select Alert Outcome</span>{{ icon('chevron-down') }}</div>
             <button type="button" class="btn btn-primary btn-sm" onclick="openAlertOutcome()" {% if alert.status != 'Handling' or alert.assigned_to != actor %}disabled title="Handle the case first"{% endif %}>Change Alert Outcome</button>
+            <form method="post" action="{{ url_for('ns_ai_assess', alert_case_id=alert.id) }}" id="ai-form" style="margin:0" onsubmit="return aiAssess(this)">
+                <button type="submit" class="btn btn-outline btn-sm" data-model="{{ ai_model }}" {% if not ai_ready %}disabled title="{{ ai_why }}"{% else %}title="Ask {{ ai_model }} whether the ticked alerts (or every pending one) could be the client — advisory, resolves nothing"{% endif %}>{{ icon('shield-check') }} AI assessment</button>
+            </form>
         </div>
         <div class="tabs chips" id="alert-tabs">
             {% for name, n in counts.items() %}
@@ -107,17 +110,18 @@
         <div class="tbl-scroll">
             <table class="tbl dense" id="alert-table">
                 <thead><tr>
-                    <th style="width:40px"><input type="checkbox" id="pick-all" title="Tick every alert shown" aria-label="Tick every alert shown" onchange="afPickAll(this)"></th><th>Alert ID</th><th>Vendor</th><th>Watch List ID</th><th>Alert Outcome</th><th>Smart Strategy</th><th>Name</th><th>Matched Alias</th>
+                    <th style="width:40px"><input type="checkbox" id="pick-all" title="Tick every alert shown" aria-label="Tick every alert shown" onchange="afPickAll(this)"></th><th>Alert ID</th><th>Vendor</th><th>Watch List ID</th><th>Alert Outcome</th><th>AI assessment</th><th>Smart Strategy</th><th>Name</th><th>Matched Alias</th>
                     <th>Score</th><th>Type</th><th>Date of Birth (DD-MM-YYYY)</th><th>Gender</th><th>Last Resolved By</th><th>Last Resolved Time</th><th>Rationale</th><th>Risk</th><th></th>
                 </tr></thead>
                 <tbody>
                 {% for a in alert.alerts %}
                 <tr data-outcome="{{ a.outcome }}" data-mode="{{ a.review_mode }}" data-wl="{{ a.watchlist_id }}" data-type="{{ a.type }}" data-smart="{{ a.smart_strategy }}">
-                    <td><span class="muted">+</span> <input type="checkbox" name="pick" value="{{ a.id }}" aria-label="Tick {{ a.name }}" data-name="{{ a.name }}" data-label="{{ a.result_label }}" data-rationale="{{ a.rationale }}" data-risk="{{ a.risk_level }}" data-match="{{ a.match_id }}" onchange="afPick()"></td>
+                    <td><span class="muted">+</span> <input type="checkbox" name="pick" value="{{ a.id }}" aria-label="Tick {{ a.name }}" data-name="{{ a.name }}" data-label="{{ a.result_label }}" data-rationale="{{ a.rationale }}" data-risk="{{ a.risk_level }}" data-match="{{ a.match_id }}" data-ai="{% if a.ai_assessment %}{{ a.ai_assessment.verdict }}, {{ a.ai_assessment.confidence }}% — {{ a.ai_assessment.summary }}{% if a.ai_assessment.missing_data %} Missing: {{ a.ai_assessment.missing_data|join('; ') }}.{% endif %} ({{ a.ai_assessment.model }}){% endif %}" data-ai-outcome="{{ a.ai_assessment.suggested_outcome if a.ai_assessment else '' }}" onchange="afPick()"></td>
                     <td><span class="cell-hex" title="{{ a.id }}">{{ a.id }}</span></td>
                     <td><span class="badge emerald">{{ a.vendor }}</span></td>
                     <td class="mono">{{ a.watchlist_id }}</td>
                     <td>{{ outcome_badge(a.outcome) }}</td>
+                    <td class="nowrap">{% if a.ai_assessment %}<span class="badge {{ ai_tone.get(a.ai_assessment.verdict, 'slate') }}" title="{{ a.ai_assessment.summary }} ({{ a.ai_assessment.model }}, {{ a.ai_assessment.at }})">{{ a.ai_assessment.verdict }} · {{ a.ai_assessment.confidence }}%</span>{% else %}-{% endif %}</td>
                     <td>{{ a.smart_strategy or '-' }}</td>
                     <td class="nowrap">{{ a.name }}</td>
                     <td class="nowrap">{{ a.matched_alias }}</td>
@@ -132,7 +136,7 @@
                     <td><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=alert.id, match_id=a.match_id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open in WC<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
                 </tr>
                 {% else %}
-                <tr><td colspan="17"><div class="no-data">{{ icon('search') }}No data</div></td></tr>
+                <tr><td colspan="18"><div class="no-data">{{ icon('search') }}No data</div></td></tr>
                 {% endfor %}
                 </tbody>
             </table>
@@ -221,6 +225,17 @@
         shownBoxes().forEach(function (b) { b.checked = box.checked; });
         afPick();
     };
+    /* AI assessment: one hidden alert_id per ticked row; none ticked = every pending alert. */
+    window.aiAssess = function (form) {
+        form.querySelectorAll('input[name=alert_id]').forEach(function (h) { h.remove(); });
+        var p = pickedBoxes();
+        if (!p.length && !confirm('Nothing is ticked. Assess every pending alert?')) { return false; }
+        p.forEach(function (b) { var h = document.createElement('input'); h.type = 'hidden'; h.name = 'alert_id'; h.value = b.value; form.appendChild(h); });
+        var btn = form.querySelector('button');
+        btn.textContent = 'Asking ' + btn.dataset.model + '\u2026';
+        setTimeout(function () { btn.disabled = true; }, 0);   /* after the submit leaves */
+        return true;
+    };
     window.openAlertOutcome = function () {
         var p = pickedBoxes();
         if (!p.length) { alert('Tick at least one alert (the check box at the left of its row) first.'); return; }
@@ -235,6 +250,11 @@
         var first = p[0];
         var sel = function (id, val) { var el = document.getElementById(id); if (el && val) { el.value = val; } };
         sel('ao-label', first.dataset.label); sel('ao-rationale', first.dataset.rationale); sel('ao-risk', first.dataset.risk);
+        /* The model's view of the first ticked alert, and its suggested label when the console recorded none. */
+        var ai = document.getElementById('ao-ai'), aiText = p.length === 1 ? (first.dataset.ai || '') : '';
+        ai.style.display = aiText ? '' : 'none';
+        ai.textContent = aiText ? 'Model assessment: ' + aiText : '';
+        if (!first.dataset.label && first.dataset.aiOutcome) { sel('ao-label', first.dataset.aiOutcome); }
         var link = document.getElementById('ao-wc-link'); if (link) { link.href = link.dataset.base + first.dataset.match; }
         openModal('alert-outcome');
     };

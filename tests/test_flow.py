@@ -591,6 +591,69 @@ class FlowTestCase(unittest.TestCase):
         self.assertIn("not on this case", flash_text(r))
         self.assertEqual(sum(1 for x in a["alerts"] if x["outcome"] == "Pending"), 1)      # nothing half-written
 
+    def test_model_assessment(self):
+        """AI assessment asks the model about the ticked alerts and records a
+        verdict on the alert rows and the watchlist records, resolving
+        nothing; without a key it is off; a model failure stops the run
+        without losing what was assessed; the team lead can switch it off."""
+        from fincrime.engines import ai_review
+        from fincrime.engines.errors import WorkflowError
+        h = self.K["hassan"]
+        aid = h["screening"]["alert_case_id"]
+        self.login("mario.kim")
+        saved = ai_review.KEY, ai_review._call_model
+        try:
+            ai_review.KEY = ""
+            page = self.c.get(f"/name_screening/case/{aid}").data.decode("utf-8")
+            self.assertIn("Model assessment is not configured", page)              # the disabled button says why
+            self.assertIn("Model assessment is not configured", flash_text(self.post(f"/name_screening/{aid}/ai_assess")))
+
+            ai_review.KEY = "test-key"
+            briefs = []
+
+            def fake(text):
+                briefs.append(text)
+                return ({"verdict": "different person", "confidence": 91, "summary": "Born forty years apart.",
+                         "reasons": ["record lists 1962, client 2005"], "missing_data": [],
+                         "suggested_outcome": "False Positive"}, {"input": 1, "output": 1, "cached": 0})
+            ai_review._call_model = fake
+            a = fcc.ALERT_BY_ID[aid]
+            pending = [x for x in a["alerts"] if x["outcome"] == "Pending"]
+            two = [pending[0]["id"], pending[1]["id"]]
+            r = self.post(f"/name_screening/{aid}/ai_assess", alert_id=two)
+            self.assertEqual(flash_text(r), f"AI assessment recorded for 2 alert(s) ({ai_review.MODEL}).")
+            self.assertEqual(len(briefs), 2)
+            self.assertIn("HASSAN", briefs[0])                                        # the brief carries the client
+            self.assertIn("system_comparison", briefs[0])
+            done = [x for x in a["alerts"] if x["id"] in two]
+            self.assertTrue(all(x["ai_assessment"]["verdict"] == "different person"
+                                and x["ai_assessment"]["confidence"] == 91 for x in done))
+            self.assertTrue(all(x["outcome"] == "Pending" for x in done))            # advisory: nothing resolved
+            wc = fcc.WC_BY_ID[aid]
+            self.assertEqual(sum(1 for m in wc["matches"] if m.get("ai_assessment")), 2)
+            for record in (a, wc, h):
+                self.assertEqual(sum(1 for row in record["audit"] if row["action"] == ai_review.ACTION), 2)
+            page = self.c.get(f"/name_screening/case/{aid}").data.decode("utf-8")
+            self.assertIn("different person · 91%", page)
+            self.assertIn('data-ai-outcome="False Positive"', page)
+            self.assertIn('id="ao-ai"', page)
+            self.assertEqual(self.c.get("/ai-screening").status_code, 200)
+
+            def boom(text):
+                raise WorkflowError("gateway down")
+            ai_review._call_model = boom
+            r = self.post(f"/name_screening/{aid}/ai_assess")                         # nothing ticked: every pending row
+            self.assertIn("gateway down", flash_text(r))
+            self.assertFalse(pending[2].get("ai_assessment"))
+
+            self.login("leah.fernandez")
+            self.assertIn("Model assessment: on → off", flash_text(self.post("/ai-screening/rules", key="model_review", enabled="0")))
+            self.login("mario.kim")
+            r = self.post(f"/name_screening/{aid}/ai_assess", alert_id=[pending[2]["id"]])
+            self.assertIn("switched off", flash_text(r))
+        finally:
+            ai_review.KEY, ai_review._call_model = saved
+
     def test_comparison_shows_location(self):
         """The World-Check comparison table shows the client's country and
         nationality beside the record's and ticks them when they agree."""

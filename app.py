@@ -40,7 +40,7 @@ from fincrime.data import vocab
 from fincrime.data.loader import SEED_VERSION, index_by_id, load_seed
 from fincrime.data.state_store import StateStore
 from fincrime.documents import svg_cards
-from fincrime.engines import (ai_screening, investigation, qc, recommendation, routing, screening, segregation, sla,
+from fincrime.engines import (ai_review, ai_screening, investigation, qc, recommendation, routing, screening, segregation, sla,
                               worldcheck, workflow)
 from fincrime.engines.errors import WorkflowError
 from fincrime.engines.wc_report_pdf import render_wc_export
@@ -756,7 +756,9 @@ def ns_case(alert_case_id):
     types = sorted({a["type"] for a in alert["alerts"] if a["type"]})
     return render_template("ns_case.html", alert=alert, wc=wc, actor=_actor(), types=types,
                            counts=screening.tab_counts(alert["alerts"]), strategies=[r["label"] for r in ai_screening.RULES],
-                           recommendation=recommendation.recommend_case_outcome(alert, wc))
+                           recommendation=recommendation.recommend_case_outcome(alert, wc),
+                           ai_ready=ai_review.ready(), ai_why=ai_review.why_not(), ai_model=ai_review.MODEL,
+                           ai_tone=ai_review.VERDICT_TONE)
 
 
 def _alert_action(alert_case_id, fn, *args, success="", open_modal="", **kwargs):
@@ -783,6 +785,29 @@ def ns_alert_outcome(alert_case_id):
     return _alert_action(alert_case_id, screening.alert_outcome, request.form,
                          success="Alert outcome recorded." if n < 2 else f"Alert outcome recorded for {n} alerts.",
                          open_modal="alert-outcome")
+
+
+@app.route("/name_screening/<alert_case_id>/ai_assess", methods=["POST"])
+@role_required("L1", "L2")
+def ns_ai_assess(alert_case_id):
+    """Ask the model about the ticked alerts (every pending one when none
+    are ticked). Advisory: nothing is resolved. What was assessed is saved
+    even when a later call fails."""
+    alert = _alert(alert_case_id)
+    kyc, wc = KYC_BY_ID.get(alert["kyc_case_id"]), WC_BY_ID.get(alert["id"])
+    ids = [i for i in request.form.getlist("alert_id") if i]
+    ok, res = _run_action(ai_review.assess_alerts, kyc, alert, wc, _actor(), ids)
+    if ok:
+        done, error = res
+        if done:
+            _save("alert", alert)
+            for kind, record in (("wc", wc), ("kyc", kyc)):
+                if record is not None:
+                    _save(kind, record)
+            flash(f"AI assessment recorded for {len(done)} alert(s) ({ai_review.MODEL}).", "success")
+        if error:
+            flash(f"Assessment stopped after {len(done)} alert(s): {error}", "error")
+    return redirect(url_for("ns_case", alert_case_id=alert_case_id))
 
 
 @app.route("/name_screening/<alert_case_id>/case_outcome", methods=["POST"])
@@ -1016,9 +1041,10 @@ def ai_screening_rules():
     ok, res = _run_action(ai_screening.set_rule, AI_SETTINGS, _actor(), key, request.form.get("enabled", ""))
     if ok:
         _save("settings", AI_SETTINGS)
-        rule = ai_screening.RULE_BY_KEY.get(key) or ai_screening.GUARD_BY_KEY.get(key) or {}
-        flash(f"{rule.get('label', key)}: {'on' if res[0] else 'off'} → {'on' if res[1] else 'off'}. "
-              "Applies to the next screening run.", "success")
+        rule = (ai_screening.RULE_BY_KEY.get(key) or ai_screening.GUARD_BY_KEY.get(key)
+                or ai_screening.SWITCH_BY_KEY.get(key) or {})
+        when = "Applies at once." if key in ai_screening.SWITCH_BY_KEY else "Applies to the next screening run."
+        flash(f"{rule.get('label', key)}: {'on' if res[0] else 'off'} → {'on' if res[1] else 'off'}. {when}", "success")
     return redirect(url_for("ai_screening_page"))
 
 

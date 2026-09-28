@@ -22,3 +22,11 @@ services:
         value: "1"
       - key: SECRET_KEY
         generateValue: true
+      # Model assessment: Claude through Straive's LLM Foundry. Render asks
+      # for the key when the blueprint is applied; blank runs without it.
+      - key: LLM_FOUNDRY_KEY
+        sync: false
+      - key: LLM_FOUNDRY_URL
+        value: https://llmfoundry.straivedemo.com
+      - key: LLM_MODEL
+        value: claude-opus-4-8

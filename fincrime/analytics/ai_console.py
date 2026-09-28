@@ -4,7 +4,7 @@ and human-in-the-loop, and a feed of what the rules did most recently."""
 from collections import Counter
 
 from fincrime.data import vocab
-from fincrime.engines import ai_screening
+from fincrime.engines import ai_review, ai_screening
 
 
 class AiScreeningConsole:
@@ -21,6 +21,9 @@ class AiScreeningConsole:
         enabled, guards_on = settings.get("enabled", {}), settings.get("guards", {})
         rules = [dict(r, on=bool(enabled.get(r["key"], r["default"])), fired=fired.get(r["label"], 0)) for r in ai_screening.RULES]
         guards = [dict(g, on=bool(guards_on.get(g["key"], g["default"]))) for g in ai_screening.GUARDS]
+        switches_on = settings.get("switches", {})
+        model = dict(ai_review.status(), on=bool(switches_on.get("model_review", True)),
+                     count=sum(1 for r in rows if r.get("ai_assessment")))
 
         hit = [c for c in tenant_cases if c["screening"]["hit"]]
         auto_hit = [c for c in hit if c["screening"].get("workflow") == "auto-verified"]
@@ -54,7 +57,7 @@ class AiScreeningConsole:
 
         return {
             "tenant_label": vocab.TENANTS[tenant]["label"],
-            "rules": rules, "guards": guards, "rails": ai_screening.RAILS,
+            "rules": rules, "guards": guards, "rails": ai_screening.RAILS, "model": model,
             "tiles": tiles, "hit": len(hit), "feed": feed[:10],
             "history": list(reversed(settings.get("history", [])))[:10],
         }
