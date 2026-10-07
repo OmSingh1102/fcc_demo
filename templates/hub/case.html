@@ -119,7 +119,7 @@
                     </select>
                     <span class="hx-help" id="act-help">{{ action_help[allowed[0]] }}</span>
                 </div>
-                <div class="hx-field"><label for="comment">Comment</label><textarea class="hx-textarea" id="comment" name="comment" placeholder="Why - this goes to the audit trail (and to the customer for an RFI)"></textarea></div>
+                <div class="hx-field"><label for="comment">Comment</label><textarea class="hx-textarea" id="comment" name="comment" placeholder="Why - this goes to the audit trail (and to the customer for an RFI)">{% if c.ai.narrative %}{{ c.ai.narrative.narrative }}{% if c.ai.narrative.regulatory_note %} {{ c.ai.narrative.regulatory_note }}{% endif %}{% endif %}</textarea>{% if c.ai.narrative %}<span class="hx-help">Prefilled with Claude's draft narrative; edit before recording.</span>{% endif %}</div>
                 <button type="submit" class="hx-btn hx-btn-primary">Record decision</button>
                 {% if hub_role == 'analyst' %}<span class="hx-help">Confirmed-match outcomes (EDD approve, reject, exit, block) need L2 Compliance or the Team Lead.</span>{% endif %}
             </form>
@@ -127,8 +127,8 @@
         </div>
     </div>
 
-    <div class="hx-card">
-        <div class="hx-card-head"><div><h2>{{ hicon('sparkles') }} Claude agents</h2><div class="hx-sub">On demand, advisory. Reads the normalised case and the agents' findings - never the historical outcome.</div></div></div>
+    <div class="hx-card" id="claude">
+        <div class="hx-card-head"><div><h2>{{ hicon('sparkles') }} Claude agents</h2><div class="hx-sub">On demand, advisory. Reads the normalised case and the agents' findings - never the historical outcome.{% if llm.ready %} {{ llm.model }} via {{ llm.gateway }}, about 10–20 s a call.{% endif %}</div></div></div>
         <div class="hx-card-body">
             {% if claude_routes %}
             {% for which, label, help in (('second_opinion', 'Second opinion on the match', 'Same person, different person or unclear, with the reasons.'), ('narrative', 'Draft the compliance narrative', 'A note in the register of the log, ready to edit into the decision comment.'), ('customer_message', 'Draft the customer message', 'A plain-English message for a document rejection or an RFI.')) %}

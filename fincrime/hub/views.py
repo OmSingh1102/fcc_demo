@@ -16,8 +16,8 @@ from flask import (Blueprint, Response, abort, current_app, flash, jsonify, redi
                    url_for)
 
 from fincrime.engines.errors import WorkflowError
-from fincrime.hub import actions, analytics, documents, pipeline, state
-from fincrime.hub.agents import AGENTS, RUN_ORDER, triage
+from fincrime.hub import actions, analytics, documents, llm, pipeline, state
+from fincrime.hub.agents import AGENTS, RUN_ORDER, llm_agents, triage
 from fincrime.hub.agents.intake import REASONS
 from fincrime.utils import dates
 
@@ -105,14 +105,8 @@ def role_required(*roles):
 
 
 def llm_status():
-    """Claude availability for the chips and buttons; the llm module
-    arrives with the Claude agents and is optional until then."""
-    try:
-        from fincrime.hub import llm
-    except ImportError:
-        return {"configured": False, "on": state.SETTINGS.get("claude", True), "why": "Claude agents are not installed in this build.",
-                "model": "", "gateway": "", "calls": 0, "ready": False}
-    return llm.status()
+    """Claude availability for the chips and buttons."""
+    return llm.status(state.SETTINGS)
 
 
 @bp.before_request
@@ -403,6 +397,22 @@ def case_intake(case_id):
     state.save_case(c)
     flash(msg, "success")
     return redirect(_back(url_for("hub.case", case_id=case_id)))
+
+
+@bp.route("/case/<case_id>/ai/<which>", methods=["POST"])
+@role_required("analyst", "l2", "lead")
+def case_ai(case_id, which):
+    """One Claude agent over the case: second_opinion, narrative or
+    customer_message. Advisory; the result lands on the case page."""
+    c = _case(case_id)
+    try:
+        _, msg = llm_agents.run(c, which, _actor(), state.SETTINGS, state.BOOK, proposed=request.form.get("proposed", ""))
+    except WorkflowError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("hub.case", case_id=case_id))
+    state.save_case(c)
+    flash(msg, "success")
+    return redirect(url_for("hub.case", case_id=case_id) + "#claude")
 
 
 @bp.route("/agents")
