@@ -182,15 +182,30 @@ class StateStore:
     def set_seed_version(cls, version: str) -> bool:
         return cls._set_setting(SEED_VERSION_KEY, version)
 
+    @classmethod
+    def setting(cls, key: str) -> str:
+        """A named setting, "" when unset (the hub stamps its own seed version)."""
+        return cls._get_setting(key)
+
+    @classmethod
+    def set_setting(cls, key: str, value: str) -> bool:
+        return cls._set_setting(key, value)
+
     # ── reset ───────────────────────────────────────────────────────────────
 
     @classmethod
-    def clear(cls) -> bool:
-        """Drop every stored record and setting. The seed reloads on top."""
+    def clear(cls, kinds=None) -> bool:
+        """Drop every stored record and setting, or only the records of
+        `kinds` (and the settings keyed after them). The seed reloads on top."""
         try:
             with closing(cls._connect()) as conn, conn:
-                conn.execute("DELETE FROM record_state")
-                conn.execute("DELETE FROM app_setting")
+                if kinds:
+                    for kind in kinds:
+                        conn.execute("DELETE FROM record_state WHERE kind = ?", (kind,))
+                        conn.execute("DELETE FROM app_setting WHERE key LIKE ?", (kind.split("_")[0] + "_%",))
+                else:
+                    conn.execute("DELETE FROM record_state")
+                    conn.execute("DELETE FROM app_setting")
             return True
         except sqlite3.Error as exc:
             cls._warn("could not clear the state store", exc)
