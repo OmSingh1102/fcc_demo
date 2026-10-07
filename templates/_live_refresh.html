@@ -153,7 +153,7 @@
         // below checks the moment they come back to it.
         if (document.hidden) { later(); return; }
         try {
-            var r = await fetch('{{ url_for("state_version") }}',
+            var r = await fetch('{{ poll_url or url_for("state_version") }}',
                                 {headers: {'Accept': 'application/json'}});
             // A redirect to the portal means the session expired — not a data
             // change, so stay quiet and let their next click handle it.

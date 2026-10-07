@@ -48,7 +48,7 @@ def synthesise(case):
     if not tampered and h % 1000 < CAPTURE_PER_MILLE:
         capture = _CAPTURE_BUCKETS[(h >> 8) % len(_CAPTURE_BUCKETS)]
     poa_old = _h("hub-poa", cid) % 1000 < POA_OLD_PER_MILLE
-    received = dates.BOOT - timedelta(hours=h % 96, minutes=(h >> 16) % 60)
+    received = dates.BOOT - timedelta(hours=h % 40, minutes=(h >> 16) % 60)     # within the last 40 h: a few P1s past their 24 h
     poa_age = 210 + (h >> 24) % 120 if poa_old else 7 + (h >> 24) % 140
     issued = received - timedelta(days=poa_age)
     years_held = 1 + (h >> 32) % 9

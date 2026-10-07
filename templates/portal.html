@@ -18,12 +18,18 @@
             <p>Unified back-office case management for creator and seller onboarding</p>
         </div>
 
-        <div class="auth-grid">
+        <div class="auth-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
             <a href="{{ url_for('login') }}" class="auth-option primary">
                 <span class="tile">{{ icon('shield-check') }}</span>
                 <h2>Analyst sign-in</h2>
                 <div class="lead">L1 confirming &amp; screening, L2 investigation, EDD and QC consoles</div>
                 <span class="btn btn-primary btn-lg btn-block">Continue to sign-in</span>
+            </a>
+            <a href="{{ url_for('hub.sign_in') }}" class="auth-option">
+                <span class="tile">{{ icon('shield') }}</span>
+                <h2>KYC Operations Hub</h2>
+                <div class="lead">AI agents with a human in the loop: document intake, identity normalisation, watchlist adjudication and triage over 1,000 synthetic cases</div>
+                <span class="btn btn-outline btn-lg btn-block">Open the hub</span>
             </a>
         </div>
 
