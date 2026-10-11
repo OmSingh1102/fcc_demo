@@ -19,6 +19,20 @@ rule and a sanctions guard, each switchable by the team lead on the AI
 Screening page — because a compliance team must be able to read and audit
 why a record was cleared.
 
+**The case book.** By default the console opens on the client's
+reconciliation log, the same 1,000-row file the hub reads
+(`fincrime/hub/data/kyc_wc_recon_log.csv`): every row is an open onboarding
+case at L1 Data Confirming with its World-Check hit, carrying the file's own
+case ids, passport numbers, names as the CRM captured them (swapped,
+nicknamed or garbled: the confirming task) and World-Check records.
+Individuals are TT Live cases (943); companies are TT Shop sellers with
+their UBO (57). The AI screening rules clear 592 hits at intake, every one
+recorded in the file as a false positive, and leave 408 for analysts, among
+them every exact or day/month-transposed date of birth and every company.
+Each case page ends with what the file's analyst recorded, for comparison.
+`CONSOLE_CASES=demo` brings back the nineteen scripted scenarios (the
+walkthrough further down, and what the test suite runs on).
+
 Built the same way as the ChargeShield demo: one Flask `app.py`, Jinja
 templates, a single stylesheet, a SQLite state store, no JS framework.
 A second demo with its own look, the **Straive KYC Operations Hub**, lives
@@ -46,6 +60,11 @@ Open http://127.0.0.1:8010 — sign in with any analyst profile and the demo
 password shown on the card (`1234`). Always run through the project `.venv`:
 the Anaconda Python on this machine has a broken `_sqlite3` and the plain
 Python 3.13 has no Flask.
+
+The startup line names the console's case book. Set `CONSOLE_CASES=demo`
+(in the environment or `.env`) for the scripted scenarios instead of the
+reconciliation log; switching books clears the console's stored state and
+leaves the hub's alone.
 
 ## Deploy — a link anyone can open
 
@@ -155,13 +174,18 @@ tile on the portal.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-105 tests: `tests/test_hub.py` (the hub's engine: the parsers, the
+122 tests: `tests/test_console_book.py` (the console on the reconciliation
+log: the book's shape, the rules at intake against what the file records,
+the documents, Data Confirm on cleared, held, garbled-name, old-POA and
+company cases, the paged lists, routing and search), `tests/test_hub.py`
+(the hub's engine: the parsers, the
 normalisation rules on example rows from the log, the DOB table, the
 agents, the split and its precision, the documents, the actions, the
 persistence), `tests/test_hub_ui.py` (every hub screen, the bulk outcome,
 the settings and re-run, both resets, the two apps leaving each other
 alone) and `tests/test_hub_llm.py` (the Claude agents through the seam),
-plus the console's 44 end-to-end tests on the Flask test client: the golden path, resubmit,
+plus the console's 47 end-to-end tests on the Flask test client, run on the
+scripted book: the golden path, resubmit,
 escalate, segregation of duties, L2/EDD decisions, Skopenow, TT Shop risk
 recalculation, routing by skill and capacity, case on-demand, immediate
 hand-offs, capacity overrides, trackers and CSV, the investigation-file ZIP,
@@ -172,8 +196,10 @@ actions staying on the page with the error as a notification, the AI
 screening rules (the rule book, what it did at intake, auto-verification on
 Data Confirm, sellers keeping the human close, rule switches that persist),
 the workflow labels across the screens, one outcome written to several
-ticked alerts at once, and the model assessment (with the model stood in
-for; the suite never calls the gateway).
+ticked alerts at once, the case list and screening queue filtered and paged
+on the server, a routing run that passes over a full tier, a day/month-swapped
+date of birth held for an analyst, and the model assessment (with the model
+stood in for; the suite never calls the gateway).
 
 ## Analyst profiles
 
@@ -192,7 +218,47 @@ still needs the stage's level to Review — Data Confirming is an L1 step —
 and a greyed Review button says so in text beside it. Mario holds both L1
 and L2.
 
-## A demo script
+## A demo script on the reconciliation log (the default book)
+
+1. **Amara** → *Due Diligence*: 943 TT Live cases, 100 a page. The filters,
+   the sort and the page run on the server and live in the URL; *Review
+   workflow* = Human-in-the-loop leaves the 351 the rules could not clear.
+2. *My Work* → **KYC-2026-3011** (Nguyen Ngoc Phuong). The header says
+   *Auto-verified*: World-Check record WC-554473 lists a 1967 birth date
+   against her 2001. Preview the passport, the CCCD and the CT07 residence
+   confirmation: the file's printed names, MRZ line and addresses. The
+   *Recorded Outcome* section at the foot shows what the file's analyst
+   decided (False Positive - Cleared, M. Chen). Reserve → Review → OK → the
+   case verifies itself, signed by System User.
+3. **KYC-2026-3146**: the CRM captured the name garbled; the vendor read
+   VŨ CÔNG KHÁNH off the MRZ. Correct the name in Data Confirm: the Change
+   Log keeps the edit and the case verifies itself.
+4. **KYC-2026-3012** (Upadhyay Ashish): an exact date of birth on an
+   adverse-media record, so the rules hold it. Confirm → the screening case
+   → World-Check record WC-675768 → resolve; the file recorded *True
+   Positive - Application Rejected*.
+5. **Jon**: **KYC-2026-3046**, a record listing the client's date with day
+   and month swapped, is held (the file recorded 14 of its 22 such cases as
+   true matches). **KYC-2026-3037**: the proof of address is 223 days old,
+   so Data Confirm refuses it and Resubmit POA is the move. Tenant TT Shop →
+   **KYC-2026-3029** Ramasamy Agro Exports Pvt Ltd: the certificate of
+   incorporation and the UBO's passport; a seller goes through Checker 1
+   and Checker 2.
+6. **Mario**: **KYC-2026-3118** is a flat scan the vendor declined (Resubmit
+   ID); **KYC-2026-3040**'s passport fails its MRZ check digit (escalate as a
+   fraud ID); **KYC-2026-3043** lists a year of birth only and is held.
+7. *AI Screening* → *Against the reconciliation log*: 592 cleared by the
+   rules, 592 recorded as false positives; the 351 left for analysts hold
+   every true match.
+8. **Nisha** → *Routing*: 935 unassigned, the 100 most urgent with the
+   router's pick; **Route selected now** fills the free slots and stops.
+9. **Reset demo** reloads the file book.
+
+The document images are drawn from the file's data (it carries none); the
+capture defects on about 9% of cases are planted, as in the hub, and the
+case page says so.
+
+## A demo script on the scripted book (`CONSOLE_CASES=demo`)
 
 0. The case list's filter panel folds behind the arrow at its top right and
    stays folded through live refreshes; the buttons row keeps working and a
@@ -242,7 +308,7 @@ and L2.
 | Path | What lives there |
 |---|---|
 | `app.py` | Flask app: sign-in, tenant switch, thin routes, state glue, the Operations Hub routes |
-| `fincrime/data/` | vocabularies, seed builders, the 19 scenarios, loader, SQLite state store |
+| `fincrime/data/` | vocabularies, seed builders, the 19 scenarios, the reconciliation-log book (`recon_book.py`), loader, SQLite state store |
 | `fincrime/engines/` | KYC workflow state machine, AI screening rules, routing (skill book, capacity, hand-offs), work log, name-screening, World-Check logic, SLA, segregation, QC sampling, investigation file, PDF export |
 | `fincrime/documents/` | synthetic ID / proof-of-address SVG cards |
 | `fincrime/analytics/` | view-model builders: case list, queues, My Work, pipeline, trackers, audit log, routing console, AI screening, dashboard |
