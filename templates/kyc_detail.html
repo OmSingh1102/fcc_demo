@@ -184,6 +184,41 @@
             </div>
         </details>
 
+        {% if case.recon %}{% set rc = case.recon %}
+        {# What the reconciliation log says an analyst did with this case: shown
+           for comparison, read by no workflow rule (fincrime/data/recon_book.py). #}
+        <details class="section" open id="recorded-outcome">
+            <summary>Recorded Outcome — Reconciliation Log <span class="caret">{{ icon('chevron-down') }}</span></summary>
+            <div class="section-body">
+                <p class="small muted mb-8">From the uploaded file, for comparison: what the file's analyst decided for this case. The console's own steps and decisions are recorded above. The document images are drawn for the demo; the capture defects on about 9% of cases are synthetic.</p>
+                <div class="desc cols-4">
+                    <div><span class="l">File case ID</span><span class="v strong mono">{{ rc.id }}</span></div>
+                    <div><span class="l">Disposition</span><span class="v"><span class="badge {{ {'FP': 'emerald', 'TP': 'rose', 'Escalated': 'amber', 'Pending': 'blue'}.get(rc.outcome, 'slate') }}">{{ rc.disposition }}</span></span></div>
+                    <div><span class="l">Analyst</span><span class="v strong">{{ rc.analyst }}</span></div>
+                    <div><span class="l">Review date</span><span class="v">{{ rc.review_date }}</span></div>
+                    <div><span class="l">Watchlist record</span><span class="v mono">{{ rc.wc_uid }}</span></div>
+                    <div><span class="l">Category</span><span class="v">{{ rc.category }}</span></div>
+                    <div><span class="l">Listed DOB</span><span class="v">{{ rc.wc_dob }}</span></div>
+                    <div><span class="l">Jurisdiction</span><span class="v">{{ rc.jurisdiction }}</span></div>
+                    <div><span class="l">Match score</span><span class="v">{{ rc.score }}% → {{ rc.score_after }}% after normalisation</span></div>
+                    <div><span class="l">Handling time</span><span class="v">{{ rc.minutes }} min</span></div>
+                    <div><span class="l">Name variance</span><span class="v">{{ rc.name_variance }}</span></div>
+                    <div><span class="l">Address variance</span><span class="v">{{ rc.address_variance }}</span></div>
+                </div>
+                <table class="tbl dense mt-12">
+                    <tbody>
+                    <tr><td class="strong nowrap" style="width:220px">Compliance action &amp; notes</td><td>{{ rc.notes }}</td></tr>
+                    <tr><td class="strong nowrap">Discrepancy analysis</td><td>{{ rc.discrepancy }}</td></tr>
+                    <tr><td class="strong nowrap">Matched attributes</td><td>{{ rc.matched_attributes }}</td></tr>
+                    <tr><td class="strong nowrap">Pain point</td><td>{{ rc.pain_point }}</td></tr>
+                    <tr><td class="strong nowrap">Normalisation applied</td><td>{{ rc.resolution }}</td></tr>
+                    <tr><td class="strong nowrap">Screening impact</td><td>{{ rc.impact }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </details>
+        {% endif %}
+
     </div>
 </div>
 

@@ -1,10 +1,19 @@
 """View-model for the AI Screening page: the rule book with how often each
 rule fired, the guards and rails, the tenant's split between auto-verified
-and human-in-the-loop, and a feed of what the rules did most recently."""
+and human-in-the-loop, and a feed of what the rules did most recently.
+
+On the reconciliation-log book it also sets the rules beside what the file's
+analysts recorded for the same cases (case["recon"]): how many of the cases
+the rules cleared were recorded as false positives, and what the cases they
+left for an analyst turned out to be."""
 from collections import Counter
 
 from fincrime.data import vocab
 from fincrime.engines import ai_review, ai_screening
+
+
+OUTCOME_LABEL = {"FP": "false positive", "TP": "true match", "Escalated": "escalated to L2", "Pending": "pending customer documents"}
+OUTCOME_TONE = (("FP", "emerald"), ("TP", "rose"), ("Escalated", "amber"), ("Pending", "blue"))
 
 
 class AiScreeningConsole:
@@ -55,9 +64,26 @@ class AiScreeningConsole:
                                  "endpoint": "kyc_detail", "args": {"case_id": c["id"]}, "new_tab": False})
         feed.sort(key=lambda r: r["at"], reverse=True)
 
+        against = None
+        recon = [c for c in tenant_cases if c.get("recon")]
+        if recon:
+            auto = [c for c in recon if c["screening"].get("workflow") == "auto-verified"]
+            held = [c for c in recon if c["screening"].get("workflow") != "auto-verified"]
+
+            def split(rows):
+                n = Counter(c["recon"]["outcome"] for c in rows)
+                return [(OUTCOME_LABEL[k], n[k], tone) for k, tone in OUTCOME_TONE if n.get(k)]
+
+            fp = sum(1 for c in auto if c["recon"]["outcome"] == "FP")
+            against = {"cases": len(recon), "auto": len(auto), "auto_fp": fp,
+                       "auto_pct": round(100 * fp / len(auto)) if auto else 0, "auto_split": split(auto),
+                       "held": len(held), "held_split": split(held),
+                       "tp_cleared": sum(1 for c in auto if c["recon"]["outcome"] == "TP")}
+
         return {
             "tenant_label": vocab.TENANTS[tenant]["label"],
             "rules": rules, "guards": guards, "rails": ai_screening.RAILS, "model": model,
             "tiles": tiles, "hit": len(hit), "feed": feed[:10],
             "history": list(reversed(settings.get("history", [])))[:10],
+            "against": against,
         }

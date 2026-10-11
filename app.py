@@ -13,6 +13,7 @@ QC, Routing) · Analytics · Demo affordances · Main.
 """
 import hmac
 import os
+import time
 from functools import wraps
 from urllib.parse import urlsplit
 
@@ -37,7 +38,8 @@ from fincrime.analytics.routing_console import RoutingConsole
 from fincrime.analytics.trackers import TrackerConsole, to_csv
 from fincrime.analytics.work import WorkConsole
 from fincrime.data import vocab
-from fincrime.data.loader import SEED_VERSION, index_by_id, load_seed
+from fincrime.data import recon_book
+from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed
 from fincrime.data.state_store import StateStore
 from fincrime.documents import svg_cards
 from fincrime.engines import (ai_review, ai_screening, investigation, qc, recommendation, routing, screening, segregation, sla,
@@ -83,6 +85,15 @@ app.jinja_env.filters.update(wc_date=dates.wc_date, wc_dt=dates.wc_datetime, who
 # as the actor — it is not a security control.
 DEMO_PASSWORD = os.environ.get("STRAIVE_DEMO_PASSWORD", "1234")
 DEMO_MODE = os.environ.get("DEMO_MODE", "1") == "1"
+# The console's case book: "file" (the default) is the 1,000 cases of the
+# reconciliation log the client sent; "demo" is the nineteen scripted
+# scenarios and their filler, which the test suite and the original
+# walkthrough use. Read once; /reset reloads the same book.
+CASE_BOOK = book_from(os.environ.get("CONSOLE_CASES"))
+CASE_BOOK_LABEL = {"file": "reconciliation log (1,000 cases)", "demo": "scripted demo (19 scenarios + filler)"}
+# The records the console owns in the state store; a new seed stamp clears
+# only these, so the hub's stored work (kinds hub_*) survives a book switch.
+CONSOLE_KINDS = ("kyc", "alert", "wc", "analyst", "settings")
 # Only advertise the password on the card while it is the built-in one.
 _SHOW_DEMO_HINT = "STRAIVE_DEMO_PASSWORD" not in os.environ
 
@@ -280,7 +291,10 @@ def _load_seed():
     may have moved; the store is cleared and the log says so. Done only in
     the reloader's child (or outside debug) so the parent process never
     wipes the database on its own boot."""
-    analysts, kyc, alerts, wc = load_seed()
+    started = time.perf_counter()
+    analysts, kyc, alerts, wc = load_seed(CASE_BOOK)
+    app.logger.info("Console case book: %s; %d cases built in %.2f s.", CASE_BOOK_LABEL[CASE_BOOK], len(kyc),
+                    time.perf_counter() - started)
     ANALYSTS[:] = analysts
     KYC_CASES[:] = kyc
     ALERT_CASES[:] = alerts
@@ -292,13 +306,14 @@ def _load_seed():
     ai_screening.configure(AI_SETTINGS)
 
     in_serving_process = (not DEBUG) or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    stamp = f"{SEED_VERSION}/{CASE_BOOK}"
     stored = StateStore.seed_version()
-    if stored and stored != SEED_VERSION and in_serving_process:
-        app.logger.warning("Seed version changed (%s -> %s); clearing stored demo state.", stored, SEED_VERSION)
-        StateStore.clear()
+    if stored and stored != stamp and in_serving_process:
+        app.logger.warning("Seed version or case book changed (%s -> %s); clearing the console's stored state.", stored, stamp)
+        StateStore.clear(kinds=CONSOLE_KINDS)
         stored = ""
     if not stored and in_serving_process:
-        StateStore.set_seed_version(SEED_VERSION)
+        StateStore.set_seed_version(stamp)
 
     restored = (StateStore.restore("kyc", KYC_BY_ID) + StateStore.restore("alert", ALERT_BY_ID)
                 + StateStore.restore("wc", WC_BY_ID) + StateStore.restore("analyst", ANALYST_BY_KEY)
@@ -731,8 +746,19 @@ def document_svg(case_id, doc_id):
     """A synthetic document drawn from the case data (see documents/svg_cards)."""
     case = _kyc(case_id)
     doc = next((d for d in case["documents"] if d["id"] == doc_id), None) or abort(404)
-    return Response(svg_cards.render(case, doc), mimetype="image/svg+xml",
+    return Response(_render_document(case, doc), mimetype="image/svg+xml",
                     headers={"Cache-Control": "no-store"})
+
+
+def _render_document(case, doc):
+    """A reconciliation-log case's passport, secondary ID and proof of
+    address are the hub's images (the file's printed names, MRZ and
+    addresses); everything else is drawn by svg_cards from the case."""
+    if doc.get("hub_file"):
+        svg = recon_book.render(case, doc)
+        if svg:
+            return svg
+    return svg_cards.render(case, doc)
 
 
 # ─── Name screening ────────────────────────────────────────────────────────────
@@ -779,13 +805,14 @@ def ns_queue():
 def ns_search():
     q = (request.args.get("q") or "").strip().lower()
     if q:
+        # Ids compare without case: the reconciliation log's are KYC-2026-3011 and WC-554473.
         for a in ALERT_CASES:
             k = KYC_BY_ID.get(a["kyc_case_id"]) or {}
-            if q in (a["id"], a["merchant_uid"], a["kyc_case_id"]) or q in k.get("client", {}).get("legal_name", "").lower():
+            if q in (a["id"].lower(), a["merchant_uid"].lower(), a["kyc_case_id"].lower())                     or q in k.get("client", {}).get("legal_name", "").lower():
                 return redirect(url_for("ns_case", alert_case_id=a["id"]))
         for wc in WC_CASES:
-            if any(m["wc_id"] == q for m in wc["matches"]):
-                mid = next(m["id"] for m in wc["matches"] if m["wc_id"] == q)
+            mid = next((m["id"] for m in wc["matches"] if str(m["wc_id"]).lower() == q), None)
+            if mid:
                 return redirect(url_for("wc_match", wc_case_id=wc["id"], match_id=mid))
     flash(f"No screening case or record matches '{q}'." if q else "Enter a case ID, merchant UID, KYC case ID or name.", "error")
     return redirect(request.referrer or url_for("ns_queue"))
@@ -1007,7 +1034,7 @@ def kyc_file_zip(case_id):
     actor = _actor()
     name, data = investigation.zip_bytes(case, alert, wc,
                                         render_pdf=lambda w, a, k: render_wc_export(w, a, k, actor),
-                                        render_doc=svg_cards.render)
+                                        render_doc=_render_document)
     return Response(data, mimetype="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
@@ -1133,5 +1160,6 @@ hub_state.boot(app.logger.info)
 
 if __name__ == "__main__":
     print(f" * FinCrime Operations Hub on http://{HOST}:{PORT}  (demo password: {DEMO_PASSWORD})")
+    print(f" * Console case book: {CASE_BOOK_LABEL[CASE_BOOK]}  (CONSOLE_CASES=file|demo)")
     print(f" * Straive KYC Operations Hub on http://{HOST}:{PORT}/hub")
     app.run(debug=DEBUG, host=HOST, port=PORT)

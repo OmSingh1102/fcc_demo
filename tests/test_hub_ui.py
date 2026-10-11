@@ -15,6 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 _DB = os.path.join(tempfile.mkdtemp(prefix="fcc-hub-ui-"), "state.db")
 os.environ.setdefault("FCC_STATE_DB", _DB)
+os.environ["CONSOLE_CASES"] = "demo"      # the scripted book these tests are written against
 from fincrime.data.state_store import StateStore  # noqa: E402
 if StateStore.path != os.environ["FCC_STATE_DB"]:
     StateStore.path = os.environ["FCC_STATE_DB"]

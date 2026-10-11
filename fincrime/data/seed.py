@@ -163,7 +163,7 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
              closed_hours_after=None, agency=None, risk_rating="", case_review_level="L1",
              resubmit=None, extra_audit=(),
              routed_to="", routed_hours_after=None, handoffs=(), fraud_typology="", escalate_reason="",
-             qc=None, poa_country="", confirmed=True):
+             qc=None, poa_country="", confirmed=True, case_id=None, id_number=None):
     """One onboarding case.
 
     Timestamps are derived from `created_hours_ago`; the *_hours_after
@@ -175,6 +175,11 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
     (with the routing chip and audit row that implies); `handoffs` seeds the
     tier hand-offs of an escalated case, so the pipeline's lag metrics have
     history; `qc` seeds a QC review on a closed case.
+
+    `case_id` and `id_number` replace the hashed case id and the synthetic
+    document number when the case comes from a file that has its own
+    (fincrime/data/recon_book.py: the reconciliation log's KYC-2026-…
+    ids and passport numbers).
     """
     t = vocab.TENANTS[tenant]
     source = source or t["source"]
@@ -194,7 +199,8 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
     closed_at = dates.add_hours(created, closed_hours_after) if closed_hours_after is not None else ""
 
     surname_first = name.upper()
-    id_number = ids.id_number(key, id_type)
+    case_id = case_id or ids.kyc_case_id(key)
+    id_number = id_number or ids.id_number(key, id_type)
     extracted = {"name": surname_first, "dob": dob, "nationality": nationality, "id_number": id_number,
                  "id_type": id_type, "expiry": dates.add_days(dates.date_only(created) + " 00:00:00", 1460)[:10]}
     l1 = list(l1)
@@ -347,11 +353,11 @@ def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfir
 
     investigation_file = None
     if escalated_at:
-        investigation_file = {"name": f"{ids.client_id(key)} ({ids.kyc_case_id(key)})", "created_at": escalated_at,
+        investigation_file = {"name": f"{ids.client_id(key)} ({case_id})", "created_at": escalated_at,
                               "created_by": confirmer}
 
     record = {
-        "id": ids.kyc_case_id(key), "key": key, "client_id": ids.client_id(key), "tenant": tenant,
+        "id": case_id, "key": key, "client_id": ids.client_id(key), "tenant": tenant,
         "tags": list(tags), "status": status, "pending_reason": pending_reason, "source": source,
         "manual_review_reason": list(manual_review_reason), "poa_required": bool(poa_required),
         "case_review_level": case_review_level,
@@ -413,9 +419,12 @@ def agency_info(*, company, registration_number, incorporation_country, address,
 def wc_match(*, key, name, alias="", strength=0.9, types=("SIC",), gender="Male", dobs=(), pob="",
              citizenship="", country="", category="", sub_category="", pep_status="",
              special_interest=(), position="", location=None, bio="", identification="",
-             reports=(), aliases=(), keywords=(), sources=(), entered="2014-10-29", updated="2020-12-09"):
+             reports=(), aliases=(), keywords=(), sources=(), entered="2014-10-29", updated="2020-12-09",
+             wc_id=None):
+    """One watchlist record. `wc_id` keeps a record id the source file
+    already has (the reconciliation log's WC-554473); else a hashed one."""
     return {
-        "id": ids.wc_id(key), "wc_id": ids.wc_id(key), "name": name, "matched_alias": alias,
+        "id": ids.wc_id(key), "wc_id": wc_id or ids.wc_id(key), "name": name, "matched_alias": alias,
         "strength": float(strength), "types": list(types), "gender": gender, "dobs": list(dobs),
         "pob": pob, "citizenship": citizenship, "country": country or citizenship,
         "entered": entered, "updated": updated, "matched": "",
@@ -491,6 +500,21 @@ def alert_case(*, kyc, key, matches, level=None, status="Init", assigned_to="", 
         "platform_rows": [dict(r) for r in kyc["screening"]["rows"]],
         "alerts": alerts, "case_outcome": case_outcome, "rfi": [], "audit": audit,
     }
+
+
+def pair_screening(kyc, key, matches, **alert_kw):
+    """A screening case and its watchlist case for a KYC case with a hit,
+    with the AI screening rules run at intake the way the real automation
+    runs them: a minute after the screening, before any analyst looks.
+    Records an analyst already resolved (seeded history) are left alone.
+    Shared by the scripted scenarios and the reconciliation-log book."""
+    a = alert_case(kyc=kyc, key=key, matches=matches, **alert_kw)
+    w = wc_case(alert=a, kyc=kyc, matches=matches)
+    screened_at = kyc["verification_points"][3]["at"]
+    ai_screening.apply(kyc, a, w, at=dates.add_minutes(screened_at, 1), run="intake",
+                       enabled=ai_screening.DEFAULT_ENABLED, guards=ai_screening.DEFAULT_GUARDS)
+    kyc["audit"].sort(key=lambda e: e["at"])      # kyc_case() sorted before the rules row existed
+    return a, w
 
 
 def wc_case(*, alert, kyc, matches, assignee="Case Unassigned", rating="Not Rated"):
@@ -652,10 +676,18 @@ def filler_cases(seed="filler"):
     return out
 
 
-def assemble():
+def assemble(book="demo"):
     """(analysts, kyc_cases, alert_cases, wc_cases) — fresh objects every call.
     Analysts are deep-copied: a capacity edited at runtime lives on the app's
-    copy and must not leak into the module-level roster that /reset rebuilds."""
+    copy and must not leak into the module-level roster that /reset rebuilds.
+
+    `book` picks the case book: "demo" is the nineteen scripted scenarios
+    plus the filler rows; "file" is the 1,000 cases of the reconciliation
+    log (fincrime/data/recon_book.py). The analysts are the same for both."""
+    if book == "file":
+        from fincrime.data import recon_book   # lazy: it imports the builders above
+        kyc, alerts, wc = recon_book.build()
+        return copy.deepcopy(ANALYSTS), kyc, alerts, wc
     from fincrime.data import scenarios   # lazy: scenarios imports the builders above
     kyc, alerts, wc = scenarios.build()
     kyc = kyc + filler_cases()

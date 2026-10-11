@@ -4,24 +4,11 @@ Each one exists to demonstrate a branch of the SOP. All people, companies,
 documents and watchlist records are fictional; adverse-media text and source
 links are invented and point at reserved example domains.
 """
-from fincrime.data.seed import (AMARA, JON, LEAH, MARIO, NISHA, RYAN, agency_info, alert_case, common_name_matches,
-                                doc, event, handoff, kyc_case, resolved, std_docs, wc_case, wc_match)
-from fincrime.engines import ai_screening
+from fincrime.data.seed import (AMARA, JON, LEAH, MARIO, NISHA, RYAN, agency_info, common_name_matches, doc, event,
+                                handoff, kyc_case, pair_screening, resolved, std_docs, wc_match)
 from fincrime.utils import dates
 
-
-def _pair(kyc, key, matches, **alert_kw):
-    """A screening case and its watchlist case for a KYC case with a hit,
-    with the AI screening rules run at intake the way the real automation
-    runs them: a minute after the screening, before any analyst looks.
-    Records an analyst already resolved (seeded history) are left alone."""
-    a = alert_case(kyc=kyc, key=key, matches=matches, **alert_kw)
-    w = wc_case(alert=a, kyc=kyc, matches=matches)
-    screened_at = kyc["verification_points"][3]["at"]
-    ai_screening.apply(kyc, a, w, at=dates.add_minutes(screened_at, 1), run="intake",
-                       enabled=ai_screening.DEFAULT_ENABLED, guards=ai_screening.DEFAULT_GUARDS)
-    kyc["audit"].sort(key=lambda e: e["at"])      # kyc_case() sorted before the rules row existed
-    return a, w
+_pair = pair_screening       # the screening case + watchlist case + intake rules for one KYC case
 
 
 def build():

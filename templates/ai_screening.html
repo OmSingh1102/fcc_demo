@@ -14,6 +14,28 @@
     {% endfor %}
 </div>
 
+{% if vm.against %}{% set ag = vm.against %}
+<div class="card mt-12 pad-0" id="against-file">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Against the reconciliation log</div><div class="card-sub">what the file's analysts recorded for the same {{ ag.cases }} cases — the rules never read it</div></div>
+    <table class="tbl">
+        <tbody>
+        <tr>
+            <td class="strong nowrap" style="width:260px">Cleared by the rules, no analyst</td>
+            <td class="num tabular" style="width:70px">{{ ag.auto }}</td>
+            <td>{% if ag.auto %}<span class="badge {{ 'emerald' if ag.auto_fp == ag.auto else 'rose' }}">{{ ag.auto_fp }} of {{ ag.auto }} recorded as false positives ({{ ag.auto_pct }}%)</span>
+                {% for label, n, tone in ag.auto_split if label != 'false positive' %} <span class="badge {{ tone }}">{{ n }} {{ label }}</span>{% endfor %}{% else %}<span class="muted">none</span>{% endif %}</td>
+        </tr>
+        <tr>
+            <td class="strong nowrap">Left for an analyst</td>
+            <td class="num tabular">{{ ag.held }}</td>
+            <td>{% for label, n, tone in ag.held_split %}<span class="badge {{ tone }}">{{ n }} {{ label }}</span> {% endfor %}
+                {% if ag.held and not ag.tp_cleared %}<span class="small muted">· every true match the file records is in this row</span>{% endif %}</td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 <div class="card mt-12 pad-0">
     <div class="card-head" style="padding-bottom:10px"><div class="card-title">Rules</div><div class="card-sub">first rule that fires wins; a switch applies to the next screening run, never to a record already resolved</div></div>
     <table class="tbl">

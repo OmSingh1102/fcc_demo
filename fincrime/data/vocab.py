@@ -180,9 +180,14 @@ ROUTING_TRIGGERS = {
 }
 
 # ── Proof of address (SOP 4.1.2 step 1) ──────────────────────────────────────
-# The "internal library" of accepted POA document types. Demo list.
+# The "internal library" of accepted POA document types. Demo list. The
+# last three are the reconciliation log's own (its analysts accepted them):
+# the Aadhaar card's address side in India, the CT07 residence confirmation
+# in Vietnam, and military orders / an LES for a US service member's APO.
 ACCEPTED_POA_TYPES = {"utility_bill": "Utility bill", "bank_statement": "Bank statement",
-                      "council_tax": "Council tax / municipal bill", "tenancy_agreement": "Tenancy agreement"}
+                      "council_tax": "Council tax / municipal bill", "tenancy_agreement": "Tenancy agreement",
+                      "aadhaar": "Aadhaar (address side)", "residence_confirmation": "Residence confirmation (Form CT07)",
+                      "military_orders": "Military orders / LES"}
 POA_MAX_AGE_DAYS = 183
 # Demo list only — the real hub reads the internal library of sanctioned and
 # prohibited jurisdictions. ISO-2 codes, as the seed stores nationalities.
@@ -195,7 +200,7 @@ COUNTRY_NAMES = {
     "NG": "Nigeria", "IT": "Italy", "IE": "Ireland", "LB": "Lebanon", "AU": "Australia", "FR": "France", "KR": "South Korea",
     "CZ": "Czechia", "EG": "Egypt", "DK": "Denmark", "SE": "Sweden", "PT": "Portugal", "KZ": "Kazakhstan", "MA": "Morocco",
     "MY": "Malaysia", "CA": "Canada", "IR": "Iran", "KP": "North Korea", "SY": "Syria", "CU": "Cuba", "BY": "Belarus",
-    "AF": "Afghanistan", "MM": "Myanmar", "VE": "Venezuela",
+    "AF": "Afghanistan", "MM": "Myanmar", "VE": "Venezuela", "QA": "Qatar", "OM": "Oman",
 }
 # What the document itself prints, so the analyst reads the birthday in the
 # right order before confirming it (SOP 4.1.2: dd/mm vs mm/dd; system stores yyyy-mm-dd).

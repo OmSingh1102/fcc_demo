@@ -333,20 +333,28 @@ def residence_permit_svg(case, doc):
 
 
 def trade_licence_svg(case, doc):
+    """The company's registration document. The agency record may name the
+    document, the issuing authority, the legal form and the licensed
+    activity (the reconciliation-log book does, from the company's name and
+    country); otherwise the card reads as a free-zone trade licence."""
     c = case["client"]
     a = case.get("agency") or {}
     W, H = 620, 800
+    title = a.get("document_title") or "TRADE LICENSE"
+    authority = a.get("authority") or f"{COUNTRY_NAMES.get(c['nationality'], c['nationality'])} - FREE ZONE AUTHORITY (DEMO)"
     body = _defs()
     body += f'<rect width="{W}" height="{H}" fill="#fffdf7"/><rect x="18" y="18" width="{W-36}" height="{H-36}" fill="none" stroke="#8a6d1f" stroke-width="3"/>'
     body += f'<rect x="26" y="26" width="{W-52}" height="{H-52}" fill="none" stroke="#c9b26a" stroke-width="1"/>'
-    body += f'<text x="{W/2}" y="80" text-anchor="middle" font-family="{FONT}" font-size="26" font-weight="800" fill="#5b4413" letter-spacing="4">TRADE LICENSE</text>'
-    body += f'<text x="{W/2}" y="104" text-anchor="middle" font-family="{FONT}" font-size="12" fill="#7a6a3a">{esc(COUNTRY_NAMES.get(c["nationality"], c["nationality"]))} - FREE ZONE AUTHORITY (DEMO)</text>'
+    body += f'<text x="{W/2}" y="80" text-anchor="middle" font-family="{FONT}" font-size="{26 if len(title) <= 16 else 20}" font-weight="800" fill="#5b4413" letter-spacing="{4 if len(title) <= 16 else 2}">{esc(title)}</text>'
+    body += f'<text x="{W/2}" y="104" text-anchor="middle" font-family="{FONT}" font-size="12" fill="#7a6a3a">{esc(authority)}</text>'
     body += f'<line x1="60" y1="120" x2="{W-60}" y2="120" stroke="#c9b26a"/>'
-    rows = [
-        ("License No.", c["id_number"]), ("Legal name", a.get("company_name") or c["legal_name"]),
-        ("Registration No.", a.get("registration_number", "")), ("Legal form", "Free Zone Establishment"),
+    # A registration certificate carries one number, the registration itself.
+    rows = ([] if a.get("document_title") else [("License No.", c["id_number"])]) + [
+        ("Legal name", a.get("company_name") or c["legal_name"]),
+        ("Registration No.", a.get("registration_number", "")), ("Legal form", a.get("legal_form") or "Free Zone Establishment"),
         ("Registered address", a.get("registered_address") or c.get("address", "")),
-        ("Licensed activity", "General trading; import and export of electronic goods"),
+        ("Principal activity" if a.get("document_title") else "Licensed activity",
+         a.get("activity") or "General trading; import and export of electronic goods"),
         ("Manager / Representative", a.get("representative", "")),
         ("Issue date", _long_date(_issue_date(case))), ("Expiry date", _long_date(_expiry(case, 1))),
     ]
