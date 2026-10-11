@@ -154,10 +154,18 @@ def _listed_dob(text):
     return None
 
 
+def _swapped(full, cd):
+    """The client's own date with the day and the month exchanged — a
+    keying slip between dd/mm and mm/dd, not a different birthday."""
+    return full.year == cd.year and full.month == cd.day and full.day == cd.month
+
+
 def dob_state(client_dob, dobs):
     """"conflict" when every listed date of birth contradicts the client's,
     "same" when one is the client's exact date, else "unknown" (no data, an
-    unreadable value, or a bare year that matches the client's year)."""
+    unreadable value, a bare year that matches the client's year, or the
+    client's date with day and month transposed — the reconciliation log
+    holds 22 of those and 14 were the client)."""
     cd = _client_dob(client_dob)
     if cd is None or not dobs:
         return "unknown"
@@ -170,7 +178,7 @@ def dob_state(client_dob, dobs):
         if full is not None:
             if full == cd:
                 return "same"
-            verdicts.append("conflict")
+            verdicts.append("possible" if _swapped(full, cd) else "conflict")
         else:
             verdicts.append("conflict" if year != cd.year else "possible")
     return "conflict" if verdicts and all(v == "conflict" for v in verdicts) else "unknown"

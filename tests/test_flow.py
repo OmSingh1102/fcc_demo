@@ -323,6 +323,20 @@ class FlowTestCase(unittest.TestCase):
         done["resolution"].update(status="True positive", by=AMARA)
         self.assertEqual(ai.evaluate(done, client)[0], "")
 
+    def test_ai_rules_hold_a_transposed_date_of_birth(self):
+        """A listed date that is the client's own with day and month swapped
+        is a keying slip, not a different birthday: never cleared."""
+        from fincrime.engines import ai_screening as ai
+        self.assertEqual(ai.dob_state("1985-09-06", ["1985-06-09"]), "unknown")
+        self.assertEqual(ai.dob_state("1985-09-06", ["06-Sep-1985"]), "same")
+        self.assertEqual(ai.dob_state("1985-09-06", ["1985-06-10"]), "conflict")         # not the swap
+        self.assertEqual(ai.dob_state("1985-09-06", ["1986-06-09"]), "conflict")         # another year
+        self.assertEqual(ai.dob_state("1985-09-06", ["1985-06-09", "1962-01-01"]), "unknown")
+        self.assertEqual(ai.dob_state("1985-05-05", ["1985-05-05"]), "same")             # day == month
+        from fincrime.data.seed import wc_match
+        record = wc_match(key="t-swap", name="X", dobs=["1985-06-09"], gender="")
+        self.assertEqual(ai.evaluate(record, {"dob": "1985-09-06", "gender": "F", "nationality": "IN"})[0], "")
+
     def test_seed_workflows(self):
         """What the rules did at intake, case by case."""
         m = self.K["mercer"]
