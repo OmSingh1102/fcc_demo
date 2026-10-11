@@ -62,13 +62,30 @@ def load(email, cases=None):
                if c.get("current_reviewer") == email and c["status"] not in vocab.CLOSED_STATUSES)
 
 
+def load_map(cases=None):
+    """{email: open cases held} in one pass over the book. The functions
+    below take it as `loads` so a page that asks about many cases (the
+    routing console, My Work, a backlog run) counts once, not once per case
+    per analyst; a run keeps it current as it gives cases out."""
+    loads = {}
+    for c in _cases(cases):
+        who = c.get("current_reviewer")
+        if who and c["status"] not in vocab.CLOSED_STATUSES:
+            loads[who] = loads.get(who, 0) + 1
+    return loads
+
+
+def _load(email, cases, loads):
+    return loads.get(email, 0) if loads is not None else load(email, cases)
+
+
 def routed_today(email, cases=None, today=None):
     today = today or dates.now_str()[:10]
     return sum(1 for c in _cases(cases)
                if (c.get("routing") or {}).get("to") == email and (c.get("routing") or {}).get("at", "")[:10] == today)
 
 
-def eligible(analyst, case, cases=None, exclude=()):
+def eligible(analyst, case, cases=None, exclude=(), loads=None):
     """(ok, reason). The reason reads as a chip: what matched, or what blocked."""
     req = requirements(case)
     email = analyst["email"]
@@ -89,21 +106,22 @@ def eligible(analyst, case, cases=None, exclude=()):
         return False, "was Checker 1"
     if segregation.hidden_from(case, email, req["level"]):
         return False, "worked the case at an earlier level"
-    n, cap = load(email, cases), int(analyst.get("capacity") or 0)
+    n, cap = _load(email, cases, loads), int(analyst.get("capacity") or 0)
     if n >= cap:
         return False, f"at capacity ({n}/{cap})"
     return True, f"{req['level']} · {req['script']} script{' · KYB' if req['kyb'] else ''} · load {n}/{cap}"
 
 
-def candidates(case, cases=None, exclude=()):
-    return [(a, *eligible(a, case, cases, exclude)) for a in BOOK["analysts"]]
+def candidates(case, cases=None, exclude=(), loads=None):
+    return [(a, *eligible(a, case, cases, exclude, loads)) for a in BOOK["analysts"]]
 
 
-def pick(case, cases=None, exclude=()):
+def pick(case, cases=None, exclude=(), loads=None):
     """(analyst | None, reason, considered). Least loaded wins; ties go to the
     alphabetically first key so the choice is reproducible."""
-    considered = candidates(case, cases, exclude)
-    ready = sorted(((load(a["email"], cases), a["key"], a, why) for a, ok, why in considered if ok),
+    loads = load_map(cases) if loads is None else loads
+    considered = candidates(case, cases, exclude, loads)
+    ready = sorted(((_load(a["email"], cases, loads), a["key"], a, why) for a, ok, why in considered if ok),
                    key=lambda t: (t[0], t[1]))
     if ready:
         _, _, best, why = ready[0]
@@ -142,14 +160,17 @@ def give(case, analyst, *, trigger, reason=""):
     return analyst
 
 
-def route(case, *, trigger, cases=None, exclude=()):
+def route(case, *, trigger, cases=None, exclude=(), loads=None):
     """Give the case to the best eligible analyst, or leave it queued (marked
-    so, with the reason in the audit trail) when nobody can take it."""
-    best, why, _ = pick(case, cases, exclude)
+    so, with the reason in the audit trail) when nobody can take it. A
+    `loads` map passed in is kept current."""
+    best, why, _ = pick(case, cases, exclude, loads)
     if best is None:
         case["routing"] = {"status": "queued", "to": "", "trigger": trigger, "reason": why, "at": dates.now_str()}
         _audit(case, "Routing queued", f"{why}. Waiting for capacity ({vocab.ROUTING_TRIGGERS.get(trigger, trigger)}).")
         return None
+    if loads is not None:
+        loads[best["email"]] = loads.get(best["email"], 0) + 1
     return give(case, best, trigger=trigger, reason=why)
 
 
@@ -177,7 +198,8 @@ def request_cases(analyst, n=1, *, tenant=None, cases=None, trigger="on_demand")
     cap = int(analyst.get("capacity") or 0)
     if cap <= 0:
         raise WorkflowError("Your profile has no case capacity — the QC / team-lead role does not take cases.")
-    headroom = cap - load(email, cases)
+    loads = load_map(cases)
+    headroom = cap - loads.get(email, 0)
     if headroom <= 0:
         raise WorkflowError(f"You are at capacity ({cap}/{cap}). Complete or release a case before requesting more.")
     try:
@@ -185,28 +207,42 @@ def request_cases(analyst, n=1, *, tenant=None, cases=None, trigger="on_demand")
     except (TypeError, ValueError):
         n = 1
     n = max(1, min(n, headroom))
-    pool = [c for c in unassigned(None, cases) if eligible(analyst, c, cases)[0]]
+    pool = [c for c in unassigned(None, cases) if eligible(analyst, c, cases, loads=loads)[0]]
     if not pool:
         raise WorkflowError("No unassigned case matches your skill book right now.")
     pool.sort(key=lambda c: (0 if c["tenant"] == tenant else 1, sla.remaining_hours(c)))
     routed = []
     for c in pool[:n]:
-        _, why = eligible(analyst, c, cases)
+        _, why = eligible(analyst, c, cases, loads=loads)
         give(c, analyst, trigger=trigger, reason=why)
+        loads[email] = loads.get(email, 0) + 1
         routed.append(c)
     return routed
 
 
+def has_headroom(tenant, level, loads):
+    """Whether anyone who works the tenant at `level` still has a free slot."""
+    return any(tenant in a.get("tenants", []) and level in a.get("roles", [])
+               and loads.get(a["email"], 0) < int(a.get("capacity") or 0) for a in BOOK["analysts"])
+
+
 def route_backlog(tenant, *, only_ids=None, cases=None, trigger="lead_run"):
     """Route the tenant's unassigned queue (or just `only_ids`), most urgent
-    first. Returns [(case, analyst | None, reason)]."""
+    first. Returns [(case, analyst | None, reason)] for the cases it touched.
+
+    A case whose tier has nobody with a free slot is passed over and left as
+    it is, in SLA order: a thousand-case backlog would otherwise collect a
+    "Routing queued" row and a save per case on every click."""
     out = []
     pool = unassigned(tenant, cases)
     if only_ids is not None:
         wanted = set(only_ids)
         pool = [c for c in pool if c["id"] in wanted]
+    loads = load_map(cases)
     for c in sorted(pool, key=sla.remaining_hours):
-        analyst = route(c, trigger=trigger, cases=cases)
+        if not has_headroom(tenant, level_for(c), loads):
+            continue
+        analyst = route(c, trigger=trigger, cases=cases, loads=loads)
         out.append((c, analyst, (c.get("routing") or {}).get("reason", "")))
     return out
 

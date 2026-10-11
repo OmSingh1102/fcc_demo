@@ -28,7 +28,7 @@ except ImportError:  # pragma: no cover
 # ─── Modular imports ───────────────────────────────────────────────────────────
 from fincrime.adapters import idv_vendor
 from fincrime.analytics.audit_log import AuditLogConsole
-from fincrime.analytics.case_list import CaseListConsole
+from fincrime.analytics.case_list import CaseListConsole, read_query as read_case_query
 from fincrime.analytics.ai_console import AiScreeningConsole
 from fincrime.analytics.dashboard import AnalyticsConsole
 from fincrime.analytics.pipeline import PipelineConsole
@@ -461,12 +461,31 @@ def switch_user():
 
 
 # ─── KYC case management ───────────────────────────────────────────────────────
+def _pager(page, pages):
+    """Links for templates/_pager.html: first, last and two either side of
+    the current page, each keeping the request's query string."""
+    args = request.args.to_dict(flat=False)
+
+    def link(n):
+        return url_for(request.endpoint, **dict(request.view_args or {}, **dict(args, page=[str(n)])))
+
+    shown = sorted({1, pages, *range(max(1, page - 2), min(pages, page + 2) + 1)})
+    items, last = [], 0
+    for n in shown:
+        if n - last > 1:
+            items.append({"gap": True})
+        items.append({"n": n, "url": link(n), "on": n == page})
+        last = n
+    return {"page": page, "pages": pages, "links": items,
+            "prev": link(page - 1) if page > 1 else "", "next": link(page + 1) if page < pages else ""}
+
+
 @app.route("/kyc/list")
 def kyc_list():
-    vm = CaseListConsole.compute(KYC_CASES, _tenant(), _actor())
-    preset = [s for s in request.args.getlist("status") if s in vocab.STATUSES]
-    return render_template("kyc_list.html", rows=vm["rows"], total=vm["total"], filters=vm["filters"],
-                           status_preset=preset)
+    vm = CaseListConsole.compute(KYC_CASES, _tenant(), _actor(), query=read_case_query(request.args))
+    return render_template("kyc_list.html", rows=vm["rows"], total=vm["total"], shown=vm["shown"], filters=vm["filters"],
+                           query=vm["query"], per_page=vm["per_page"], first=vm["first"], last=vm["last"],
+                           pages=_pager(vm["page"], vm["pages"]))
 
 
 def _linked(case):
@@ -717,6 +736,9 @@ def document_svg(case_id, doc_id):
 
 
 # ─── Name screening ────────────────────────────────────────────────────────────
+NS_PER_PAGE = 100
+
+
 def _tenant_alerts():
     t = _tenant()
     return [a for a in ALERT_CASES if (KYC_BY_ID.get(a["kyc_case_id"]) or {}).get("tenant") == t]
@@ -740,7 +762,17 @@ def ns_queue():
                        "auto_closed": auto_closed, "human": len(rows) - auto_closed})
     rows = [a for a in alerts if a["case_level"] == level and (not mine or a["assigned_to"] == _actor())]
     rows.sort(key=lambda a: (a["status"] == "Closed", a["created_at"]), reverse=False)
-    return render_template("ns_queue.html", level=level, mine_only=mine, queues=queues, rows=rows)
+    # Paged: a file-backed book puts a thousand screening cases in one queue.
+    try:
+        page = max(1, int(request.args.get("page") or 1))
+    except ValueError:
+        page = 1
+    pages = max(1, -(-len(rows) // NS_PER_PAGE))
+    page = min(page, pages)
+    shown = rows[(page - 1) * NS_PER_PAGE: page * NS_PER_PAGE]
+    return render_template("ns_queue.html", level=level, mine_only=mine, queues=queues, rows=shown, total=len(rows),
+                           first=(page - 1) * NS_PER_PAGE + 1 if rows else 0, last=(page - 1) * NS_PER_PAGE + len(shown),
+                           pages=_pager(page, pages))
 
 
 @app.route("/name_screening/search")
@@ -1023,17 +1055,18 @@ def routing_console():
 @role_required("L2", "QC")
 def routing_run():
     ids = request.form.getlist("case_id")
+    wanted = len(ids) if ids else len(routing.unassigned(_tenant(), KYC_CASES))
     results = routing.route_backlog(_tenant(), only_ids=ids if ids else None)
-    for c, _a, _r in results:
+    for c, _a, _r in results:                    # only the cases the run touched
         _save("kyc", c)
     routed = [(c, a) for c, a, _ in results if a]
-    queued = len(results) - len(routed)
-    if not results:
+    waiting = wanted - len(routed)
+    if not wanted:
         flash("Nothing to route.", "error")
     else:
         detail = ", ".join(f"{c['client']['legal_name']} → {display_name(a['email'])}" for c, a in routed[:6])
         flash(f"Routed {len(routed)} case(s){' — ' + detail if detail else ''}."
-              + (f" {queued} still waiting for capacity." if queued else ""), "success" if routed else "error")
+              + (f" {waiting} still waiting for capacity." if waiting else ""), "success" if routed else "error")
     return redirect(url_for("routing_console"))
 
 

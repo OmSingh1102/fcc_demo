@@ -41,7 +41,7 @@
 <form method="post" action="{{ url_for('routing_run') }}">
 <div class="card mt-12 pad-0">
     <div class="card-head" style="padding-bottom:10px">
-        <div><div class="card-title">Unassigned backlog</div><div class="card-sub">most urgent first; the pick is what the router would do right now</div></div>
+        <div><div class="card-title">Unassigned backlog <span class="muted small">({{ vm.unassigned }})</span></div><div class="card-sub">most urgent first; the pick is what the router would do right now</div></div>
         <button type="submit" class="btn btn-primary btn-sm" {% if not vm.backlog %}disabled{% endif %}>{{ icon('sliders') }} Route selected now</button>
     </div>
     <table class="tbl">
@@ -61,6 +61,7 @@
         {% else %}<tr><td colspan="8"><div class="no-data">{{ icon('check-circle') }}Every queue case is with somebody.</div></td></tr>{% endfor %}
         </tbody>
     </table>
+    {% if vm.more %}<div class="table-foot"><span>The {{ vm.backlog|length }} most urgent of {{ vm.unassigned }} unassigned cases; {{ vm.more }} more wait behind them, in SLA order.</span></div>{% endif %}
 </div>
 </form>
 {% endblock %}

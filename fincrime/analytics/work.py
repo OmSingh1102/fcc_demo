@@ -39,7 +39,8 @@ class WorkConsole:
                 k = kyc_by_id.get(a["kyc_case_id"])
                 screening.append({"alert": a, "kyc": k, "pending": sum(1 for x in a["alerts"] if x["outcome"] == "Pending"),
                                   "sla": sla.chip(k, now) if k else None})
-        eligible = [c for c in routing.unassigned(None, cases) if routing.eligible(analyst, c, cases)[0]]
+        loads = routing.load_map(cases)
+        eligible = [c for c in routing.unassigned(None, cases) if routing.eligible(analyst, c, cases, loads=loads)[0]]
         return {
             "analyst": analyst, "wip": wip, "capacity": capacity, "headroom": headroom,
             "pct": int(100 * wip / capacity) if capacity else 0,

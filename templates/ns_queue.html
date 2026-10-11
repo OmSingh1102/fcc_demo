@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_badges.html" import outcome_badge %}
 {% from "_modals.html" import modal_open, modal_close %}
+{% from "_pager.html" import pager %}
 {% block title %}Name Screening - Onboarding{% endblock %}
 
 {% block content %}
@@ -37,7 +38,7 @@
 </div>
 
 <div class="card pad-0">
-    <div class="card-head" style="padding-bottom:10px"><div class="card-title">{{ level }} screening cases{% if mine_only %} — mine{% endif %}</div><span class="rowcount">{{ rows|length }} case(s)</span></div>
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">{{ level }} screening cases{% if mine_only %} — mine{% endif %}</div><span class="rowcount">{{ total }} case(s)</span></div>
     <table class="tbl">
         <thead><tr><th>Case ID</th><th>Name</th><th>Level</th><th>Status</th><th>Alerts</th><th>Pending</th><th>Assigned to</th><th>Created Date</th><th>Outcome</th><th></th></tr></thead>
         <tbody>
@@ -59,6 +60,13 @@
         {% endfor %}
         </tbody>
     </table>
+    {% if pages.pages > 1 %}
+    <div class="table-foot">
+        <span>{{ first }}&ndash;{{ last }} of {{ total }}</span>
+        {{ pager(pages) }}
+        <span>100 / Page</span>
+    </div>
+    {% endif %}
 </div>
 
 {{ modal_open('usearch', 'Universal Search', 'sm') }}

@@ -481,6 +481,43 @@ class FlowTestCase(unittest.TestCase):
         self.assertLess(page.index('id="filters-toggle"'), page.index('id="filters-grid"'))
         self.assertLess(page.index('id="filters-grid"'), page.index('id="sort-btn"'))
 
+    def test_case_list_filters_and_pages_on_the_server(self):
+        """The filters, the sort and the page are query parameters the server
+        applies, so a thousand-case book still sends one 100-row page."""
+        from werkzeug.datastructures import MultiDict
+        from fincrime.analytics.case_list import CaseListConsole, read_query
+        self.login("amara.iyer")
+        t, m = self.K["taylor"], self.K["mercer"]
+        page = self.c.get("/kyc/list?name=taylor").data.decode("utf-8")
+        self.assertIn(f'data-case-id="{t["id"]}"', page)
+        self.assertNotIn(f'data-case-id="{m["id"]}"', page)
+        self.assertIn('value="taylor"', page)                               # the box keeps what was typed
+        self.assertIn("1 of", page)
+        verified = [c for c in fcc.KYC_CASES if c["tenant"] == "ttlive" and c["status"] == "Verified"]
+        page = self.c.get("/kyc/list?status=Verified&status=Rejected").data.decode("utf-8")
+        self.assertEqual(page.count('data-status="Verified"'), len(verified))
+        self.assertNotIn('data-status="DataConfirming"', page)
+        self.assertIn('value="Verified" checked', page)
+        self.assertIn("No case matches", self.c.get("/kyc/list?case_id=no-such-case").data.decode("utf-8"))
+        vm = CaseListConsole.compute(fcc.KYC_CASES, "ttlive", query=read_query(MultiDict({"page": "2"})), per_page=10)
+        self.assertEqual((vm["page"], len(vm["rows"]), vm["first"]), (2, 10, 11))
+        self.assertEqual(vm["pages"], -(-vm["total"] // 10))
+        created = [r["created_at"] for r in vm["rows"]]
+        self.assertEqual(created, sorted(created, reverse=True))           # latest first by default
+        vm = CaseListConsole.compute(fcc.KYC_CASES, "ttlive", query=read_query(MultiDict({"sort": "asc", "page": "99"})), per_page=10)
+        self.assertEqual(vm["page"], vm["pages"])                           # past the end: the last page
+        created = [r["created_at"] for r in vm["rows"]]
+        self.assertEqual(created, sorted(created))
+        # the screening queue pages too, and its pager keeps the query string
+        per_page, fcc.NS_PER_PAGE = fcc.NS_PER_PAGE, 2
+        try:
+            queue = self.c.get("/name_screening/queue?level=L1").data.decode("utf-8")
+            self.assertIn('aria-current="page">1<', queue)
+            self.assertIn("level=L1&amp;page=2", queue)
+            self.assertIn('aria-current="page">2<', self.c.get("/name_screening/queue?level=L1&page=2").data.decode("utf-8"))
+        finally:
+            fcc.NS_PER_PAGE = per_page
+
     def test_document_viewer_zooms_and_pans(self):
         """The Preview dialog and the Data Confirm viewer share one controller:
         wheel zoom, drag to pan, double-click, zoom / fit / rotate buttons and
@@ -778,6 +815,21 @@ class FlowTestCase(unittest.TestCase):
         self.assertIn("earlier level", flash_text(r))                      # Mario worked it at L1
         self.login("nisha.rao")
         self.assertIn(h["id"], self.c.get("/work").data.decode("utf-8"))
+
+    def test_backlog_run_passes_over_a_full_tier(self):
+        """With every L1 slot taken, a lead's run routes nothing at L1 and
+        leaves the waiting cases exactly as they were: no audit row, no save."""
+        for a in fcc.ANALYSTS:
+            if "L1" in a["roles"]:
+                a["capacity"] = fcc.routing.load(a["email"])
+        waiting = [c for c in fcc.routing.unassigned("ttlive") if fcc.routing.level_for(c) == "L1"]
+        self.assertTrue(waiting)
+        before = {c["id"]: (len(c["audit"]), dict(c.get("routing") or {})) for c in waiting}
+        self.login("leah.fernandez")
+        r = self.post("/routing/run")
+        self.assertIn("still waiting for capacity", flash_text(r))
+        self.assertEqual({c["id"]: (len(c["audit"]), dict(c.get("routing") or {})) for c in waiting}, before)
+        self.assertTrue(all(not c["current_reviewer"] for c in waiting))
 
     def test_capacity_override_persists_and_queueing(self):
         self.login("leah.fernandez")
