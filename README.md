@@ -1,17 +1,17 @@
 # FinCrime KYC/KYB Operations Hub — demo
 
-A Straive demo of a unified back-office case-management hub for creator and
-seller KYC/KYB. It reproduces the client's as-is screens — the internal case
+A Straive demo of a unified back-office case-management hub for individual and
+business KYC/KYB, built to be shown to any client. It reproduces the client's as-is screens — the internal case
 manager and a simulated World-Check console — driven by the SOP's L1 → L2 →
 L3 workflow, and adds the "Unified Back-Office Case Management" layer the
 SOP proposes (§5.2): automated skill-based routing, case on-demand with
 capacity, a live tier pipeline with hand-off lag, tracker views that replace
 the spreadsheets, an investigation file per escalation, a global audit log,
-QC sampling with a scorecard, and a four-eyes Checker 2 on seller approvals.
+QC sampling with a scorecard, and a four-eyes Checker 2 on business approvals.
 
 Screening runs in two workflows. **Auto-verified**: no match on any list, or
 every watchlist record cleared by the *AI screening rules*, so the screening
-case closes itself and a TT Live case completes with no analyst step.
+case closes itself and a Individuals case completes with no analyst step.
 **Human-in-the-loop**: at least one record the rules could not clear, so an
 analyst handles only what is left. The "AI" is a deterministic rule book, not
 a model — date-of-birth mismatch, gender mismatch, an optional nationality
@@ -25,7 +25,7 @@ reconciliation log, the same 1,000-row file the hub reads
 case at L1 Data Confirming with its World-Check hit, carrying the file's own
 case ids, passport numbers, names as the CRM captured them (swapped,
 nicknamed or garbled: the confirming task) and World-Check records.
-Individuals are TT Live cases (943); companies are TT Shop sellers with
+Individuals are Individuals cases (943); companies are companies on the Businesses tenant with
 their UBO (57). The AI screening rules clear 592 hits at intake, every one
 recorded in the file as a false positive, and leave 408 for analysts, among
 them every exact or day/month-transposed date of birth and every company.
@@ -63,6 +63,14 @@ skipped, up to 500 rows a file. *Download a sample* gives five new cases
 (two the agent should verify, a CRM name with another surname, an exact
 date-of-birth hit, a company). Uploads are stored and rebuilt on restart
 until Reset demo.
+
+The console's names and colours are client-neutral: the two onboarding
+lines are **Individuals** and **Businesses**, customer tiers are Tier 1–4,
+the top tabs are Monitoring / Reports / Administration and the accent is a
+petrol teal. Internally the tenants keep their old keys (`ttlive`, `ttshop`)
+because behaviour hangs on them; `vocab.TENANTS` holds every label, and
+records stored under the old names are relabelled on load
+(`loader.relabel`, `vocab.RELABEL`).
 
 Built the same way as the ChargeShield demo: one Flask `app.py`, Jinja
 templates, a single stylesheet, a SQLite state store, no JS framework.
@@ -205,7 +213,7 @@ tile on the portal.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-141 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+142 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
@@ -223,7 +231,7 @@ the settings and re-run, both resets, the two apps leaving each other
 alone) and `tests/test_hub_llm.py` (the Claude agents through the seam),
 plus the console's 47 end-to-end tests on the Flask test client, run on the
 scripted book: the golden path, resubmit,
-escalate, segregation of duties, L2/EDD decisions, Skopenow, TT Shop risk
+escalate, segregation of duties, L2/EDD decisions, Skopenow, Businesses risk
 recalculation, routing by skill and capacity, case on-demand, immediate
 hand-offs, capacity overrides, trackers and CSV, the investigation-file ZIP,
 the global audit log, QC sampling, Checker 2, role enforcement at EDD, POA
@@ -231,7 +239,7 @@ checks, fraud typology, World-Check links and the screening Details
 button opening in a new tab, the document viewer's controls, the greyed Review button's reasons, refused
 actions staying on the page with the error as a notification, the AI
 screening rules (the rule book, what it did at intake, auto-verification on
-Data Confirm, sellers keeping the human close, rule switches that persist),
+Data Confirm, businesses keeping the human close, rule switches that persist),
 the workflow labels across the screens, one outcome written to several
 ticked alerts at once, the case list and screening queue filtered and paged
 on the server, a routing run that passes over a full tier, a day/month-swapped
@@ -242,8 +250,8 @@ stood in for; the suite never calls the gateway).
 
 | Profile | Roles | Tenants | Skill book | Capacity |
 |---|---|---|---|---|
-| Amara Iyer | L1 | TT Live | latin, cyrillic | 6 |
-| Jon Miranda | L1 | TT Live, TT Shop | latin, arabic, KYB | 6 |
+| Amara Iyer | L1 | Individuals | latin, cyrillic | 6 |
+| Jon Miranda | L1 | Individuals, Businesses | latin, arabic, KYB | 6 |
 | Mario Kim | L1 + L2 | both | latin, KYB | 5 |
 | Nisha Rao | L2 | both | latin, cyrillic, arabic, KYB | 4 |
 | Ryan Lee | EDD (L3 / PIC) | both | all scripts, KYB | 3 |
@@ -257,7 +265,7 @@ and L2.
 
 ## A demo script on the reconciliation log (the default book)
 
-1. **Amara** → *Due Diligence*: 943 TT Live cases, 100 a page. The filters,
+1. **Amara** → *Due Diligence*: 943 Individuals cases, 100 a page. The filters,
    the sort and the page run on the server and live in the URL; *Review
    workflow* = Human-in-the-loop leaves the 351 the rules could not clear.
 2. *My Work* → **KYC-2026-3011** (Nguyen Ngoc Phuong). The header says
@@ -277,9 +285,9 @@ and L2.
 5. **Jon**: **KYC-2026-3046**, a record listing the client's date with day
    and month swapped, is held (the file recorded 14 of its 22 such cases as
    true matches). **KYC-2026-3037**: the proof of address is 223 days old,
-   so Data Confirm refuses it and Resubmit POA is the move. Tenant TT Shop →
+   so Data Confirm refuses it and Resubmit POA is the move. Tenant Businesses →
    **KYC-2026-3029** Ramasamy Agro Exports Pvt Ltd: the certificate of
-   incorporation and the UBO's passport; a seller goes through Checker 1
+   incorporation and the UBO's passport; a business goes through Checker 1
    and Checker 2.
 6. **Mario**: **KYC-2026-3118** is a flat scan the vendor declined (Resubmit
    ID); **KYC-2026-3040**'s passport fails its MRZ check digit (escalate as a
@@ -327,11 +335,11 @@ case page says so.
    Review → Verified.
 4. **Nisha** → *My Work* shows the hand-off; *Pipeline* shows the L2 column
    and the hand-off feed with lag 0 s against the bot-era history.
-5. **Jon**, tenant TT Shop → a seller in Data Screening → Recalculate Risk
-   Rating → EDD Review "No match - Approve" → the seller waits for
+5. **Jon**, tenant Businesses → a business in Data Screening → Recalculate Risk
+   Rating → EDD Review "No match - Approve" → the business waits for
    **Checker 2**; Jon cannot sign it off. **Nisha** → L2 / EDD Queue → the
    Checker 2 row → Review → Approve → Verified.
-6. *Trackers*: the Productivity / Time, Fraud and EDD / TT Shop Escalation
+6. *Trackers*: the Productivity / Time, Fraud and EDD / Businesses Escalation
    trackers, filled by the system, with CSV. Open an escalated case's
    **Investigation File** and download the ZIP.
 7. **Leah** → *QC Sampling* → fail one sampled case with a reason → the
@@ -368,7 +376,7 @@ case page says so.
 | §4.1.2 Data Confirming, POA checks, resubmit reasons | Data Confirm modal |
 | §4.1.3 screening, WC export, Skopenow, escalation, fraud typology, EDD tracker, investigation folder | screening case, World-Check console, EDD Review, Escalate dialog, Trackers, Investigation File |
 | §5.1 current automation: rule-based disposition of screening hits; the auto-verified and human-in-the-loop workflows | AI screening rules at intake and at the re-screen, auto-verification on Data Confirm, AI Screening page, workflow badge and filter |
-| §4.2 TT Shop Checker 1 / Checker 2, risk rating, Pending EDD | Agency panel, EDD Review, Checker 2 sign-off, L2 / EDD queue |
+| §4.2 Businesses Checker 1 / Checker 2, risk rating, Pending EDD | Agency panel, EDD Review, Checker 2 sign-off, L2 / EDD queue |
 | §5.2.1 automated routing, no spreadsheets | routing engine on every hand-off, Routing console, Trackers |
 | §5.2.2 dynamic capacity, case on-demand | My Work (Get next case / Request cases), capacity per analyst |
 | §5.2.3 L1 → L2 → L3, real-time pipeline, no hand-off lag | Pipeline page, hand-off feed, lag metric |
