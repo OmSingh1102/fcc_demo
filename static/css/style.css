@@ -65,30 +65,31 @@
     --radius:       var(--radius-xl);
 }
 
-/* The case-management console. Blue accent and a grey page, the way the
-   real tool looks; corners two steps squarer than the Straive pages. */
+/* The case-management console: its own deep petrol-teal accent on a soft
+   off-white page (a hue apart from the success green, so a primary button
+   never reads as a status), corners a step rounder than a plain admin tool. */
 body.console {
-    --primary:            #1677ff;
-    --primary-strong:     #0958d9;
-    --primary-soft:       #e6f4ff;
-    --primary-tint:       #f0f7ff;
+    --primary:            #0e7490;
+    --primary-strong:     #155e75;
+    --primary-soft:       #e3f3f6;
+    --primary-tint:       #f1f9fa;
     --primary-foreground: #ffffff;
-    --background:         #f0f2f5;
-    --foreground:         #1f2329;
+    --background:         #f4f6f6;
+    --foreground:         #1c2526;
     --card:               #ffffff;
-    --card-foreground:    #1f2329;
-    --muted:              #fafafa;
-    --muted-foreground:   #6b7280;
-    --accent:             #f0f5ff;
-    --accent-foreground:  #0958d9;
-    --border:             #e5e7eb;
-    --border-strong:      #d1d5db;
-    --input:              #d9d9d9;
-    --ring:               #4096ff;
-    --radius-sm: 2px;
-    --radius-md: 4px;
-    --radius-lg: 6px;
-    --radius-xl: 8px;
+    --card-foreground:    #1c2526;
+    --muted:              #f8fafa;
+    --muted-foreground:   #64707a;
+    --accent:             #ecf6f8;
+    --accent-foreground:  #155e75;
+    --border:             #e2e8ea;
+    --border-strong:      #cfd8db;
+    --input:              #d5dde0;
+    --ring:               #22a3c2;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 10px;
 }
 
 /* The simulated World-Check console. Dark, blue accent, flat. */
