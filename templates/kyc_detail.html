@@ -38,18 +38,10 @@
     <div class="card-head" style="padding-bottom:10px">
         <div class="card-title">AI Agent</div>
         <div class="row" style="gap:8px">
-            {% if ag %}
             <span class="badge {{ {'verified': 'emerald', 'screening': 'blue', 'human': 'amber'}[ag.decision] }}" id="ai-agent-decision">{{ agent.labels[ag.decision] }}</span>
             <span class="small muted">{{ ag.model }} · {{ ag.seconds }} s · {{ ag.at }}</span>
-            {% endif %}
-            {% if agent.can_run %}
-            <form method="post" action="{{ url_for('kyc_ai_agent', case_id=case.id) }}" style="margin:0" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Reading the documents…'">
-                <button type="submit" class="btn btn-primary btn-xs">{{ icon('shield-check') }} {{ 'Run again' if ag else 'Run AI agent' }}</button>
-            </form>
-            {% elif agent.why %}<span class="small muted">{{ agent.why }}</span>{% endif %}
         </div>
     </div>
-    {% if ag %}
     <div class="card-body" style="padding-top:0">
         {% if ag.reasons %}
         <div class="note warn small mb-8"><b>Sent to a person:</b> {{ ag.reasons|join('; ') }}</div>
@@ -72,9 +64,6 @@
     {% for key, label in (('id', 'ID'), ('poa', 'Proof of address')) %}{% set r = ag.read.get(key) or {} %}
     {% if r.problems or r.note %}<div class="small muted" style="padding:6px 16px">{{ label }}: {{ (r.problems|join(', ')).replace('_', ' ') }}{% if r.problems and r.note %} — {% endif %}{{ r.note }}</div>{% endif %}
     {% endfor %}
-    {% endif %}
-    {% else %}
-    <div class="card-body" style="padding-top:0"><p class="small muted">The AI Agent has not read this case yet. It reads the passport and the proof of address with {{ agent.model }}, checks them against the CRM, and either confirms the data itself or hands the case to a person with its reasons.</p></div>
     {% endif %}
 </div>
 {% endif %}

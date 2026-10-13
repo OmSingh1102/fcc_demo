@@ -1123,50 +1123,35 @@ def ai_screening_rules():
 
 
 # ─── AI Agent (engines/ai_agent): Claude reads the documents, checks decide ─
-# Paused at every boot, so a restart never spends model calls by itself; a
-# team lead starts it on the AI Screening page. Workers read outside the lock
-# (the slow model call) and decide under it, re-checking the case is still
-# theirs to take.
+# It starts by itself on the first request the serving process handles and
+# works only the cases the AI screening rules cleared (auto-verified): those
+# whose ID and proof of address pass every check verify themselves; the rest
+# go to an analyst with the reasons. A team lead can pause it on the AI
+# Screening page. Workers read outside the lock (the slow model call) and
+# decide under it, re-checking the case is still theirs to take. A read is
+# stored on the case, so a restart does not read a case twice.
 AI_AGENT_WORKERS = 2          # the gateway refuses more concurrent connections
 AI_AGENT_LOCK = threading.Lock()
 AI_AGENT = {"running": False, "busy": set(), "threads": [], "done": 0, "errors": 0, "started_by": "", "started_at": "",
-            "stopped": ""}
+            "stopped": "", "autostarted": False}
 AGENT_LABELS = {"verified": "Handled by AI", "screening": "Confirmed by AI · alert left for an analyst",
                 "human": "Sent to a person"}
 
 
 def _agent_view(case, actor, levels):
-    """What the case page shows about the agent, and whether this analyst
-    may run it on the case now."""
-    show = bool(case.get("ai_agent")) or (case["tenant"] == "ttlive" and not case.get("agency")
-                                          and case["status"] == "DataConfirming")
-    why = ""
-    if not ai_review.configured():
-        why = "The AI Agent needs LLM_FOUNDRY_KEY (see .env.example)."
-    elif case["status"] != "DataConfirming" or case.get("agency") or case["tenant"] != "ttlive":
-        why = ""
-    elif case["current_reviewer"] not in ("", actor):
-        why = f"Reserved by {display_name(case['current_reviewer'])}."
-    elif case["id"] in AI_AGENT["busy"]:
-        why = "The AI Agent is reading this case now."
-    can = (not why and case["status"] == "DataConfirming" and case["tenant"] == "ttlive" and not case.get("agency")
-           and bool(levels & {"L1", "L2", "QC"}))
-    return {"show": show, "can_run": can, "why": why, "model": ai_agent.MODEL, "labels": AGENT_LABELS}
+    """What the case page shows: the agent's read and checks, once it has
+    worked the case."""
+    return {"show": bool(case.get("ai_agent")), "labels": AGENT_LABELS}
 
 
-def _agent_take(case, actor=""):
-    """Under the lock: may the agent still act on this case?"""
-    return (case["status"] == "DataConfirming" and case["tenant"] == "ttlive" and not case.get("agency")
-            and case["current_reviewer"] in ("", actor))
-
-
-def _agent_finish(case, perceived, actor=""):
+def _agent_finish(case, perceived):
     """Under the lock: decide on a read and save what changed."""
+    reviewer = case.get("current_reviewer", "")
     alert, wc = _linked(case)
     record = ai_agent.decide(case, alert, wc, perceived)
-    if actor and case["status"] == "Verified":
-        # the analyst had it reserved; their turn ends with the agent's close
-        workflow.worklog.close_entry(case, "Verified by the AI Agent", email=actor)
+    if reviewer and case["status"] == "Verified":
+        # an analyst had it reserved; their turn ends with the agent's close
+        workflow.worklog.close_entry(case, "Verified by the AI Agent", email=reviewer)
     AI_AGENT["done"] += 1
     AI_AGENT["errors"] += 1 if record.get("error") else 0
     _save("kyc", case)
@@ -1187,7 +1172,7 @@ def _agent_worker():
         try:
             perceived = ai_agent.perceive(case, _render_document)
             with AI_AGENT_LOCK:
-                if _agent_take(case):
+                if ai_agent.eligible(case) and not case.get("ai_agent"):
                     _agent_finish(case, perceived)
         except Exception:            # one bad case must not stop the queue
             app.logger.exception("AI Agent failed on %s", case["id"])
@@ -1203,20 +1188,36 @@ def _agent_worker():
             _bump_state()
 
 
+def _agent_start(by):
+    with AI_AGENT_LOCK:
+        if AI_AGENT["running"]:
+            return
+        AI_AGENT.update(running=True, started_by=by, started_at=dates.now_str(), stopped="")
+        AI_AGENT["threads"] = [threading.Thread(target=_agent_worker, name=f"ai-agent-{i}", daemon=True)
+                               for i in range(AI_AGENT_WORKERS)]
+        for t in AI_AGENT["threads"]:
+            t.start()
+
+
+@app.before_request
+def _agent_autostart():
+    """The agent starts by itself once per serving process, when the model
+    is configured (never under the test client)."""
+    if AI_AGENT["autostarted"] or app.testing:
+        return
+    AI_AGENT["autostarted"] = True
+    if ai_review.configured():
+        _agent_start("System")
+
+
 @app.route("/ai-agent/start", methods=["POST"])
 @role_required("QC")
 def ai_agent_start():
     if not ai_review.configured():
         flash("The AI Agent needs LLM_FOUNDRY_KEY (see .env.example).", "error")
         return redirect(url_for("ai_screening_page"))
-    with AI_AGENT_LOCK:
-        if not AI_AGENT["running"]:
-            AI_AGENT.update(running=True, started_by=_actor(), started_at=dates.now_str(), stopped="")
-            AI_AGENT["threads"] = [threading.Thread(target=_agent_worker, name=f"ai-agent-{i}", daemon=True)
-                                   for i in range(AI_AGENT_WORKERS)]
-            for t in AI_AGENT["threads"]:
-                t.start()
-    flash(f"AI Agent started: {AI_AGENT_WORKERS} cases at a time. Cases move on this page and in the case list as it works.", "success")
+    _agent_start(_actor())
+    flash(f"AI Agent running: {AI_AGENT_WORKERS} cases at a time.", "success")
     return redirect(url_for("ai_screening_page"))
 
 
@@ -1226,32 +1227,6 @@ def ai_agent_pause():
     AI_AGENT.update(running=False, stopped=f"Paused by {display_name(_actor())}")
     flash("AI Agent pausing: the cases it is reading now finish, then it stops.", "success")
     return redirect(url_for("ai_screening_page"))
-
-
-@app.route("/kyc/<case_id>/ai-agent", methods=["POST"])
-@role_required("L1", "L2", "QC")
-def kyc_ai_agent(case_id):
-    """Run the agent on one case now (a demo, or Run again)."""
-    case, actor = _kyc(case_id), _actor()
-    view = _agent_view(case, actor, _levels())
-    if not view["can_run"]:
-        flash(view["why"] or "The AI Agent works TT Live individuals in Data Confirming.", "error")
-        return redirect(url_for("kyc_detail", case_id=case_id))
-    AI_AGENT["busy"].add(case_id)
-    try:
-        perceived = ai_agent.perceive(case, _render_document)
-        with AI_AGENT_LOCK:
-            if not _agent_take(case, actor):
-                flash("The case changed while the AI Agent was reading it; nothing was done.", "error")
-                return redirect(url_for("kyc_detail", case_id=case_id))
-            record = _agent_finish(case, perceived, actor)
-    finally:
-        AI_AGENT["busy"].discard(case_id)
-    text = AGENT_LABELS[record["decision"]]
-    if record["reasons"]:
-        text += ": " + "; ".join(record["reasons"])
-    flash(f"AI Agent — {text}.", "success" if record["decision"] != "human" else "error")
-    return redirect(url_for("kyc_detail", case_id=case_id))
 
 
 @app.route("/routing/capacity", methods=["POST"])

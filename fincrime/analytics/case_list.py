@@ -55,7 +55,8 @@ def _agent(c):
     take, else empty."""
     if c.get("ai_agent"):
         return c["ai_agent"]["decision"]
-    if c["tenant"] == "ttlive" and not c.get("agency") and c["status"] == "DataConfirming":
+    if (c["tenant"] == "ttlive" and not c.get("agency") and c["status"] == "DataConfirming"
+            and c["screening"].get("workflow") == "auto-verified"):
         return "not_run"
     return ""
 

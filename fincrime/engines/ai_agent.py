@@ -13,8 +13,9 @@ and hands the case to a person whenever it cannot be sure.
    cannot be reached: the case stays in Data Confirming, labelled
    human-in-the-loop, with the reasons and what the agent read.
 
-It only takes TT Live individuals nobody has reserved; a company (KYB)
-always stays with people. The result sits on the case as case["ai_agent"].
+It only takes TT Live individuals whose screening the rules already
+cleared (the auto-verified workflow); a company (KYB) and every case with an
+alert left stay with people. The result sits on the case as case["ai_agent"].
 """
 import base64
 import time
@@ -62,8 +63,11 @@ SCHEMA = {"type": "object", "additionalProperties": False, "properties": {"id": 
 # ── which case, which images ─────────────────────────────────────────────────
 
 def eligible(case):
+    """A TT Live individual in Data Confirming whose screening the rules
+    cleared (auto-verified): the agent confirms it so it verifies itself.
+    Everything else is an analyst's from the start."""
     return (case["tenant"] == "ttlive" and case["status"] == "DataConfirming" and not case.get("agency")
-            and not case.get("current_reviewer"))
+            and case["screening"].get("workflow") == "auto-verified")
 
 
 def _id_doc(case):

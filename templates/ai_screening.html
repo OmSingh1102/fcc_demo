@@ -18,21 +18,21 @@
 {% set ai = vm.agent %}
 <div class="card mt-12 pad-0" id="ai-agent-card">
     <div class="card-head" style="padding-bottom:10px">
-        <div><div class="card-title">AI Agent — Data Confirming without an analyst</div>
-            <div class="card-sub">{{ ai.model }} reads each ID and proof of address; fixed checks compare the read with the CRM. All pass: it confirms the data and a case the rules cleared verifies itself. Anything unreadable, expired, missing or different goes to a person with the reason. TT Live individuals only; companies stay with people.</div></div>
+        <div><div class="card-title">AI Agent — auto-verified cases verify themselves</div>
+            <div class="card-sub">Runs by itself on every case the rules cleared (auto-verified): {{ ai.model }} reads the ID and the proof of address, fixed checks compare the read with the CRM, and when all pass the case is Verified with no analyst. Anything unreadable, expired, missing or different goes to an analyst with the reason. Cases with an alert left, and companies, are the analysts' from the start.</div></div>
         <div class="row" style="gap:8px">
             {% if ai.running %}<span class="badge blue" id="ai-agent-state">Running · {{ ai.busy }} reading now</span>
             {% else %}<span class="badge slate" id="ai-agent-state">Paused{% if ai.stopped %} · {{ ai.stopped }}{% endif %}</span>{% endif %}
             {% if can_edit and agent_ready %}
             <form method="post" action="{{ url_for('ai_agent_pause' if ai.running else 'ai_agent_start') }}" style="margin:0">
-                <button type="submit" class="btn {{ 'btn-outline' if ai.running else 'btn-primary' }} btn-sm">{{ 'Pause' if ai.running else 'Start AI Agent' }}</button>
+                <button type="submit" class="btn {{ 'btn-outline' if ai.running else 'btn-primary' }} btn-sm">{{ 'Pause' if ai.running else 'Resume' }}</button>
             </form>
             {% elif not agent_ready %}<span class="small muted">Needs LLM_FOUNDRY_KEY</span>
             {% else %}<span class="small muted">Start / Pause: team lead</span>{% endif %}
         </div>
     </div>
     <div class="kpi-strip" style="padding:0 16px 12px">
-        <div class="kpi"><div class="l">Waiting for the agent</div><div class="v">{{ ai.queue }}</div><div class="hint">unreserved, in Data Confirming</div></div>
+        <div class="kpi"><div class="l">Waiting for the agent</div><div class="v">{{ ai.queue }}</div><div class="hint">auto-verified, not read yet</div></div>
         <div class="kpi tone-success"><div class="l">Handled by AI</div><div class="v">{{ ai.verified }}</div><div class="hint">verified with no analyst</div></div>
         <div class="kpi tone-info"><div class="l">Confirmed, alert left</div><div class="v">{{ ai.screening }}</div><div class="hint">in Data Screening for an analyst</div></div>
         <div class="kpi {% if ai.human %}tone-warning{% endif %}"><div class="l">Sent to a person</div><div class="v">{{ ai.human }}</div><div class="hint">a check failed</div></div>

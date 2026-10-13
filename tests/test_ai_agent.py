@@ -168,8 +168,9 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertTrue(v("KEVIN NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                        # the hub knows Kevin for Khoa
         self.assertFalse(v("BRANDON NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                     # another given name
 
-    def test_reserved_and_company_cases_are_not_taken(self):
-        self.assertFalse(ai_agent.eligible(self.K["KYC-2026-3011"]))     # reserved by Amara
+    def test_only_auto_verified_individuals_are_taken(self):
+        self.assertTrue(ai_agent.eligible(self.K["KYC-2026-3011"]))      # auto-verified, even though Amara holds it
+        self.assertFalse(ai_agent.eligible(self.K["KYC-2026-3012"]))     # an alert left: the analysts' from the start
         self.assertFalse(ai_agent.eligible(self.K["KYC-2026-3029"]))     # a company
         self.assertTrue(svg_to_png('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>').startswith(b"\x89PNG"))
 
@@ -180,28 +181,23 @@ class AiAgentTestCase(unittest.TestCase):
         r = self.c.post("/login", data={"analyst": key, "password": "1234"})
         self.assertEqual(r.status_code, 302)
 
-    def test_run_on_one_case_from_the_case_page(self):
+    def test_the_agent_verifies_an_auto_verified_case_by_itself(self):
         self.login("amara.iyer")
-        c = self.K["KYC-2026-3011"]                                     # reserved by Amara at intake
+        c = self.K["KYC-2026-3011"]                                     # auto-verified, reserved by Amara at intake
         page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
-        self.assertIn('id="ai-agent"', page)
-        self.assertIn("Run AI agent", page)
-        with mock.patch.object(ai_agent.llm, "call", Stub(perfect_read(c))), mock.patch.object(fcc.ai_review, "configured", lambda: True):
-            r = self.c.post(f"/kyc/{c['id']}/ai-agent", follow_redirects=True)
-        self.assertEqual(c["status"], "Verified", r.data.decode("utf-8")[:300])
+        self.assertNotIn('id="ai-agent"', page)                          # no card, no button before the agent runs
+        self.assertNotIn("Run AI agent", page)
+        original = ai_agent.eligible
+        with mock.patch.object(ai_agent, "eligible", lambda x: x is c and original(x)),                 mock.patch.object(ai_agent.llm, "call", Stub(perfect_read(c))):
+            fcc.AI_AGENT.update(running=True, threads=[], busy=set())
+            fcc._agent_worker()
+        self.assertEqual((c["status"], c["closed_by"], c["previous_reviewer"]), ("Verified", "System User", "AI Agent"))
         self.assertTrue(all(w.get("to") for w in c.get("work", [])), c.get("work"))      # Amara's turn closed
-        page = r.data.decode("utf-8")
+        page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
         self.assertIn('id="ai-agent-decision"', page)
         self.assertIn("Handled by AI", page)
-        self.assertIn("Every check passed", page)
-        # the list filter finds it; Jon cannot run the agent on Amara's reserved case
+        self.assertNotIn("Run AI agent", page)
         self.assertIn(c["id"], self.c.get("/kyc/list?agent=verified").data.decode("utf-8"))
-        self.login("jon.miranda")
-        other = self.K["KYC-2026-3012"]
-        with mock.patch.object(fcc.ai_review, "configured", lambda: True):
-            r = self.c.post(f"/kyc/{other['id']}/ai-agent", follow_redirects=True)
-        self.assertIn("Reserved by", r.data.decode("utf-8"))
-        self.assertFalse(other.get("ai_agent"))
 
     def test_the_worker_works_the_queue_and_stops(self):
         chosen = [c["id"] for c in fcc.KYC_CASES if ai_agent.eligible(c)][:3]
