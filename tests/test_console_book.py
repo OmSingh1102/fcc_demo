@@ -111,12 +111,12 @@ class ConsoleBookTestCase(unittest.TestCase):
     def test_rules_at_intake_against_the_file(self):
         """The rules clear only what the file's analysts also cleared; every
         exact or transposed date of birth and every company stays human."""
-        auto = [c for c in fcc.KYC_CASES if c["screening"]["workflow"] == "auto-verified"]
-        held = [c for c in fcc.KYC_CASES if c["screening"]["workflow"] != "auto-verified"]
+        # read off the screening cases, which later Data Confirms in this class leave alone
+        auto = [c for c in fcc.KYC_CASES if self.alert_of(c)["status"] == "Closed"
+                and self.alert_of(c)["case_outcome"]["by"] == "System User"]
+        held = [c for c in fcc.KYC_CASES if c not in auto]
         self.assertEqual(len(auto), 592)
         self.assertEqual({c["recon"]["outcome"] for c in auto}, {"FP"})
-        self.assertTrue(all(self.alert_of(c)["status"] == "Closed"
-                            and self.alert_of(c)["case_outcome"]["by"] == "System User" for c in auto))
         self.assertEqual(Counter(c["recon"]["outcome"] for c in held), {"TP": 171, "Pending": 128, "Escalated": 72, "FP": 37})
         for marker, n in (("transposed", 22), ("Exact", 157)):
             cases = [c for c in fcc.KYC_CASES if marker in c["recon"]["wc_dob"]]
@@ -173,6 +173,20 @@ class ConsoleBookTestCase(unittest.TestCase):
         self.assertEqual(c["status"], "Verified", flash_text(r))
         self.assertEqual((c["closed_by"], c["previous_reviewer"]), ("System User", AMARA))
         self.assertIn("auto-verified", flash_text(r))
+
+    def test_clear_screening_never_verifies_a_bad_id(self):
+        """The rules cleared the alert, but the vendor declined the ID or it has
+        expired: Data Confirm leaves the case with a person, not Verified."""
+        self.login("amara.iyer")
+        auto = [c for c in fcc.KYC_CASES if c["screening"]["workflow"] == "auto-verified" and not c["current_reviewer"]]
+        declined = next(c for c in auto if c["vendor_check"]["result"] == "Declined" and c["documents"][0]["quality"] != "expired")
+        expired = next(c for c in auto if c["documents"][0]["quality"] == "expired")
+        for c, needle in ((declined, "ID declined by the vendor"), (expired, "ID expired on")):
+            r = self.confirm(c)
+            self.assertEqual(c["status"], "DataScreening", flash_text(r))
+            self.assertEqual(c["screening"]["workflow"], "human-in-the-loop")
+            self.assertIn(needle, c["audit"][-1]["detail"])
+            self.assertFalse(c.get("closed_by"))
 
     def test_confirm_corrects_a_garbled_name(self):
         self.login("amara.iyer")

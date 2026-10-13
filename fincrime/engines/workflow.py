@@ -306,13 +306,33 @@ def data_confirm(case, actor, form, alert_case=None, wc=None):
     _audit(case, actor, "Data confirmed", detail)
     ai_screening.apply(case, alert_case, wc, at=now, run="rescreen")
     if _auto_verify_allowed(case) and case["screening"].get("workflow") == "auto-verified":
-        auto_verify(case, actor, now)
+        problems = id_problems(case)
+        if problems:
+            # The screening is clear but the ID is not: a person looks before
+            # anything verifies (the rules never approve a bad ID).
+            case["screening"]["workflow"] = "human-in-the-loop"
+            _audit(case, vocab.SYSTEM_USER, "Auto-verify held", "; ".join(problems) + " — an analyst reviews the case.")
+        else:
+            auto_verify(case, actor, now)
 
 
 def _auto_verify_allowed(case):
     """Creators verify themselves when the rules leave nothing; sellers never
     do (SOP 4.2: Checker 1 recalculates the risk, Checker 2 signs off)."""
     return case["tenant"] == "ttlive"
+
+
+def id_problems(case, now=None):
+    """Why the ID on file cannot be approved without a person: the vendor
+    declined it, or it has expired. Empty when neither."""
+    out = []
+    vc = case.get("vendor_check") or {}
+    if vc.get("result") == "Declined":
+        out.append("ID declined by the vendor" + (f": {vc['vendor_reason']}" if vc.get("vendor_reason") else ""))
+    expiry = dates.parse((vc.get("extracted") or {}).get("expiry") or "")
+    if expiry is not None and expiry < (now or dates.now()):
+        out.append(f"ID expired on {expiry:%Y-%m-%d}")
+    return out
 
 
 def auto_verify(case, actor, now):
