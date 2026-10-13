@@ -32,6 +32,53 @@
     </table>
 </div>
 
+{# ── AI Agent: Claude's read of the documents and the checks on it ── #}
+{% if agent.show %}{% set ag = case.ai_agent %}
+<div class="card mt-12 pad-0" id="ai-agent">
+    <div class="card-head" style="padding-bottom:10px">
+        <div class="card-title">AI Agent</div>
+        <div class="row" style="gap:8px">
+            {% if ag %}
+            <span class="badge {{ {'verified': 'emerald', 'screening': 'blue', 'human': 'amber'}[ag.decision] }}" id="ai-agent-decision">{{ agent.labels[ag.decision] }}</span>
+            <span class="small muted">{{ ag.model }} · {{ ag.seconds }} s · {{ ag.at }}</span>
+            {% endif %}
+            {% if agent.can_run %}
+            <form method="post" action="{{ url_for('kyc_ai_agent', case_id=case.id) }}" style="margin:0" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Reading the documents…'">
+                <button type="submit" class="btn btn-primary btn-xs">{{ icon('shield-check') }} {{ 'Run again' if ag else 'Run AI agent' }}</button>
+            </form>
+            {% elif agent.why %}<span class="small muted">{{ agent.why }}</span>{% endif %}
+        </div>
+    </div>
+    {% if ag %}
+    <div class="card-body" style="padding-top:0">
+        {% if ag.reasons %}
+        <div class="note warn small mb-8"><b>Sent to a person:</b> {{ ag.reasons|join('; ') }}</div>
+        {% elif ag.decision == 'verified' %}
+        <div class="note ok small mb-8">Every check passed. The AI Agent confirmed the data, the screening rules had cleared every alert, and the case verified with no analyst step.</div>
+        {% else %}
+        <div class="note info small mb-8">Every check passed and the AI Agent confirmed the data; a World-Check alert is left, so the case went to Data Screening for an analyst.</div>
+        {% endif %}
+    </div>
+    {% if ag.checks %}
+    <table class="tbl dense">
+        <thead><tr><th>Check</th><th>CRM</th><th>Read from the document</th><th>Result</th></tr></thead>
+        <tbody>
+        {% for c in ag.checks %}
+        <tr><td class="strong nowrap">{{ c.check }}</td><td>{{ c.crm or '—' }}</td><td>{{ c.document or '—' }}</td>
+            <td>{% if c.ok %}<span class="badge emerald">{{ icon('check') }} Pass</span>{% else %}<span class="badge amber">{{ icon('x') }} {{ c.note }}</span>{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% for key, label in (('id', 'ID'), ('poa', 'Proof of address')) %}{% set r = ag.read.get(key) or {} %}
+    {% if r.problems or r.note %}<div class="small muted" style="padding:6px 16px">{{ label }}: {{ (r.problems|join(', ')).replace('_', ' ') }}{% if r.problems and r.note %} — {% endif %}{{ r.note }}</div>{% endif %}
+    {% endfor %}
+    {% endif %}
+    {% else %}
+    <div class="card-body" style="padding-top:0"><p class="small muted">The AI Agent has not read this case yet. It reads the passport and the proof of address with {{ agent.model }}, checks them against the CRM, and either confirms the data itself or hands the case to a person with its reasons.</p></div>
+    {% endif %}
+</div>
+{% endif %}
+
 {# ── Information Verification: client, agency, documents, screening, decisions ── #}
 <div class="card mt-12">
     <div class="card-head" style="padding-bottom:10px"><div class="card-title">Information Verification</div></div>

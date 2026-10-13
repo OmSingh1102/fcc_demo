@@ -20,7 +20,7 @@ TEXT_FILTERS = (("case_id", "id"), ("client_id", "client_id"), ("name", "name"),
 EXACT_FILTERS = (("reviewer", "current_reviewer"), ("prev", "previous_reviewer"), ("source", "source"),
                  ("vendor", "vendor"), ("gifter", "gifter"), ("nat", "nationality"), ("issuing", "issuing"),
                  ("poa", "poa"), ("level", "level"), ("pending", "pending_reason"), ("edd", "edd_rfi"),
-                 ("qcrev", "qc_reviewer"), ("qcresult", "qc_result"), ("workflow", "workflow"))
+                 ("qcrev", "qc_reviewer"), ("qcresult", "qc_result"), ("workflow", "workflow"), ("agent", "agent"))
 DATE_FILTERS = (("dob", "dob"), ("created", "created_at"), ("sub", "submitted_at"))
 INERT = ("regional", "change")          # on the grid, as on the real tool, but not part of this demo
 
@@ -46,7 +46,18 @@ def _row(c, analyst_email):
         "edd_rfi": "Yes" if c["pending_reason"] in ("Pending EDD", "RFI Sent") else "No",
         "mine": bool(analyst_email) and c["current_reviewer"] == analyst_email,
         "workflow": c["screening"].get("workflow", ""),
+        "agent": _agent(c),
     }
+
+
+def _agent(c):
+    """The AI Agent's decision on the case, "not_run" for one it could still
+    take, else empty."""
+    if c.get("ai_agent"):
+        return c["ai_agent"]["decision"]
+    if c["tenant"] == "ttlive" and not c.get("agency") and c["status"] == "DataConfirming":
+        return "not_run"
+    return ""
 
 
 def read_query(args):

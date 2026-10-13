@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -171,6 +172,67 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertFalse(ai_agent.eligible(self.K["KYC-2026-3011"]))     # reserved by Amara
         self.assertFalse(ai_agent.eligible(self.K["KYC-2026-3029"]))     # a company
         self.assertTrue(svg_to_png('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>').startswith(b"\x89PNG"))
+
+
+    # ── in the console ──────────────────────────────────────────────────────
+    def login(self, key):
+        self.c = fcc.app.test_client()
+        r = self.c.post("/login", data={"analyst": key, "password": "1234"})
+        self.assertEqual(r.status_code, 302)
+
+    def test_run_on_one_case_from_the_case_page(self):
+        self.login("amara.iyer")
+        c = self.K["KYC-2026-3011"]                                     # reserved by Amara at intake
+        page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
+        self.assertIn('id="ai-agent"', page)
+        self.assertIn("Run AI agent", page)
+        with mock.patch.object(ai_agent.llm, "call", Stub(perfect_read(c))), mock.patch.object(fcc.ai_review, "configured", lambda: True):
+            r = self.c.post(f"/kyc/{c['id']}/ai-agent", follow_redirects=True)
+        self.assertEqual(c["status"], "Verified", r.data.decode("utf-8")[:300])
+        self.assertTrue(all(w.get("to") for w in c.get("work", [])), c.get("work"))      # Amara's turn closed
+        page = r.data.decode("utf-8")
+        self.assertIn('id="ai-agent-decision"', page)
+        self.assertIn("Handled by AI", page)
+        self.assertIn("Every check passed", page)
+        # the list filter finds it; Jon cannot run the agent on Amara's reserved case
+        self.assertIn(c["id"], self.c.get("/kyc/list?agent=verified").data.decode("utf-8"))
+        self.login("jon.miranda")
+        other = self.K["KYC-2026-3012"]
+        with mock.patch.object(fcc.ai_review, "configured", lambda: True):
+            r = self.c.post(f"/kyc/{other['id']}/ai-agent", follow_redirects=True)
+        self.assertIn("Reserved by", r.data.decode("utf-8"))
+        self.assertFalse(other.get("ai_agent"))
+
+    def test_the_worker_works_the_queue_and_stops(self):
+        chosen = [c["id"] for c in fcc.KYC_CASES if ai_agent.eligible(c)][:3]
+        original = ai_agent.eligible
+        only = lambda c: c["id"] in chosen and original(c)                  # noqa: E731
+        answers = [perfect_read(self.K[i]) for i in chosen]                  # the worker takes them in book order
+
+        def call(system, content, schema, max_tokens=3000):
+            return answers.pop(0), {"input": 10, "output": 5}, 1.0
+        with mock.patch.object(ai_agent, "eligible", only), mock.patch.object(ai_agent.llm, "call", call):
+            fcc.AI_AGENT.update(running=True, threads=[], busy=set())
+            fcc._agent_worker()
+        self.assertFalse(fcc.AI_AGENT["running"])
+        self.assertEqual(fcc.AI_AGENT["stopped"], "Queue finished")
+        self.assertTrue(all(self.K[i].get("ai_agent") for i in chosen))
+
+    def test_start_and_pause_are_for_the_team_lead(self):
+        self.login("amara.iyer")
+        r = self.c.post("/ai-agent/start", follow_redirects=True)
+        self.assertIn("That action needs QC access", r.data.decode("utf-8"))
+        self.assertFalse(fcc.AI_AGENT["running"])
+        self.login("leah.fernandez")
+        with mock.patch.object(fcc, "_agent_worker", lambda: None), mock.patch.object(fcc.ai_review, "configured", lambda: True):
+            self.c.post("/ai-agent/start")
+            self.assertTrue(fcc.AI_AGENT["running"])
+            page = self.c.get("/ai-screening").data.decode("utf-8")
+            self.assertIn('id="ai-agent-card"', page)
+            self.assertIn("Running", page)
+            self.c.post("/ai-agent/pause")
+        self.assertFalse(fcc.AI_AGENT["running"])
+        self.assertIn("Paused by Leah Fernandez", self.c.get("/ai-screening").data.decode("utf-8"))
 
 
 if __name__ == "__main__":

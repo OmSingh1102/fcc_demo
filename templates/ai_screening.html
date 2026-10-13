@@ -14,6 +14,54 @@
     {% endfor %}
 </div>
 
+{# ── The AI Agent: Claude reads the documents, fixed checks decide ── #}
+{% set ai = vm.agent %}
+<div class="card mt-12 pad-0" id="ai-agent-card">
+    <div class="card-head" style="padding-bottom:10px">
+        <div><div class="card-title">AI Agent — Data Confirming without an analyst</div>
+            <div class="card-sub">{{ ai.model }} reads each ID and proof of address; fixed checks compare the read with the CRM. All pass: it confirms the data and a case the rules cleared verifies itself. Anything unreadable, expired, missing or different goes to a person with the reason. TT Live individuals only; companies stay with people.</div></div>
+        <div class="row" style="gap:8px">
+            {% if ai.running %}<span class="badge blue" id="ai-agent-state">Running · {{ ai.busy }} reading now</span>
+            {% else %}<span class="badge slate" id="ai-agent-state">Paused{% if ai.stopped %} · {{ ai.stopped }}{% endif %}</span>{% endif %}
+            {% if can_edit and agent_ready %}
+            <form method="post" action="{{ url_for('ai_agent_pause' if ai.running else 'ai_agent_start') }}" style="margin:0">
+                <button type="submit" class="btn {{ 'btn-outline' if ai.running else 'btn-primary' }} btn-sm">{{ 'Pause' if ai.running else 'Start AI Agent' }}</button>
+            </form>
+            {% elif not agent_ready %}<span class="small muted">Needs LLM_FOUNDRY_KEY</span>
+            {% else %}<span class="small muted">Start / Pause: team lead</span>{% endif %}
+        </div>
+    </div>
+    <div class="kpi-strip" style="padding:0 16px 12px">
+        <div class="kpi"><div class="l">Waiting for the agent</div><div class="v">{{ ai.queue }}</div><div class="hint">unreserved, in Data Confirming</div></div>
+        <div class="kpi tone-success"><div class="l">Handled by AI</div><div class="v">{{ ai.verified }}</div><div class="hint">verified with no analyst</div></div>
+        <div class="kpi tone-info"><div class="l">Confirmed, alert left</div><div class="v">{{ ai.screening }}</div><div class="hint">in Data Screening for an analyst</div></div>
+        <div class="kpi {% if ai.human %}tone-warning{% endif %}"><div class="l">Sent to a person</div><div class="v">{{ ai.human }}</div><div class="hint">a check failed</div></div>
+        <div class="kpi"><div class="l">Model calls</div><div class="v">{{ ai.calls }}</div><div class="hint">{{ ai.avg_seconds }} s each · {{ '{:,}'.format(ai.tokens) }} tokens</div></div>
+    </div>
+    {% if ai.done %}
+    <table class="tbl dense">
+        <tbody>
+        {% if ai.why %}<tr><td class="strong nowrap" style="width:260px">Why cases went to a person</td>
+            <td>{% for check, n in ai.why %}<span class="badge amber">{{ check }}: {{ n }}</span> {% endfor %}</td></tr>{% endif %}
+        {% if ai.has_file %}<tr><td class="strong nowrap">Handled by AI, against the file</td>
+            <td>{% if ai.verified %}<span class="badge {{ 'emerald' if not ai.file_tp else 'rose' }}">{{ ai.file_fp }} of {{ ai.verified }} recorded as false positives</span>
+                <span class="badge {{ 'emerald' if not ai.file_tp else 'rose' }}">true matches verified: {{ ai.file_tp }}</span>{% if ai.file_other %} <span class="badge slate">{{ ai.file_other }} escalated or pending in the file</span>{% endif %}
+                {% else %}<span class="muted">none yet</span>{% endif %}</td></tr>{% endif %}
+        </tbody>
+    </table>
+    <table class="tbl dense">
+        <thead><tr><th>Case</th><th>Customer</th><th>Agent decision</th><th>Reason</th><th>At</th></tr></thead>
+        <tbody>
+        {% for r in ai.recent %}
+        <tr><td><a class="link mono" href="{{ url_for('kyc_detail', case_id=r.id) }}">{{ r.id }}</a></td><td>{{ r.name }}</td>
+            <td><span class="badge {{ {'verified': 'emerald', 'screening': 'blue', 'human': 'amber'}[r.decision] }}">{{ agent_labels[r.decision] }}</span></td>
+            <td class="small">{{ r.reason or '—' }}</td><td class="small muted nowrap">{{ r.at }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+
 {% if vm.against %}{% set ag = vm.against %}
 <div class="card mt-12 pad-0" id="against-file">
     <div class="card-head" style="padding-bottom:10px"><div class="card-title">Against the reconciliation log</div><div class="card-sub">what the file's analysts recorded for the same {{ ag.cases }} cases — the rules never read it</div></div>

@@ -71,4 +71,6 @@
         <select class="input" id="f-qcresult" name="qcresult"><option value="">Select</option>{% for x in filters.qc_results %}{{ opt(x, q.qcresult) }}{% endfor %}</select></div>
     <div class="f"><label for="f-workflow">Review workflow</label>
         <select class="input" id="f-workflow" name="workflow"><option value="">Select</option>{% for k, label in vocab.REVIEW_WORKFLOWS.items() %}{{ opt(k, q.workflow, label) }}{% endfor %}</select></div>
+    <div class="f"><label for="f-agent">AI Agent</label>
+        <select class="input" id="f-agent" name="agent"><option value="">Select</option>{% for k, label in vocab.AI_AGENT_FILTER.items() %}{{ opt(k, q.agent, label) }}{% endfor %}</select></div>
 </div>

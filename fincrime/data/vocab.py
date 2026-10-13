@@ -130,6 +130,8 @@ SYSTEM_USER = "System User"
 # address, fixed checks decide, and it confirms the data in place of an L1
 # analyst when every check passes. It signs its own rows.
 AI_AGENT = "AI Agent"
+AI_AGENT_FILTER = {"verified": "Handled by AI", "screening": "Confirmed by AI, alert left", "human": "Sent to a person",
+                   "not_run": "Not read yet"}
 # Every KYC case carries one of these once it has been screened (SOP: current
 # automation; the client's two workflows, 2026-09-24).
 REVIEW_WORKFLOWS = {"auto-verified": "Auto-verified", "human-in-the-loop": "Human-in-the-loop"}

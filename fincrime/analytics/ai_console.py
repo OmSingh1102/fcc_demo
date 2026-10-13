@@ -19,7 +19,7 @@ OUTCOME_TONE = (("FP", "emerald"), ("TP", "rose"), ("Escalated", "amber"), ("Pen
 class AiScreeningConsole:
 
     @staticmethod
-    def compute(cases, alert_cases, wc_cases, tenant, settings):
+    def compute(cases, alert_cases, wc_cases, tenant, settings, agent=None):
         tenant_cases = [c for c in cases if c["tenant"] == tenant]
         ids = {c["id"] for c in tenant_cases}
         by_id = {c["id"]: c for c in tenant_cases}
@@ -86,4 +86,38 @@ class AiScreeningConsole:
             "tiles": tiles, "hit": len(hit), "feed": feed[:10],
             "history": list(reversed(settings.get("history", [])))[:10],
             "against": against,
+            "agent": agent_card(tenant_cases, agent or {}),
         }
+
+
+def agent_card(tenant_cases, runtime):
+    """The AI Agent card: its queue, what it decided, why it handed cases to a
+    person, its model calls, and its verified cases set against the file."""
+    from fincrime.engines import ai_agent
+    queue = [c for c in tenant_cases if ai_agent.eligible(c) and not c.get("ai_agent")]
+    done = [c for c in tenant_cases if c.get("ai_agent")]
+    decided = Counter(c["ai_agent"]["decision"] for c in done)
+    why = Counter()
+    for c in done:
+        rec = c["ai_agent"]
+        if rec["decision"] != "human":
+            continue
+        failed = [x["check"] for x in rec.get("checks", []) if not x["ok"]]
+        for check in failed or (["Model call failed"] if rec.get("error") else ["Other"]):
+            why[check] += 1
+    secs = [c["ai_agent"]["seconds"] for c in done if c["ai_agent"].get("seconds") and not c["ai_agent"].get("error")]
+    tokens = sum((c["ai_agent"].get("usage") or {}).get("input", 0) + (c["ai_agent"].get("usage") or {}).get("output", 0)
+                 for c in done)
+    verified = [c for c in done if c["ai_agent"]["decision"] == "verified"]
+    file_split = Counter(c["recon"]["outcome"] for c in verified if c.get("recon"))
+    recent = sorted(done, key=lambda c: c["ai_agent"].get("at", ""), reverse=True)[:8]
+    return {"running": bool(runtime.get("running")), "busy": len(runtime.get("busy") or ()),
+            "started_by": runtime.get("started_by", ""), "started_at": runtime.get("started_at", ""),
+            "stopped": runtime.get("stopped", ""), "workers": runtime.get("workers", 0), "model": ai_agent.MODEL,
+            "queue": len(queue), "done": len(done), "verified": decided.get("verified", 0),
+            "screening": decided.get("screening", 0), "human": decided.get("human", 0),
+            "why": why.most_common(), "calls": len(secs), "avg_seconds": round(sum(secs) / len(secs), 1) if secs else 0.0,
+            "tokens": tokens, "file_fp": file_split.get("FP", 0), "file_tp": file_split.get("TP", 0),
+            "file_other": sum(n for k, n in file_split.items() if k not in ("FP", "TP")), "has_file": bool(file_split) or any(c.get("recon") for c in tenant_cases),
+            "recent": [{"id": c["id"], "name": c["client"]["legal_name"], "decision": c["ai_agent"]["decision"],
+                        "reason": "; ".join(c["ai_agent"].get("reasons", [])[:2]), "at": c["ai_agent"].get("at", "")} for c in recent]}
