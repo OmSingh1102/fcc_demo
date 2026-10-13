@@ -124,7 +124,7 @@
                         <tbody>{% for u in a.ubos %}<tr><td class="strong">{{ u.name }}</td><td>{{ u.pct }}%</td><td>{{ u.nationality }}</td></tr>{% endfor %}</tbody>
                     </table>
                     <form method="post" action="{{ url_for('kyc_recalculate_risk', case_id=case.id) }}" style="margin:0">
-                        <button type="submit" class="btn btn-outline btn-sm" {% if closed %}disabled{% endif %} title="SOP 4.2.2: recalculate the risk rating before approving a seller">{{ icon('refresh-cw') }} Recalculate Risk Rating</button>
+                        <button type="submit" class="btn btn-outline btn-sm" {% if closed %}disabled{% endif %} title="SOP 4.2.2: recalculate the risk rating before approving a business">{{ icon('refresh-cw') }} Recalculate Risk Rating</button>
                     </form>
                 </div>
                 {% endif %}

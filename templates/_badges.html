@@ -17,7 +17,7 @@
 {%- endmacro %}
 
 {% macro tag_chip(tag) -%}
-{%- set tone = 'purple' if tag.startswith('Gifter') else ('blue' if tag.startswith('Creator') else '') -%}
+{%- set tone = 'purple' if tag in ('Tier 1', 'Tier 2') else ('blue' if tag.startswith('Tier') else '') -%}
 <span class="tag {{ tone }}">{{ tag }}</span>
 {%- endmacro %}
 

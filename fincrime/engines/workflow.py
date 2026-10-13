@@ -14,15 +14,15 @@ the segregation check still knows who touched a case at L1 after it has been
 returned and picked up by somebody else.
 
 The AI screening rules (engines/ai_screening) run again at the re-screen
-after Data Confirming. A TT Live case they leave nothing on is auto-verified
-here without an analyst step; a seller always keeps its human close.
+after Data Confirming. An individual's case they leave nothing on is auto-verified
+here without an analyst step; a business always keeps its human close.
 
 Ownership changes also keep the work log (engines/worklog) and, on every
 tier hand-off, ask the router (engines/routing) for the next analyst at
 once — SOP 5.2.3, no bot lag.
 
     Submitted → IDVerification → DataConfirming ──OK──▶ DataScreening ──review: FP / no match──▶ Verified
-                                      │  │                     │                (TT Shop: Checker 2 signs off first)
+                                      │  │                     │                (business: Checker 2 signs off first)
                                       │  └─Resubmit─▶ ResubmitID / ResubmitPOA
                                       └────Escalate─▶ DataEscalatingL2 ◀──review: TP / potential match──┘
                                                               └─ L2/EDD: Approve → Verified | Reject → Rejected | Escalate to EDD
@@ -203,7 +203,7 @@ CONFIRM_FIELDS_KYB = (("name", "legal_name", "Legal name", "text"), ("id_number"
 
 def confirm_fields(case):
     """(form field, client key, label, input type) × 3 — a person confirms
-    name / birthday / nationality; a seller confirms name / registration /
+    name / birthday / nationality; a business confirms name / registration /
     country of incorporation."""
     return CONFIRM_FIELDS_KYB if case.get("agency") else CONFIRM_FIELDS
 
@@ -258,7 +258,7 @@ def data_confirm(case, actor, form, alert_case=None, wc=None):
     confirmed), the POA checks confirmed when a POA is required, optional
     summary and attachment. Moves the case to Data Screening, re-runs the
     name screen on the confirmed data and lets the AI screening rules act on
-    it; a TT Live case with nothing left for an analyst verifies itself."""
+    it; an individual's case with nothing left for an analyst verifies itself."""
     _require(case["status"] == "DataConfirming", "Data confirming is only available while the case is in Data Confirming.")
     _require_reserved(case, actor)
     values = {}
@@ -333,7 +333,7 @@ def confirm_data(case, actor, values, summary="", attachment="", alert_case=None
 
 
 def _auto_verify_allowed(case):
-    """Creators verify themselves when the rules leave nothing; sellers never
+    """Individuals verify themselves when the rules leave nothing; businesses never
     do (SOP 4.2: Checker 1 recalculates the risk, Checker 2 signs off)."""
     return case["tenant"] == "ttlive"
 
@@ -459,7 +459,7 @@ def edd_review(case, actor, decision, summary, attachment, alert_case=None, leve
     analyst working the screening queue) — it is where the close is recorded."""
     _require(case["status"] == "DataScreening", "The screening review is only available while the case is in Data Screening.")
     _require(case.get("pending_reason") != "Pending Checker 2",
-             "This seller is waiting for Checker 2 — the second reviewer signs it off from the L2 queue.")
+             "This business is waiting for Checker 2 — the second reviewer signs it off from the L2 queue.")
     _require_reserved(case, actor)
     summary = _require_text(summary, "A summary")
     hit = case["screening"]["hit"]
@@ -495,12 +495,12 @@ def edd_review(case, actor, decision, summary, attachment, alert_case=None, leve
 
 
 def _close(case, actor, status, now, decision, summary, attachment="", level="L1"):
-    """Close the case — or, for a TT Shop seller being approved, park it for
-    Checker 2 (SOP 4.2: a second reviewer signs off every seller approval,
+    """Close the case — or, for a business being approved, park it for
+    Checker 2 (SOP 4.2: a second reviewer signs off every business approval,
     after the risk rating has been recalculated)."""
     checker2_gate = status == "Verified" and case["tenant"] == "ttshop" and not case.get("checker2")
     if checker2_gate:
-        _require(case.get("risk_recalculated_at"), "Recalculate the risk rating before approving a seller (SOP 4.2.2 §5.1.1).")
+        _require(case.get("risk_recalculated_at"), "Recalculate the risk rating before approving a business (SOP 4.2.2 §5.1.1).")
     if attachment:
         case["attachments"].append({"name": attachment, "at": now, "by": actor, "ref": "edd_review"})
     _decision(case, "Data Screening", decision=decision, operated_at=now, by=actor,
@@ -523,7 +523,7 @@ def _close(case, actor, status, now, decision, summary, attachment="", level="L1
 
 
 def checker2_signoff(case, actor, decision, comment):
-    """TT Shop Checker 2: a different analyst approves, returns, or escalates
+    """Business Checker 2: a different analyst approves, returns, or escalates
     what Checker 1 approved."""
     _require(case["status"] == "DataScreening" and case.get("pending_reason") == "Pending Checker 2",
              "This case is not waiting for Checker 2.")
@@ -605,11 +605,11 @@ def l2_decision(case, actor, level, decision, comment, levels=None):
     _audit(case, actor, f"{level} decision: {decision}", comment)
 
 
-# ── TT Shop: Checker 1 ───────────────────────────────────────────────────────
+# ── Businesses: Checker 1 ──────────────────────────────────────────────────────
 
 def recalculate_risk(case, actor):
-    """SOP 4.2.2: recalculate the seller's risk rating before approving."""
-    _require(case["tenant"] == "ttshop", "Risk rating recalculation applies to TT Shop sellers.")
+    """SOP 4.2.2: recalculate the business's risk rating before approving."""
+    _require(case["tenant"] == "ttshop", "Risk rating recalculation applies to businesses.")
     score = 0
     reasons = []
     agency = case.get("agency") or {}

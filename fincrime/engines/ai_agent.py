@@ -13,7 +13,7 @@ and hands the case to a person whenever it cannot be sure.
    cannot be reached: the case stays in Data Confirming, labelled
    human-in-the-loop, with the reasons and what the agent read.
 
-It only takes TT Live individuals whose screening the rules already
+It only takes individuals whose screening the rules already
 cleared (the auto-verified workflow); a company (KYB) and every case with an
 alert left stay with people. The result sits on the case as case["ai_agent"].
 """
@@ -63,7 +63,7 @@ SCHEMA = {"type": "object", "additionalProperties": False, "properties": {"id": 
 # ── which case, which images ─────────────────────────────────────────────────
 
 def eligible(case):
-    """A TT Live individual in Data Confirming whose screening the rules
+    """An individual (not a business) in Data Confirming whose screening the rules
     cleared (auto-verified): the agent confirms it so it verifies itself.
     Everything else is an analyst's from the start."""
     return (case["tenant"] == "ttlive" and case["status"] == "DataConfirming" and not case.get("agency")

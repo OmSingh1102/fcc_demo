@@ -92,6 +92,33 @@ class FlowTestCase(unittest.TestCase):
         self.assertEqual(self.c.get("/kyc/list").status_code, 200)
         self.assertEqual(self.c.get("/state/version").get_json()["v"], fcc.STATE_VERSION)
 
+    def test_screens_are_client_neutral(self):
+        """No name from the source tool on the console's screens, for either
+        tenant; stored records with the old names are relabelled on load."""
+        old = ("TikTok", "TT Live", "TT Shop", "Gifter", "Creator G", "US-TTP", "Utility Hub", "Live Standard KYC")
+        pages = ["/", "/login"]
+        self.login("mario.kim")
+        m = self.K["mercer"]
+        pages += ["/kyc/list", f"/kyc/detail/{m['id']}", f"/name_screening/case/{m['screening']['alert_case_id']}",
+                  "/name_screening/queue", "/trackers", "/ai-screening", "/analytics", "/work", "/queue/l2"]
+        for tenant in ("ttlive", "ttshop"):
+            self.c.post("/tenant", data={"tenant": tenant, "next": "/kyc/list"})
+            for path in pages:
+                r = self.c.get(path)
+                if path in ("/", "/login") and r.status_code == 302:         # signed in: sent on to the console
+                    continue
+                self.assertEqual(r.status_code, 200, path)
+                body = r.data.decode("utf-8")
+                for word in old:
+                    self.assertNotIn(word, body, f"{word!r} on {path} ({tenant})")
+        self.assertIn("Individuals", self.c.get("/kyc/list").data.decode("utf-8"))
+        stored = {"tags": ["Gifter G6", "Agency"], "source": "Live Standard KYC", "note": "Agency",
+                  "screening": {"wc_group": "TTLIVE_KYC_name_screening_prod"}, "role_label": "L1 · TT Live, TT Shop"}
+        self.assertEqual(fcc.relabel([stored]), 5)
+        self.assertEqual(stored, {"tags": ["Tier 1", "Introducer"], "source": "Standard KYC", "note": "Agency",
+                                  "screening": {"wc_group": "RETAIL_KYC_name_screening_prod"},
+                                  "role_label": "L1 · Individuals, Businesses"})
+
     def test_golden_path(self):
         self.login("amara.iyer")
         m = self.K["mercer"]
@@ -420,7 +447,7 @@ class FlowTestCase(unittest.TestCase):
                       nationality=c["nationality"], nationality_ok="1", poa_ok="1", summary="Registry checked.")
         self.assertEqual(f["status"], "DataScreening", flash_text(r))
         self.assertEqual(f["screening"]["workflow"], "auto-verified")
-        self.assertIn("approve the seller", flash_text(r))
+        self.assertIn("approve the business", flash_text(r))
         self.post(f"/kyc/{f['id']}/recalculate_risk")
         r = self.post(f"/kyc/{f['id']}/edd_review", decision="No match - Approve", summary="Clean seller.")
         self.assertEqual(f["pending_reason"], "Pending Checker 2", flash_text(r))
@@ -578,7 +605,7 @@ class FlowTestCase(unittest.TestCase):
         self.assertEqual(why(), "Reserve the case first (top right)")
         self.post(f"/kyc/{s['id']}/reserve")
         self.assertEqual(why(), "ENABLED")
-        self.confirm(s)                                    # no hit, TT Live: auto-verifies
+        self.confirm(s)                                    # no hit, an individual: auto-verifies
         self.assertEqual(s["status"], "Verified")
         self.assertEqual(why(), "Case is closed")
 
@@ -749,7 +776,7 @@ class FlowTestCase(unittest.TestCase):
 
     def test_persistence_and_reset(self):
         self.login("amara.iyer")
-        s = self.K["solis"]                                                # TT Live, no hit
+        s = self.K["solis"]                                                # an individual, no hit
         r = self.confirm(s)
         # No match on any list: the case verifies itself once the data is confirmed.
         self.assertEqual(s["status"], "Verified", flash_text(r))
@@ -784,7 +811,7 @@ class FlowTestCase(unittest.TestCase):
         best, why, _ = fcc.routing.pick(v)
         self.assertIsNone(best)
         self.assertIn("capacity", why)
-        # A seller needs the KYB skill; Amara (no KYB, no TT Shop) is never eligible.
+        # A business needs the KYB skill; Amara (no KYB, no Businesses tenant) is never eligible.
         ok, reason = fcc.routing.eligible(amara, self.K["vanguard"])
         self.assertFalse(ok)
 
@@ -883,7 +910,7 @@ class FlowTestCase(unittest.TestCase):
         self.assertIn(self.K["mensah"]["investigation_file"]["name"], page)
         self.c.post("/tenant", data={"tenant": "ttshop", "next": "/kyc/list"})
         page = self.c.get("/trackers?view=edd").data.decode("utf-8")
-        self.assertIn("TT Shop Escalation Tracker", page)
+        self.assertIn("Business Escalation Tracker", page)
         self.assertIn(self.K["oceanic"]["investigation_file"]["name"], page)
 
     def test_investigation_file_zip(self):

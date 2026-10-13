@@ -2,8 +2,8 @@
 "replaces ... external Google Sheets trackers with ... centralized tracking").
 
 Four sheets appear in the SOP: the Productivity / Time Tracker every step
-tells the analyst to fill in, the TikTok Live Fraud Tracker (4.1.3 §2.1.1),
-the TikTok Live EDD Tracker (4.1.3 §6.1) and the TikTok Shop Escalation
+tells the analyst to fill in, the Fraud Tracker (4.1.3 §2.1.1),
+the EDD Tracker (4.1.3 §6.1) and the Business Escalation
 Tracker (4.2.2 §2.1.1 / §6.1). Their columns are reproduced verbatim; every
 value is computed, so no analyst ever types into them again. CSV keeps the
 spreadsheet-shaped export for anyone downstream who still wants one.
@@ -65,7 +65,7 @@ class TrackerConsole:
                         c["id"], c["client_id"], c["client"]["legal_name"], display_name(w["analyst"]), vocab.LEVEL_LABELS.get(w["level"], w["level"]),
                         w["from"], w.get("to") or "open", f"{worklog.hours(w, now):.1f}", w.get("outcome") or "in progress", c["status"]]})
         elif view == "fraud":
-            title = f"{tenant_label} — Fraud Tracker" if not ttshop else "TT Shop Escalation — fraud cases"
+            title = f"{tenant_label} — Fraud Tracker" if not ttshop else "Business Escalation — fraud cases"
             sub = "SOP 4.1.3 §2.1.1: every Fraud ID escalation, with its typology"
             columns = ["Client ID (UID)", "Case ID", "Client Name", "WC ID", "L1 Investigator", "Submission date", "L1 Outcome", "Fraud Typology", "Status"]
             rows = [{"case_id": c["id"], "sort": c["created_at"], "cells": [
@@ -73,12 +73,12 @@ class TrackerConsole:
                         _l1_outcome(c), c.get("fraud_typology") or "-", c["status"]]}
                     for c in scoped if c.get("fraud_typology")]
         elif ttshop:
-            title, sub = "TT Shop Escalation Tracker", "SOP 4.2.2 §2.1.1 and §6.1: escalated sellers, their investigators and PIC"
+            title, sub = "Business Escalation Tracker", "SOP 4.2.2 §2.1.1 and §6.1: escalated businesses, their investigators and PIC"
             columns = ["Client ID (UID)", "Case ID", "Client Name", "WC ID", "Customer Type", "KYB Investigator", "KYB Creation Date",
                        "Fraud Typology", "Additional Links (Skopenow)", "L1 Outcome", "Pending Reason", "PIC", "Investigation File"]
             rows = [{"case_id": c["id"], "sort": c.get("escalated_at") or c["created_at"], "file": bool(c.get("investigation_file")), "cells": [
                         c["client_id"], c["id"], c["client"]["legal_name"], _wc_id(c, wc_by_kyc),
-                        "Seller (KYB)" if c.get("agency") else "Individual seller", _l1(c), c["created_at"],
+                        "Business (KYB)" if c.get("agency") else "Sole trader", _l1(c), c["created_at"],
                         c.get("fraud_typology") or "-", "Skopenow report" if c.get("skopenow") else "-", _l1_outcome(c),
                         c.get("pending_reason") or "-", _pic(c), (c.get("investigation_file") or {}).get("name", "-")]}
                     for c in scoped if c.get("escalated_at")]
@@ -92,7 +92,7 @@ class TrackerConsole:
                         (c.get("investigation_file") or {}).get("name", "-"), _pic(c), c["status"], c.get("pending_reason") or "-"]}
                     for c in scoped if c.get("escalated_at")]
         rows.sort(key=lambda r: r["sort"], reverse=True)
-        views = [(k, ("TT Shop Escalation Tracker" if (k == "edd" and ttshop) else label)) for k, label in VIEWS]
+        views = [(k, ("Business Escalation Tracker" if (k == "edd" and ttshop) else label)) for k, label in VIEWS]
         return {"view": view, "views": views, "title": title, "subtitle": sub, "columns": columns, "rows": rows,
                 "file_col": columns.index("Investigation File") if "Investigation File" in columns else -1}
 

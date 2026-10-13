@@ -89,7 +89,7 @@ class UploadTestCase(unittest.TestCase):
                          ["auto-verified", "auto-verified", "auto-verified", "human-in-the-loop", "human-in-the-loop"])
         self.assertEqual(new[4]["tenant"], "ttshop")
         self.assertEqual(self.started, ["upload"])
-        for c in new[:4]:                                                       # the TT Live list, filtered to the upload
+        for c in new[:4]:                                                       # the Individuals list, filtered to the upload
             self.assertIn(c["id"], r.data.decode("utf-8"))
         page = self.c.get(f"/kyc/detail/{new[0]['id']}").data.decode("utf-8")
         self.assertNotIn('id="recorded-outcome"', page)                         # a new case has no recorded outcome

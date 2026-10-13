@@ -153,7 +153,7 @@ def _level_for(status, pending_reason):
 
 def kyc_case(*, key, name, nationality, dob, tenant="ttlive", status="DataConfirming",
              id_type="Passport", issuing="", native_name="", gender="M", us_person=False,
-             tags=("Creator G3",), poa_required=False, source=None,
+             tags=("Tier 3",), poa_required=False, source=None,
              manual_review_reason=("Namescreen hit - WC or CMS",), created_hours_ago=20.0,
              vendor="shufti_pro_ios_webview", vendor_result="Approved", vendor_reason="",
              docs=None, address="", country="", phone="", email="",
@@ -622,7 +622,7 @@ def filler_cases(seed="filler"):
     screening or watchlist case. Four of the open ones are already routed, so
     My Work and the pipeline have something to show at boot; the rest of the
     Data Confirming ones are left for the presenter to pull. None sits in
-    Data Screening: a TT Live case with no hit auto-verifies the moment its
+    Data Screening: an individual with no hit auto-verifies the moment its
     data is confirmed (ai_screening), so that stage never holds one."""
     rng = random.Random(seed)
     out = []
@@ -653,7 +653,7 @@ def filler_cases(seed="filler"):
         out.append(case)
     for i, (name, nat, id_type, dob, gender) in enumerate(_INTAKE):
         out.append(kyc_case(key=f"{seed}-intake-{i}", name=name, nationality=nat, dob=dob, id_type=id_type, gender=gender,
-                            tags=["Creator G3"], status="IDVerification", manual_review_reason=["Manual referral"],
+                            tags=["Tier 3"], status="IDVerification", manual_review_reason=["Manual referral"],
                             created_hours_ago=0.2 + i * 0.4, vendor=rng.choice(vocab.VENDORS)))
     for i, (company, country, rep) in enumerate(_FILLER_SELLERS):
         status = ["Verified", "Verified", "DataScreening", "DataConfirming", "Verified", "Rejected", "Verified", "DataScreening"][i]
@@ -661,7 +661,7 @@ def filler_cases(seed="filler"):
         l1 = [rng.choice([JON, MARIO])]
         case = kyc_case(
             key=f"{seed}-shop-{i}", name=company, nationality=country, dob="", tenant="ttshop", status=status,
-            id_type="TradeLicense", gender="", tags=["Agency"] if i % 3 == 0 else ["Priority Review"],
+            id_type="TradeLicense", gender="", tags=["Introducer"] if i % 3 == 0 else ["Priority Review"],
             poa_required=True, manual_review_reason=["Manual referral"], created_hours_ago=hours,
             vendor="shufti_pro_android_webview", l1=l1 if status != "DataConfirming" else [],
             previous_reviewer=l1[0] if status != "DataConfirming" else "",

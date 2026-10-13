@@ -15,7 +15,7 @@ requirement of 2026-09-24):
     auto-verified        no match on any list, or every alert cleared by the
                          rules. The screening case closes itself, an export
                          is recorded as evidence, and (workflow.auto_verify)
-                         a TT Live case completes with no analyst step.
+                         an individual's case completes with no analyst step.
     human-in-the-loop    at least one alert the rules could not clear. The
                          analyst handles only what is left.
 

@@ -1,7 +1,7 @@
 """View-model for the L2 / EDD queue: escalated cases the signed-in analyst
 is allowed to see, with the segregation rule applied and the hidden ones
-counted so the page can say why. TT Shop sellers waiting for Checker 2 sit
-in the same queue (SOP 4.2: the second reviewer on a seller approval)."""
+counted so the page can say why. Businesses waiting for Checker 2 sit
+in the same queue (SOP 4.2: the second reviewer on a business approval)."""
 from fincrime.engines import segregation, sla
 
 

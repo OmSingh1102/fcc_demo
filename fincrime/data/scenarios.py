@@ -17,7 +17,7 @@ def build():
     # 1 ── Daniel Mercer: the golden path ───────────────────────────────────
     mercer = kyc_case(
         key="mercer", name="Daniel Mercer", nationality="US", dob="1988-02-11", id_type="DrivingLicense",
-        issuing="US", us_person=True, tags=["Gifter G6", "Creator G3"], poa_required=True,
+        issuing="US", us_person=True, tags=["Tier 1", "Tier 3"], poa_required=True,
         manual_review_reason=["Namescreen hit - WC or CMS"], created_hours_ago=20, vendor="jumio_ios_webview",
         docs=std_docs("driving_licence", poa=True), address="1842 Maple Ridge Drive, Columbus, OH 43215",
         country="United States", screening_hit=True,
@@ -64,7 +64,7 @@ def build():
     # 2 ── Farah Rahman: one PEP match, resolved as a false positive ────────
     rahman = kyc_case(
         key="rahman", name="Farah Rahman", nationality="SG", dob="1996-12-09", id_type="NationalID", gender="F",
-        tags=["Creator G3"], created_hours_ago=14, status="DataScreening", confirmed_hours_after=0.9,
+        tags=["Tier 3"], created_hours_ago=14, status="DataScreening", confirmed_hours_after=0.9,
         l1=[JON], previous_reviewer=JON, routed_to=JON, screening_hit=True, address="12 Tanjong Pagar Road, Singapore 088444",
         country="Singapore",
     )
@@ -85,7 +85,7 @@ def build():
     # 3 ── Anatoly Sidorov: sanctioned-country passport, clean POA, OFAC hit ─
     sidorov = kyc_case(
         key="sidorov", name="Anatoly Petrovich Sidorov", native_name="Анатолий Петрович Сидоров",
-        nationality="RU", dob="1975-04-12", id_type="Passport", issuing="RU", tags=["Creator G2"], poa_required=True,
+        nationality="RU", dob="1975-04-12", id_type="Passport", issuing="RU", tags=["Tier 4"], poa_required=True,
         manual_review_reason=["POA Collected", "Namescreen hit - WC or CMS", "Namescreen hit - Sanction country"],
         created_hours_ago=9, docs=std_docs("passport", poa=True),
         address="45 Griva Digeni Avenue, Office 302, Nicosia 1080, Cyprus", country="Cyprus", poa_country="CY", screening_hit=True,
@@ -109,7 +109,7 @@ def build():
     # 4 ── Tara Nguyen: cropped ID → Resubmit ──────────────────────────────
     kyc.append(kyc_case(
         key="nguyen", name="Tara Nguyen", nationality="VN", dob="1995-07-14", id_type="NationalID", gender="F",
-        tags=["Creator G3"], manual_review_reason=["Vendor rejected"], created_hours_ago=6,
+        tags=["Tier 3"], manual_review_reason=["Vendor rejected"], created_hours_ago=6,
         vendor_result="Declined", vendor_reason="Document edges not visible.",
         docs=[doc("national_id", "front", "cropped"), doc("national_id", "back")],
         address="88 Nguyen Hue Boulevard, District 1, Ho Chi Minh City", country="Vietnam",
@@ -118,14 +118,14 @@ def build():
     # 5 ── Ariana Solis: happy path, nothing to resolve ────────────────────
     kyc.append(kyc_case(
         key="solis", name="Ariana Solis", nationality="MX", dob="1994-08-21", id_type="Passport", gender="F",
-        tags=["Gifter G4"], manual_review_reason=["Manual referral"], created_hours_ago=3,
+        tags=["Tier 2"], manual_review_reason=["Manual referral"], created_hours_ago=3,
         address="Av. Insurgentes Sur 1602, Ciudad de Mexico", country="Mexico",
     ))
 
     # 6 ── Ahmed Hassan: 212 matches on a common name ──────────────────────
     hassan = kyc_case(
         key="hassan", name="Ahmed Hassan", nationality="PK", dob="2005-07-26", id_type="NationalID",
-        tags=["Creator G2"], created_hours_ago=30, status="DataScreening", confirmed_hours_after=1.0,
+        tags=["Tier 4"], created_hours_ago=30, status="DataScreening", confirmed_hours_after=1.0,
         l1=[MARIO], previous_reviewer=MARIO, routed_to=MARIO, screening_hit=True, address="Block 7, Clifton, Karachi", country="Pakistan",
     )
     hassan_matches = common_name_matches(first="Ahmed", surname="Hassan", client_year=2005, n=212, seed="hassan", keep_unresolved=3)
@@ -147,7 +147,7 @@ def build():
     # data nothing is left for an analyst and the case verifies on its own.
     taylor = kyc_case(
         key="taylor", name="Michael James Taylor", nationality="GB", dob="1991-08-15", id_type="Passport",
-        tags=["Gifter G6"], created_hours_ago=11, status="DataConfirming", routed_to=AMARA, screening_hit=True,
+        tags=["Tier 1"], created_hours_ago=11, status="DataConfirming", routed_to=AMARA, screening_hit=True,
         address="142 High Street, Kensington, London W8 7RG", country="United Kingdom",
     )
     taylor_matches = [wc_match(
@@ -169,7 +169,7 @@ def build():
     # 8 ── Carlos Eduardo Mendoza: confirmed PEP, waiting at L2 ────────────
     mendoza = kyc_case(
         key="mendoza", name="Carlos Eduardo Mendoza", nationality="BR", dob="1969-11-03", id_type="NationalID",
-        tags=["Creator G3", "Priority Review"], created_hours_ago=40, status="DataEscalatingL2", confirmed_hours_after=1.1,
+        tags=["Tier 3", "Priority Review"], created_hours_ago=40, status="DataEscalatingL2", confirmed_hours_after=1.1,
         escalated_hours_after=2.4, l1=[AMARA], previous_reviewer=AMARA, pending_reason="Pending L2", case_review_level="L2",
         screening_hit=True, address="Avenida Atlantica 2100, Apt 801, Copacabana, Rio de Janeiro", country="Brazil",
     )
@@ -196,7 +196,7 @@ def build():
     # 9 ── Tariq Al-Mansoor: law-enforcement hit, L2 to reject ─────────────
     almansoor = kyc_case(
         key="almansoor", name="Tariq Mahmoud Al-Mansoor", nationality="AE", dob="1981-10-18", id_type="NationalID",
-        tags=["Gifter G6"], created_hours_ago=26, status="DataEscalatingL2", confirmed_hours_after=0.8,
+        tags=["Tier 1"], created_hours_ago=26, status="DataEscalatingL2", confirmed_hours_after=0.8,
         escalated_hours_after=1.9, l1=[JON], previous_reviewer=JON, pending_reason="Pending L2", case_review_level="L2",
         screening_hit=True, address="Villa 88, Al Barsha 2, Dubai", country="United Arab Emirates",
         routed_to=NISHA, routed_hours_after=1.9,
@@ -223,7 +223,7 @@ def build():
     # 10 ── Sofia Petrova: US person, adverse media, Skopenow path ─────────
     petrova = kyc_case(
         key="petrova", name="Sofia Petrova", nationality="US", dob="1990-01-19", id_type="Passport", gender="F",
-        us_person=True, tags=["Creator G3"], created_hours_ago=16, status="DataScreening", confirmed_hours_after=0.6,
+        us_person=True, tags=["Tier 3"], created_hours_ago=16, status="DataScreening", confirmed_hours_after=0.6,
         l1=[AMARA], previous_reviewer=AMARA, routed_to=AMARA, screening_hit=True, address="410 Pine Street, Apt 5B, Seattle, WA 98101",
         country="United States",
     )
@@ -241,7 +241,7 @@ def build():
     # 11 ── Nadia Yusuf: low-score transliteration variant that IS the person
     yusuf = kyc_case(
         key="yusuf", name="Nadia Yusuf", nationality="AE", dob="1992-10-02", id_type="Passport", gender="F",
-        tags=["Creator G2"], created_hours_ago=8, status="DataScreening", confirmed_hours_after=0.5,
+        tags=["Tier 4"], created_hours_ago=8, status="DataScreening", confirmed_hours_after=0.5,
         l1=[JON], previous_reviewer=JON, routed_to=JON, screening_hit=True, address="Marina Walk, Tower 3, Dubai Marina", country="United Arab Emirates",
     )
     yusuf_matches = [wc_match(
@@ -259,7 +259,7 @@ def build():
     # 12 ── Milo Stein: 96% and same DOB, different person ─────────────────
     stein = kyc_case(
         key="stein", name="Milo Stein", nationality="DE", dob="1989-05-18", id_type="Passport",
-        tags=["Gifter G4"], created_hours_ago=5, status="DataScreening", confirmed_hours_after=0.4,
+        tags=["Tier 2"], created_hours_ago=5, status="DataScreening", confirmed_hours_after=0.4,
         l1=[MARIO], previous_reviewer=MARIO, routed_to=MARIO, screening_hit=True, address="Leopoldstrasse 27, 80802 Munich", country="Germany",
     )
     stein_matches = [wc_match(
@@ -275,7 +275,7 @@ def build():
     # 13 ── Closed history ─────────────────────────────────────────────────
     gomez = kyc_case(
         key="gomez", name="Jose Luis Rodriguez Gomez", nationality="ES", dob="1985-12-04", id_type="NationalID",
-        tags=["Creator G3"], created_hours_ago=76, status="Verified", confirmed_hours_after=1.3, closed_hours_after=2.6,
+        tags=["Tier 3"], created_hours_ago=76, status="Verified", confirmed_hours_after=1.3, closed_hours_after=2.6,
         l1=[AMARA], previous_reviewer=AMARA, screening_hit=True, address="Calle de Alcala 85, 4 Dcha, 28009 Madrid", country="Spain",
         qc={"reviewer": LEAH, "result": "Pass", "reason": "Decision correct and evidenced", "comment": "DOB gap documented, export attached, single-line rationale."},
     )
@@ -295,7 +295,7 @@ def build():
 
     alhassan = kyc_case(
         key="alhassan", name="Fatima Al-Hassan", nationality="JO", dob="1995-02-14", id_type="NationalID", gender="F",
-        tags=["Gifter G4"], created_hours_ago=52, status="Verified", confirmed_hours_after=0.9, closed_hours_after=1.8,
+        tags=["Tier 2"], created_hours_ago=52, status="Verified", confirmed_hours_after=0.9, closed_hours_after=1.8,
         l1=[JON], previous_reviewer=JON, screening_hit=True, address="Building 12, Rainbow Street, Amman 11118", country="Jordan",
         qc={"reviewer": LEAH, "result": "Pass", "reason": "Decision correct and evidenced", "comment": "Distinct person established; employer letter referenced."},
     )
@@ -315,7 +315,7 @@ def build():
 
     rostova = kyc_case(
         key="rostova", name="Elena Rostova", nationality="CH", dob="1988-03-30", id_type="ResidencePermit", gender="F",
-        tags=["Gifter G6", "Priority Review"], created_hours_ago=120, status="Verified", confirmed_hours_after=1.0,
+        tags=["Tier 1", "Priority Review"], created_hours_ago=120, status="Verified", confirmed_hours_after=1.0,
         escalated_hours_after=2.0, closed_hours_after=70.0, l1=[AMARA], l2=[NISHA], edd=[RYAN], previous_reviewer=RYAN,
         screening_hit=True, address="74 Quai de Cologny, 1223 Cologny, Geneva", country="Switzerland",
         docs=std_docs("residence_permit", poa=True), poa_required=True,
@@ -340,10 +340,10 @@ def build():
                                "at": dates.add_minutes(r_at, 6)})
     kyc.append(rostova); alerts.append(a); wc.append(w)
 
-    # 14 ── Vanguard Tech Supplies FZE: TT Shop Checker 1, export-control hit
+    # 14 ── Vanguard Tech Supplies FZE: business Checker 1, export-control hit
     vanguard = kyc_case(
         key="vanguard", name="Vanguard Tech Supplies FZE", nationality="AE", dob="", tenant="ttshop", status="DataScreening",
-        id_type="TradeLicense", gender="", tags=["Agency"], poa_required=True, manual_review_reason=["Namescreen hit - WC or CMS"],
+        id_type="TradeLicense", gender="", tags=["Introducer"], poa_required=True, manual_review_reason=["Namescreen hit - WC or CMS"],
         created_hours_ago=18, confirmed_hours_after=1.4, l1=[JON], previous_reviewer=JON, vendor="shufti_pro_android_webview",
         docs=[doc("trade_licence", "page 1"), doc("passport", "front"), doc("passport", "back"), doc("utility_bill", "page 1")],
         address="Building 4W, Office 508, Dubai Airport Free Zone, Dubai", country="United Arab Emirates", screening_hit=True,
@@ -390,7 +390,7 @@ def build():
     # 16 ── Oceanic Logistics & Energy: 52% owned by a sanctioned parent ───
     oceanic = kyc_case(
         key="oceanic", name="Oceanic Logistics & Energy Pte Ltd", nationality="SG", dob="", tenant="ttshop", status="DataEscalatingL2",
-        id_type="TradeLicense", gender="", tags=["Agency", "Priority Review"], poa_required=True, created_hours_ago=44,
+        id_type="TradeLicense", gender="", tags=["Introducer", "Priority Review"], poa_required=True, created_hours_ago=44,
         confirmed_hours_after=1.0, escalated_hours_after=2.8, l1=[JON], l2=[NISHA], previous_reviewer=NISHA, pending_reason="Pending EDD",
         case_review_level="L3", vendor="shufti_pro_android_webview", routed_to=RYAN, routed_hours_after=32.8,
         handoffs=[handoff("L1", "L2", dates.add_hours(dates.hours_ago(44), 2.8), NISHA, 4.2, "bot"),
@@ -423,7 +423,7 @@ def build():
     # 17 ── Beatriz Camargo: proof of address eight months old → Resubmit POA
     kyc.append(kyc_case(
         key="camargo", name="Beatriz Camargo", nationality="BR", dob="1997-03-09", id_type="Passport", gender="F",
-        tags=["Creator G3"], poa_required=True, manual_review_reason=["POA Collected"], created_hours_ago=4,
+        tags=["Tier 3"], poa_required=True, manual_review_reason=["POA Collected"], created_hours_ago=4,
         docs=std_docs("passport", poa=True, poa_issued_days_ago=245),
         address="Rua Oscar Freire 1200, Jardins, Sao Paulo 01426-001", country="Brazil",
     ))
@@ -431,7 +431,7 @@ def build():
     # 18 ── Dmitri Volkov: sanctioned-country passport AND a same-country POA → must escalate
     kyc.append(kyc_case(
         key="volkov", name="Dmitri Volkov", native_name="Дмитрий Волков", nationality="RU", dob="1983-06-21",
-        id_type="Passport", issuing="RU", tags=["Creator G2"], poa_required=True,
+        id_type="Passport", issuing="RU", tags=["Tier 4"], poa_required=True,
         manual_review_reason=["POA Collected", "High-risk country"], created_hours_ago=7,
         docs=std_docs("passport", poa=True, poa_country="RU"),
         address="Leninsky Prospekt 42, kv. 17, Moscow 119334", country="Russian Federation",
@@ -440,7 +440,7 @@ def build():
     # 19 ── Kwame Mensah: forged passport, escalated as Fraud ID, rejected at L2 (fraud tracker row)
     kyc.append(kyc_case(
         key="mensah", name="Kwame Mensah", nationality="GH", dob="1990-08-14", id_type="Passport", issuing="GH",
-        tags=["Gifter G4"], manual_review_reason=["Vendor rejected"], created_hours_ago=70, status="Rejected", confirmed=False,
+        tags=["Tier 2"], manual_review_reason=["Vendor rejected"], created_hours_ago=70, status="Rejected", confirmed=False,
         vendor_result="Declined", vendor_reason="Security-feature check failed: data-page font inconsistent with the specimen.",
         escalated_hours_after=1.5, closed_hours_after=9.0, l1=[JON], l2=[NISHA], previous_reviewer=NISHA,
         escalate_reason="Fraud ID / AI-generated document", fraud_typology="Forged or altered document",

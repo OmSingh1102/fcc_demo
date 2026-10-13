@@ -31,7 +31,7 @@
         <div class="desc cols-3">
             <div><span class="l">Case ID</span><span class="v mono">{{ alert.id }}</span></div>
             <div><span class="l">Assigned to</span><span class="v">{{ alert.assigned_to or '' }}</span></div>
-            <div><span class="l">Created Date</span><span class="v">{{ alert.created_at }} (UTC+07:00)</span></div>
+            <div><span class="l">Created Date</span><span class="v">{{ alert.created_at }} (UTC)</span></div>
             <div><span class="l">Status</span><span class="v">{{ outcome_badge(alert.status) }}</span></div>
             <div><span class="l">Is Test</span><span class="v">{{ alert.is_test }}</span></div>
             <div><span class="l">WC Group Name</span><span class="v">{{ alert.wc_group }}</span></div>
@@ -45,14 +45,14 @@
             <div><span class="l">PI Type</span><span class="v"></span></div>
             <div><span class="l">Data Source</span><span class="v"></span></div>
             <div><span class="l">File ID Link</span><span class="v"></span></div>
-            <div><span class="l">Latest Updated Date</span><span class="v">{{ alert.latest_updated }} (UTC+07:00)</span></div>
+            <div><span class="l">Latest Updated Date</span><span class="v">{{ alert.latest_updated }} (UTC)</span></div>
             <div><span class="l">Event</span><span class="v">{{ alert.event }}</span></div>
             <div><span class="l">KYC Triggered</span><span class="v">{{ alert.kyc_triggered }}</span></div>
             <div><span class="l">Customer Category</span><span class="v"></span></div>
             <div><span class="l">Customer Type</span><span class="v">{{ alert.screening_info.search_type }}</span></div>
             <div><span class="l">KYC Platform</span><span class="v"></span></div>
             <div><span class="l">Need Audit</span><span class="v">{{ alert.need_audit }}</span></div>
-            <div><span class="l">Last Screen Time</span><span class="v">{{ alert.last_screen_time }} (UTC+07:00)</span></div>
+            <div><span class="l">Last Screen Time</span><span class="v">{{ alert.last_screen_time }} (UTC)</span></div>
             <div><span class="l">KYC Triggered Date</span><span class="v"></span></div>
             <div><span class="l">KYC Case</span><span class="v"><a href="{{ url_for('kyc_detail', case_id=alert.kyc_case_id) }}" class="mono">{{ alert.kyc_case_id }}</a></span></div>
             <div><span class="l">Watchlist case</span><span class="v"><a href="{{ url_for('wc_case', wc_case_id=alert.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open in World-Check console<span class="ext-ic">{{ icon('external-link') }}</span></a></span></div>

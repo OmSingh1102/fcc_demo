@@ -93,24 +93,41 @@ ESCALATE_REASONS = [
     "Other",
 ]
 
-SOURCES = ["Live Standard KYC", "Live Agency KYC", "Shop Seller KYB", "Periodic Review"]
-TAGS = ["Gifter G6", "Gifter G4", "Creator G3", "Creator G2", "Agency", "Priority Review"]
+SOURCES = ["Standard KYC", "Introduced KYC", "Business KYB", "Periodic Review"]
+# Customer tiers (highest value first) and the introducer flag; "Tier" tags
+# take the purple chip, "Introducer" the blue one (templates/_badges.html).
+TAGS = ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Introducer", "Priority Review"]
 CASE_REVIEW_LEVELS = ["L1", "L2", "L3"]
 QC_RESULTS = ["", "Pass", "Fail"]
 ID_TYPES = ["Passport", "DrivingLicense", "NationalID", "ResidencePermit", "TradeLicense"]
 VENDORS = ["shufti_pro_ios_webview", "shufti_pro_android_webview", "jumio_ios_webview", "jumio_android_webview"]
 
+# Two onboarding lines. The keys are internal (they drive behaviour: an
+# individual auto-verifies, a business goes through Checker 2); only the
+# labels below reach the screen.
 TENANTS = {
     "ttlive": {
-        "key": "ttlive", "label": "TT Live", "business_line": "TikTok Live",
-        "wc_group": "TTLIVE_KYC_name_screening_prod", "event": "Onboarding KYC Live",
-        "cms_queue": "Sanction_CMS_Customer_KYC_Onboarding", "source": "Live Standard KYC",
+        "key": "ttlive", "label": "Individuals", "business_line": "Consumer Onboarding",
+        "wc_group": "RETAIL_KYC_name_screening_prod", "event": "Onboarding KYC Individual",
+        "cms_queue": "Sanction_CMS_Customer_KYC_Onboarding", "source": "Standard KYC",
     },
     "ttshop": {
-        "key": "ttshop", "label": "TT Shop", "business_line": "TikTok Shop",
-        "wc_group": "TTSHOP_KYB_name_screening_prod", "event": "Onboarding KYB Shop",
-        "cms_queue": "Sanction_CMS_Seller_KYB_Onboarding", "source": "Shop Seller KYB",
+        "key": "ttshop", "label": "Businesses", "business_line": "Business Onboarding",
+        "wc_group": "BUSINESS_KYB_name_screening_prod", "event": "Onboarding KYB Business",
+        "cms_queue": "Sanction_CMS_Business_KYB_Onboarding", "source": "Business KYB",
     },
+}
+
+# Display strings the console used before it went client-neutral, for
+# records already in a state store (loader.relabel maps them on load).
+RELABEL = {
+    "Live Standard KYC": "Standard KYC", "Live Agency KYC": "Introduced KYC", "Shop Seller KYB": "Business KYB",
+    "Gifter G6": "Tier 1", "Gifter G4": "Tier 2", "Creator G3": "Tier 3", "Creator G2": "Tier 4", "Agency": "Introducer",
+    "TikTok Live": "Consumer Onboarding", "TikTok Shop": "Business Onboarding",
+    "TTLIVE_KYC_name_screening_prod": "RETAIL_KYC_name_screening_prod",
+    "TTSHOP_KYB_name_screening_prod": "BUSINESS_KYB_name_screening_prod",
+    "Onboarding KYC Live": "Onboarding KYC Individual", "Onboarding KYB Shop": "Onboarding KYB Business",
+    "Sanction_CMS_Seller_KYB_Onboarding": "Sanction_CMS_Business_KYB_Onboarding",
 }
 
 # ── Name-screening case ──────────────────────────────────────────────────────
@@ -229,7 +246,7 @@ FRAUD_TYPOLOGIES = [
     "Not applicable (screening escalation)",
 ]
 
-# ── TT Shop Checker 2 (SOP 4.2: second reviewer on seller approvals) ─────────
+# ── Business Checker 2 (SOP 4.2: second reviewer on business approvals) ──────
 CHECKER2_DECISIONS = ["Approve", "Return to Checker 1", "Escalate to L2"]
 
 # ── QC sampling (SOP 2.1: QA / QC / Team Lead) ───────────────────────────────

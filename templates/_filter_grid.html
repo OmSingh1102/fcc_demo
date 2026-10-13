@@ -36,10 +36,10 @@
         <div class="range"><input class="input" type="date" id="f-sub-from" name="sub_from" value="{{ q.sub_from }}" title="Start"><span class="dash">-</span><input class="input" type="date" id="f-sub-to" name="sub_to" value="{{ q.sub_to }}" title="End"></div></div>
     <div class="f"><label for="f-vendor">Vendor</label>
         <select class="input" id="f-vendor" name="vendor"><option value="">Select</option>{% for v in filters.vendors %}{{ opt(v, q.vendor) }}{% endfor %}</select></div>
-    <div class="f"><label for="f-gifter">Gifter</label>
-        <select class="input" id="f-gifter" name="gifter"><option value="">Select</option>{{ opt('Gifter G6', q.gifter) }}{{ opt('Gifter G4', q.gifter) }}</select></div>
+    <div class="f"><label for="f-gifter">Customer tier</label>
+        <select class="input" id="f-gifter" name="gifter"><option value="">Select</option>{% for t in vocab.TAGS if t.startswith('Tier') %}{{ opt(t, q.gifter) }}{% endfor %}</select></div>
 
-    <div class="f"><label for="f-regional">Regional Gifter</label>
+    <div class="f"><label for="f-regional">Regional customer</label>
         <select class="input" id="f-regional" name="regional"><option value="">Select</option>{{ opt('Yes', q.regional) }}{{ opt('No', q.regional) }}</select></div>
     <div class="f"><label for="f-nat">Nationality</label>
         <select class="input" id="f-nat" name="nat"><option value="">Select</option>{% for n in filters.issuing %}{{ opt(n, q.nat) }}{% endfor %}</select></div>

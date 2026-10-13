@@ -42,7 +42,7 @@ def _row(c, analyst_email):
         "poa": "Yes" if c["poa_required"] else "No", "level": c["case_review_level"],
         "mrr": "; ".join(c["manual_review_reason"]), "qc_reviewer": _short(c["qc_reviewer"]),
         "qc_reason": c["qc_reason"], "qc_result": c["qc_result"],
-        "gifter": next((t for t in c["tags"] if t.startswith("Gifter")), ""),
+        "gifter": next((t for t in c["tags"] if t.startswith("Tier")), ""),
         "edd_rfi": "Yes" if c["pending_reason"] in ("Pending EDD", "RFI Sent") else "No",
         "mine": bool(analyst_email) and c["current_reviewer"] == analyst_email,
         "workflow": c["screening"].get("workflow", ""),
