@@ -126,6 +126,10 @@ REVIEW_MODES = ["Smart Review", "Manual Review"]
 # The actor the automation signs with: the AI screening rules on a match, the
 # screening case they close, the KYC case they auto-verify.
 SYSTEM_USER = "System User"
+# The AI Agent (engines/ai_agent): Claude reads the ID and the proof of
+# address, fixed checks decide, and it confirms the data in place of an L1
+# analyst when every check passes. It signs its own rows.
+AI_AGENT = "AI Agent"
 # Every KYC case carries one of these once it has been screened (SOP: current
 # automation; the client's two workflows, 2026-09-24).
 REVIEW_WORKFLOWS = {"auto-verified": "Auto-verified", "human-in-the-loop": "Human-in-the-loop"}

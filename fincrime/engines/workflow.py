@@ -261,11 +261,33 @@ def data_confirm(case, actor, form, alert_case=None, wc=None):
     it; a TT Live case with nothing left for an analyst verifies itself."""
     _require(case["status"] == "DataConfirming", "Data confirming is only available while the case is in Data Confirming.")
     _require_reserved(case, actor)
+    values = {}
+    for field, client_key, label, _type in confirm_fields(case):
+        _require(form.get(f"{field}_ok") == "1", f"Confirm {label} before pressing OK.")
+        values[field] = _require_text(form.get(field, ""), label)
+    if case.get("poa_required"):
+        _require_poa(case)
+        _require(form.get("poa_ok") == "1", "Confirm the proof of address checks before pressing OK.")
+    confirm_data(case, actor, values, (form.get("summary") or "").strip()[:200], (form.get("attachment_name") or "").strip(),
+                 alert_case, wc)
+
+
+def _require_poa(case):
+    failures = poa_failures(case)
+    _require(not failures, "The proof of address fails a check: "
+             + "; ".join(f"{f['label']} — {f['detail']}" for f in failures)
+             + ". Use Resubmit POA, or Escalate when the sanctioned-country rule applies.")
+
+
+def confirm_data(case, actor, values, summary="", attachment="", alert_case=None, wc=None):
+    """The part of Data Confirm an analyst and the AI Agent share: write the
+    confirmed values, move to Data Screening, re-screen, and auto-verify
+    when nothing is left. `values` maps each confirm field to its value."""
+    _require(case["status"] == "DataConfirming", "Data confirming is only available while the case is in Data Confirming.")
     now = dates.now_str()
     edited = []
     for field, client_key, label, _type in confirm_fields(case):
-        _require(form.get(f"{field}_ok") == "1", f"Confirm {label} before pressing OK.")
-        value = _require_text(form.get(field, ""), label)
+        value = _require_text(values.get(field, ""), label)
         if field == "dob":
             _require(dates.parse(value) is not None, "Birthday must be a date (YYYY-MM-DD).")
         before = case["client"].get(client_key, "")
@@ -276,14 +298,8 @@ def data_confirm(case, actor, form, alert_case=None, wc=None):
             edited.append(label)
         case["confirmations"][field] = {"value": value, "confirmed_by": actor, "at": now, "edited": changed}
     if case.get("poa_required"):
-        failures = poa_failures(case)
-        _require(not failures, "The proof of address fails a check: "
-                 + "; ".join(f"{f['label']} — {f['detail']}" for f in failures)
-                 + ". Use Resubmit POA, or Escalate when the sanctioned-country rule applies.")
-        _require(form.get("poa_ok") == "1", "Confirm the proof of address checks before pressing OK.")
+        _require_poa(case)
         case["confirmations"]["poa"] = {"value": "checked", "confirmed_by": actor, "at": now, "edited": False}
-    summary = (form.get("summary") or "").strip()[:200]
-    attachment = (form.get("attachment_name") or "").strip()
     if attachment:
         case["attachments"].append({"name": attachment, "at": now, "by": actor, "ref": "data_confirm"})
 
