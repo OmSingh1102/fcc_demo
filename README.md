@@ -33,6 +33,27 @@ Each case page ends with what the file's analyst recorded, for comparison.
 `CONSOLE_CASES=demo` brings back the nineteen scripted scenarios (the
 walkthrough further down, and what the test suite runs on).
 
+**The AI Agent** (`fincrime/engines/ai_agent.py`) does Data Confirming in
+place of an L1 analyst. Claude (`claude-opus-4-8` through Straive's LLM
+Foundry, `LLM_FOUNDRY_KEY`) reads the passport data page and the proof of
+address from their images, rendered to PNG with resvg. Fixed checks, not the
+model, compare that read with the case: readable, name (the hub's name
+rules: nicknames, word order, initials, a garbled CRM encoding), date of
+birth, nationality, ID number, expiry, the vendor's result, and the proof of
+address (readable, address, age, type, country). Every check passes: the
+agent confirms the data through the analysts' own path, the AI screening
+rules re-run, and a case they cleared verifies itself with nobody touching
+it; a case with an alert left goes to Data Screening. Anything blurred, cut
+off, expired, missing or different, a declined ID, or a model call that
+fails: the case stays with a person, labelled human-in-the-loop, with the
+reasons and what the agent read. A team lead starts and pauses it on the AI
+Screening page (it is paused at every boot, so a restart spends nothing),
+two cases at a time because the gateway refuses more concurrent calls; any
+L1, L2 or QC analyst can run it on one case from the case page. The whole
+file takes roughly an hour and about 930 model calls. Companies stay with
+people. Auto-verification also refuses an expired or vendor-declined ID now,
+whoever confirmed the data.
+
 Built the same way as the ChargeShield demo: one Flask `app.py`, Jinja
 templates, a single stylesheet, a SQLite state store, no JS framework.
 A second demo with its own look, the **Straive KYC Operations Hub**, lives
@@ -174,7 +195,11 @@ tile on the portal.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-122 tests: `tests/test_console_book.py` (the console on the reconciliation
+137 tests: `tests/test_ai_agent.py` (the AI Agent with the model call stood
+in for: the clean path to Verified, a held alert to Data Screening, every
+reason a case goes to a person, a gateway error, a rate-limit retry, the
+name rules, the case-page run, the worker, Start/Pause for the team lead),
+`tests/test_console_book.py` (the console on the reconciliation
 log: the book's shape, the rules at intake against what the file records,
 the documents, Data Confirm on cleared, held, garbled-name, old-POA and
 company cases, the paged lists, routing and search), `tests/test_hub.py`
@@ -247,12 +272,19 @@ and L2.
 6. **Mario**: **KYC-2026-3118** is a flat scan the vendor declined (Resubmit
    ID); **KYC-2026-3040**'s passport fails its MRZ check digit (escalate as a
    fraud ID); **KYC-2026-3043** lists a year of birth only and is held.
-7. *AI Screening* → *Against the reconciliation log*: 592 cleared by the
+7. *AI Agent*: on **KYC-2026-3011** press **Run AI agent** on the AI Agent
+   card. In about ten seconds Claude has read the passport and the CT07, every
+   check passes and the case is Verified with no analyst step. On
+   **KYC-2026-3119** (a blurred passport) it sends the case to a person with
+   the reasons. As **Leah** (team lead), *AI Screening* → **Start AI Agent**
+   works the rest of the queue; *Due Diligence* → filter *AI Agent* shows
+   what it handled and what it handed over.
+8. *AI Screening* → *Against the reconciliation log*: 592 cleared by the
    rules, 592 recorded as false positives; the 351 left for analysts hold
    every true match.
-8. **Nisha** → *Routing*: 935 unassigned, the 100 most urgent with the
+9. **Nisha** → *Routing*: 935 unassigned, the 100 most urgent with the
    router's pick; **Route selected now** fills the free slots and stops.
-9. **Reset demo** reloads the file book.
+10. **Reset demo** reloads the file book.
 
 The document images are drawn from the file's data (it carries none); the
 capture defects on about 9% of cases are planted, as in the hub, and the

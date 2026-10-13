@@ -41,7 +41,7 @@
     {% if ai.done %}
     <table class="tbl dense">
         <tbody>
-        {% if ai.why %}<tr><td class="strong nowrap" style="width:260px">Why cases went to a person</td>
+        {% if ai.why %}<tr><td class="strong nowrap" style="width:260px">Checks that failed<div class="tiny muted" style="font-weight:400">a case can fail several</div></td>
             <td>{% for check, n in ai.why %}<span class="badge amber">{{ check }}: {{ n }}</span> {% endfor %}</td></tr>{% endif %}
         {% if ai.has_file %}<tr><td class="strong nowrap">Handled by AI, against the file</td>
             <td>{% if ai.verified %}<span class="badge {{ 'emerald' if not ai.file_tp else 'rose' }}">{{ ai.file_fp }} of {{ ai.verified }} recorded as false positives</span>
