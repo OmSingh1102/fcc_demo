@@ -129,6 +129,17 @@ def name_verdict(crm, surname, given):
     return True, " ".join(s + g if surname_first else g + s)
 
 
+def _poa_address(read, country):
+    """The demo's proof-of-address images print the passport country after
+    every address, so an overseas one reads '..., CA 92683, USA, Vietnam'.
+    Drop that tail when the address before it names another country."""
+    name = vocab.COUNTRY_NAMES.get(country, "")
+    head, _, tail = read.rpartition(",")
+    if name and head and similarity.fold(tail) == similarity.fold(name)             and addresses.normalise(head, country)["country"] not in ("", country):
+        return head.strip()
+    return read
+
+
 def _check(out, check, crm, document, ok, note=""):
     out.append({"check": check, "crm": crm or "", "document": document or "", "ok": bool(ok), "note": note})
 
@@ -180,7 +191,7 @@ def checks(case, got, now=None):
                poa.get("readable"), "" if poa.get("readable") else "Proof of address could not be read")
         country = client.get("nationality", "")
         verdict = addresses.compare(addresses.normalise(client.get("address", ""), country),
-                                    addresses.normalise(poa.get("address", ""), country))
+                                    addresses.normalise(_poa_address(poa.get("address", ""), country), country))
         _check(out, "Address", client.get("address", ""), poa.get("address", ""), verdict == "same",
                "" if verdict == "same" else f"Address on the proof of address does not match the CRM ({verdict.replace('_', ' ')})")
         failures = workflow.poa_failures(case, now)
