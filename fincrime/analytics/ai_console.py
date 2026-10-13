@@ -65,7 +65,7 @@ class AiScreeningConsole:
         feed.sort(key=lambda r: r["at"], reverse=True)
 
         against = None
-        recon = [c for c in tenant_cases if c.get("recon")]
+        recon = [c for c in tenant_cases if c.get("recon") and not c["recon"].get("uploaded")]
         if recon:
             auto = [c for c in recon if c["screening"].get("workflow") == "auto-verified"]
             held = [c for c in recon if c["screening"].get("workflow") != "auto-verified"]
@@ -109,7 +109,7 @@ def agent_card(tenant_cases, runtime):
     tokens = sum((c["ai_agent"].get("usage") or {}).get("input", 0) + (c["ai_agent"].get("usage") or {}).get("output", 0)
                  for c in done)
     verified = [c for c in done if c["ai_agent"]["decision"] == "verified"]
-    file_split = Counter(c["recon"]["outcome"] for c in verified if c.get("recon"))
+    file_split = Counter(c["recon"]["outcome"] for c in verified if c.get("recon") and not c["recon"].get("uploaded"))
     recent = sorted(done, key=lambda c: c["ai_agent"].get("at", ""), reverse=True)[:8]
     return {"running": bool(runtime.get("running")), "busy": len(runtime.get("busy") or ()),
             "started_by": runtime.get("started_by", ""), "started_at": runtime.get("started_at", ""),

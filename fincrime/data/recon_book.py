@@ -18,11 +18,14 @@ handling time) rides along as case["recon"]. Nothing in the console's logic
 reads it: it is shown on the case page, and the AI Screening page measures
 the rules against it.
 """
+import csv
 import hashlib
+import io
 import re
 from datetime import date, timedelta
 
 from fincrime.data import vocab
+from fincrime.engines.errors import WorkflowError
 from fincrime.data.seed import AMARA, JON, MARIO, agency_info, kyc_case, pair_screening, wc_match
 from fincrime.hub import documents as hub_documents
 from fincrime.hub import loader as hub_loader
@@ -244,7 +247,8 @@ def _recorded(v):
 
 def case_records(v, routed_to=""):
     """(kyc, alert, wc) for one hub-shaped view."""
-    key = KEY_PREFIX + v["id"].rsplit("-", 1)[-1]
+    key = (UPLOAD_PREFIX + re.sub(r"[^a-z0-9]+", "-", v["id"].lower()).strip("-") if v.get("uploaded")
+           else KEY_PREFIX + v["id"].rsplit("-", 1)[-1])
     cust, s, pp = v["customer"], v["synth"], v["documents"]["passport"]
     nat = v["country"]
     received = dates.parse(s["received_at"]) or dates.BOOT
@@ -253,7 +257,8 @@ def case_records(v, routed_to=""):
     company = _company(v) if cust["corporate"] else None
     common = dict(
         key=key, case_id=v["id"], nationality=nat, issuing=nat, status="DataConfirming", us_person=nat == "US",
-        tags=["Priority Review"] if cust["risk"] == "High" else [], poa_required=True,
+        tags=(["Priority Review"] if cust["risk"] == "High" else []) + (["Uploaded"] if v.get("uploaded") else []),
+        poa_required=True,
         manual_review_reason=["Namescreen hit - WC or CMS"] + (["Vendor rejected"] if defect else []),
         created_hours_ago=hours, vendor=vocab.VENDORS[_h("recon-vendor", v["id"]) % len(vocab.VENDORS)],
         vendor_result="Declined" if defect else "Approved", vendor_reason=VENDOR_REASON.get(defect, ""),
@@ -278,7 +283,7 @@ def case_records(v, routed_to=""):
     mrz = pp["mrz"]
     kyc["vendor_check"]["extracted"].update(name=" ".join(mrz["primary_tokens"] + mrz["secondary"]), dob=cust["dob"],
                                             id_number=pp["number"], id_type="Passport", expiry=s["passport_expiry"])
-    kyc["recon"] = _recorded(v)
+    kyc["recon"] = dict(_recorded(v), uploaded=bool(v.get("uploaded")))
     alert, wc = pair_screening(kyc, key, [_match(v, key)])
     return kyc, alert, wc
 
@@ -296,3 +301,102 @@ def build():
         alerts.append(a)
         wcs.append(w)
     return kyc, alerts, wcs
+
+
+# ── cases uploaded in the console ────────────────────────────────────────────
+# A new onboarding case has no outcome yet, so an upload needs the log's
+# columns up to what the analyst decided; those history columns may be
+# absent or empty. The rows then go through the same path as the file's.
+UPLOAD_PREFIX = "upload-"
+HISTORY_COLUMNS = ("discrepancy_analysis_dob_address", "case_analyst", "review_date", "disposition_status",
+                   "compliance_action_regulatory_notes", "name_variance_type", "address_variance_type",
+                   "pain_point_detail", "normalisation_resolution_applied", "screening_impact",
+                   "match_score_after_normalisation", "analyst_handling_time_mins")
+UPLOAD_COLUMNS = tuple(k for k in hub_loader.REQUIRED if k not in HISTORY_COLUMNS)
+UPLOAD_MAX_ROWS = 500
+
+
+def read_upload(text):
+    """The rows of an uploaded CSV, keyed like the log's. Refuses a file
+    without the columns a case needs, or with more rows than one upload takes."""
+    reader = csv.DictReader(io.StringIO(text))
+    keys = {hub_loader.parse.header_key(h) for h in (reader.fieldnames or [])}
+    missing = [k for k in UPLOAD_COLUMNS if k not in keys]
+    if missing:
+        raise WorkflowError(f"The file lacks {len(missing)} column(s) a case needs: {', '.join(missing[:6])}"
+                            + (" …" if len(missing) > 6 else "") + ". Download the sample for the layout.")
+    rows = []
+    for raw in reader:
+        row = {hub_loader.parse.header_key(h): (v or "").strip() for h, v in raw.items() if h is not None}
+        if not any(row.values()):
+            continue
+        for k in hub_loader.REQUIRED:
+            row.setdefault(k, "")
+        rows.append(row)
+    if not rows:
+        raise WorkflowError("The file has no case rows.")
+    if len(rows) > UPLOAD_MAX_ROWS:
+        raise WorkflowError(f"One upload takes at most {UPLOAD_MAX_ROWS} cases; the file has {len(rows)}.")
+    return rows
+
+
+def add_rows(rows, start_seq):
+    """(kyc, alert, wc) triples for uploaded rows, screened at intake like the
+    file's; a row that cannot be built is returned as (row number, reason)."""
+    built, failed = [], []
+    for i, row in enumerate(rows):
+        try:
+            v = hub_documents.synthesise(hub_loader.build_case(row, start_seq + i))
+            v.pop("raw", None)
+            v["uploaded"] = True
+            VIEWS[v["id"]] = v
+            built.append(case_records(v))
+        except (KeyError, ValueError, TypeError, IndexError) as exc:
+            failed.append((i + 2, f"{type(exc).__name__}: {exc}"))          # +2: the header is line 1
+    return built, failed
+
+
+def sample_rows(first_number, taken=()):
+    """A sample upload: rows of the log under new ids with the history
+    columns blanked, chosen to show each path: two the AI Agent should verify
+    by itself, one whose CRM name carries another surname (it goes to an
+    analyst), an exact date-of-birth hit and a company (both the analysts'
+    from the start). Ids are numbered from `first_number`, skipping `taken`
+    and any id whose drawn capture defects would spoil the first three."""
+    from fincrime.engines import ai_agent                    # late: the engines import the seed
+    from fincrime.hub import addresses
+    rows = hub_loader.read_rows()
+    picks = []
+    for want in ("clean", "clean", "name", "exact", "company"):
+        for seq, row in enumerate(rows, start=1):
+            if row in picks:
+                continue
+            v = hub_loader.build_case(row, seq)
+            corp, exact = v["customer"]["corporate"], "Exact" in row["world_check_listed_dob"]
+            dob_conflict = v["wc"]["dob"].get("kind") == "full" and not exact and "transposed" not in row["world_check_listed_dob"]
+            viz = v["documents"]["passport"]["viz"]
+            same_name = ai_agent.name_verdict(v["customer"]["name"], viz["surname"], viz["given"])[0]
+            home = addresses.compare(addresses.normalise(v["customer"]["address"], v["country"]),
+                                     addresses.normalise(v["documents"]["poa"]["address"], v["country"])) == "same"
+            ok = {"clean": not corp and dob_conflict and same_name and home,
+                  "name": not corp and dob_conflict and not same_name and viz["surname"],
+                  "exact": not corp and exact, "company": corp}[want]
+            if ok:
+                picks.append(row)
+                break
+    out, n = [], first_number
+    for want, row in zip(("clean", "clean", "name", "exact", "company"), picks):
+        while True:
+            new_id = f"KYC-2026-{n}"
+            n += 1
+            if new_id in taken:
+                continue
+            s_ = hub_documents.synthesise(hub_loader.build_case(dict(row, kyc_case_id=new_id), 0))["synth"]
+            # capture defects are drawn per case id: the cases meant to reach the
+            # agent's decision get an id whose documents carry none
+            if want in ("exact", "company") or (s_["capture"] == "none" and not s_["tampered"] and s_["poa_age_days"] <= 183):
+                break
+        r = {k: ("" if k in HISTORY_COLUMNS else row[k]) for k in UPLOAD_COLUMNS + HISTORY_COLUMNS}
+        r["kyc_case_id"] = new_id
+        out.append(r)
+    return out

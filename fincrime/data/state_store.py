@@ -141,6 +141,26 @@ class StateStore:
         return applied
 
     @classmethod
+    def records(cls, kind: str) -> list:
+        """Every stored record of `kind`, for kinds the seed does not produce
+        (the console's uploaded case batches)."""
+        try:
+            with closing(cls._connect()) as conn, conn:
+                rows = conn.execute("SELECT data FROM record_state WHERE kind = ?", (kind,)).fetchall()
+        except sqlite3.Error as exc:
+            cls._warn(f"could not read stored {kind} records", exc)
+            return []
+        out = []
+        for (blob,) in rows:
+            try:
+                data = json.loads(blob)
+            except ValueError:
+                continue
+            if isinstance(data, dict):
+                out.append(data)
+        return out
+
+    @classmethod
     def count(cls) -> int:
         try:
             with closing(cls._connect()) as conn, conn:

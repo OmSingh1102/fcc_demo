@@ -220,7 +220,7 @@
             </div>
         </details>
 
-        {% if case.recon %}{% set rc = case.recon %}
+        {% if case.recon and not case.recon.uploaded %}{% set rc = case.recon %}
         {# What the reconciliation log says an analyst did with this case: shown
            for comparison, read by no workflow rule (fincrime/data/recon_book.py). #}
         <details class="section" open id="recorded-outcome">

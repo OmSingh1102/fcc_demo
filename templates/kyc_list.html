@@ -9,6 +9,7 @@
     <span class="tab chip" title="Not part of this demo">Recheck List</span>
     <span class="tab chip" title="Not part of this demo">Appeal List</span>
     <button type="button" class="filters-toggle" id="filters-toggle" onclick="toggleFilters()" aria-expanded="true" aria-controls="filters-grid" title="Hide the filters">{{ icon('chevron-up') }} Filters</button>
+    {% if can_upload %}<a class="btn btn-primary btn-sm" id="upload-cases" href="{{ url_for('kyc_upload') }}" style="margin-left:8px">{{ icon('upload') }} Upload cases</a>{% endif %}
 </div>
 
 {# One GET form: the filters, the sort and the page live in the URL and run

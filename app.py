@@ -13,6 +13,7 @@ QC, Routing) · Analytics · Demo affordances · Main.
 """
 import hmac
 import os
+import re
 import threading
 import time
 from functools import wraps
@@ -94,7 +95,7 @@ CASE_BOOK = book_from(os.environ.get("CONSOLE_CASES"))
 CASE_BOOK_LABEL = {"file": "reconciliation log (1,000 cases)", "demo": "scripted demo (19 scenarios + filler)"}
 # The records the console owns in the state store; a new seed stamp clears
 # only these, so the hub's stored work (kinds hub_*) survives a book switch.
-CONSOLE_KINDS = ("kyc", "alert", "wc", "analyst", "settings")
+CONSOLE_KINDS = ("kyc", "alert", "wc", "analyst", "settings", "upload")
 # Only advertise the password on the card while it is the built-in one.
 _SHOW_DEMO_HINT = "STRAIVE_DEMO_PASSWORD" not in os.environ
 
@@ -316,11 +317,29 @@ def _load_seed():
     if not stored and in_serving_process:
         StateStore.set_seed_version(stamp)
 
+    # cases uploaded in the console: rebuilt from their stored rows, oldest
+    # batch first, so the actions stored on them below have a case to land on
+    if CASE_BOOK == "file":
+        for batch in sorted(StateStore.records("upload"), key=lambda b: b.get("at", "")):
+            _add_uploaded([r for r in batch.get("rows", []) if r.get("kyc_case_id") not in KYC_BY_ID])
+
     restored = (StateStore.restore("kyc", KYC_BY_ID) + StateStore.restore("alert", ALERT_BY_ID)
                 + StateStore.restore("wc", WC_BY_ID) + StateStore.restore("analyst", ANALYST_BY_KEY)
                 + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS}))
     if restored:
         app.logger.info("Restored %d stored record(s) onto the seed.", restored)
+
+
+def _add_uploaded(rows):
+    """Uploaded rows → cases on the live lists, screened at intake. Returns
+    (built cases, [(line, reason)] for rows that could not be built)."""
+    built, failed = recon_book.add_rows(rows, len(KYC_CASES) + 1)
+    for kyc, alert, wc in built:
+        KYC_CASES.append(kyc)
+        ALERT_CASES.append(alert)
+        WC_CASES.append(wc)
+    _rebuild_indexes()
+    return [k for k, _, _ in built], failed
 
 
 def _save(kind: str, record: dict):
@@ -501,7 +520,7 @@ def kyc_list():
     vm = CaseListConsole.compute(KYC_CASES, _tenant(), _actor(), query=read_case_query(request.args))
     return render_template("kyc_list.html", rows=vm["rows"], total=vm["total"], shown=vm["shown"], filters=vm["filters"],
                            query=vm["query"], per_page=vm["per_page"], first=vm["first"], last=vm["last"],
-                           pages=_pager(vm["page"], vm["pages"]))
+                           pages=_pager(vm["page"], vm["pages"]), can_upload=CASE_BOOK == "file")
 
 
 def _linked(case):
@@ -1227,6 +1246,68 @@ def ai_agent_pause():
     AI_AGENT.update(running=False, stopped=f"Paused by {display_name(_actor())}")
     flash("AI Agent pausing: the cases it is reading now finish, then it stops.", "success")
     return redirect(url_for("ai_screening_page"))
+
+
+# ─── Upload cases: new onboarding rows in the reconciliation log's layout ────
+@app.route("/kyc/upload", methods=["GET", "POST"])
+@role_required("L1", "L2", "EDD", "QC")
+def kyc_upload():
+    if CASE_BOOK != "file":
+        flash("Uploading cases works on the reconciliation-log book (CONSOLE_CASES=file).", "error")
+        return redirect(url_for("kyc_list"))
+    if request.method == "GET":
+        batches = sorted(StateStore.records("upload"), key=lambda b: b.get("at", ""), reverse=True)
+        return render_template("kyc_upload.html", columns=recon_book.UPLOAD_COLUMNS, optional=recon_book.HISTORY_COLUMNS,
+                               max_rows=recon_book.UPLOAD_MAX_ROWS, batches=batches, agent_ready=ai_review.configured())
+    f = request.files.get("file")
+    if not f or not f.filename:
+        flash("Choose a CSV file to upload.", "error")
+        return redirect(url_for("kyc_upload"))
+    try:
+        text = f.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        flash("The file is not UTF-8 text; save it as CSV UTF-8 and try again.", "error")
+        return redirect(url_for("kyc_upload"))
+    ok, rows = _run_action(recon_book.read_upload, text)
+    if not ok:
+        return redirect(url_for("kyc_upload"))
+    seen, fresh, skipped = set(KYC_BY_ID), [], []
+    for i, r in enumerate(rows, start=2):
+        cid = r["kyc_case_id"]
+        if not cid:
+            skipped.append(f"line {i}: no case id")
+        elif cid in seen:
+            skipped.append(f"line {i}: {cid} already exists")
+        else:
+            seen.add(cid)
+            fresh.append(r)
+    cases, failed = _add_uploaded(fresh) if fresh else ([], [])
+    bad = {line for line, _ in failed}
+    skipped += [f"line {line}: {why}" for line, why in failed]
+    kept = [r for i, r in enumerate(fresh, start=2) if i not in bad] if failed else fresh
+    if cases:
+        now = dates.now_str()
+        _save("upload", {"id": f"upload-{now}-{len(StateStore.records('upload')) + 1}", "file": f.filename, "by": _actor(),
+                         "at": now, "rows": kept, "cases": [c["id"] for c in cases]})
+        auto = sum(1 for c in cases if c["screening"].get("workflow") == "auto-verified")
+        if auto and ai_review.configured():
+            _agent_start("upload")
+        flash(f"{len(cases)} case(s) added from {f.filename}: {auto} auto-verified"
+              + (" — the AI Agent is reading them now" if auto and ai_review.configured() else "")
+              + f", {len(cases) - auto} for analysts." + (f" Skipped {len(skipped)}: {'; '.join(skipped[:5])}" if skipped else ""),
+              "success")
+        return redirect(url_for("kyc_list", tags="Uploaded"))
+    flash("No case was added. " + "; ".join(skipped[:8]), "error")
+    return redirect(url_for("kyc_upload"))
+
+
+@app.route("/kyc/upload/sample.csv")
+def kyc_upload_sample():
+    nums = [int(m.group(1)) for c in KYC_CASES for m in [re.search(r"(\d+)$", c["id"])] if m]
+    start = max(nums, default=4010) + 1
+    rows = recon_book.sample_rows(start, taken=set(KYC_BY_ID))
+    columns = list(recon_book.UPLOAD_COLUMNS + recon_book.HISTORY_COLUMNS)
+    return _csv_response("new_cases_sample.csv", columns, [[r[c] for c in columns] for r in rows])
 
 
 @app.route("/routing/capacity", methods=["POST"])

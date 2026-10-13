@@ -54,6 +54,16 @@ read is stored, so a restart does not read a case twice. A team lead can
 pause and resume it on the AI Screening page. Auto-verification also refuses
 an expired or vendor-declined ID now, whoever confirmed the data.
 
+**Upload cases** (the button on the case list, `/kyc/upload`) adds new
+onboarding cases from a CSV in the reconciliation log's layout; the columns
+that record what an analyst decided may be left out. Each row goes through
+intake like the file's: the rules screen it, an auto-verified one is read by
+the AI Agent at once, the rest go to analysts. Existing case ids are
+skipped, up to 500 rows a file. *Download a sample* gives five new cases
+(two the agent should verify, a CRM name with another surname, an exact
+date-of-birth hit, a company). Uploads are stored and rebuilt on restart
+until Reset demo.
+
 Built the same way as the ChargeShield demo: one Flask `app.py`, Jinja
 templates, a single stylesheet, a SQLite state store, no JS framework.
 A second demo with its own look, the **Straive KYC Operations Hub**, lives
@@ -195,7 +205,9 @@ tile on the portal.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-137 tests: `tests/test_ai_agent.py` (the AI Agent with the model call stood
+141 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+agent started, duplicates and a wrong file refused, uploads surviving a
+restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, a gateway error, a rate-limit retry, the
 name rules, the worker on an auto-verified case, Pause/Resume for the team lead),
