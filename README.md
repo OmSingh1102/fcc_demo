@@ -54,6 +54,24 @@ read is stored, so a restart does not read a case twice. A team lead can
 pause and resume it on the AI Screening page. Auto-verification also refuses
 an expired or vendor-declined ID now, whoever confirmed the data.
 
+**Bad photos of the ID.** The planted capture defects copy what real
+uploads that needed a person looked like: a phone lying on the passport,
+a page shot at an angle with a phone over its corner, a cracked and worn
+card, a page cut off by a shot taken too close, a dark blurred shot. They
+are drawn as phone photos on a cloth (`fincrime/hub/documents.py`), and
+each hides at least a date or the number, so the fixed checks fail even if
+the model names nothing. The ID vendor passes the first three, as it did on
+the real uploads; only the AI Agent's look at the picture stops them. Claude
+names the problem (covered, angled, damaged, cut off, blurred, too dark) and
+says whether all four edges and the MRZ are in shot (a slight tilt alone
+stops nothing: good photos have one); the case goes to a
+person with a suggested Resubmit ID reason (for example *Please resubmit a
+clear, good quality valid proof of identity and ensure all information on
+the document is visible*), which the Resubmit dialog arrives filled in
+with. The analyst still decides and clicks OK. A stored case whose ID image
+was redrawn since it was read starts again from the file, so only those
+are read a second time.
+
 **Upload cases** (the button on the case list, `/kyc/upload`) adds new
 onboarding cases from a CSV in the reconciliation log's layout; the columns
 that record what an analyst decided may be left out. Each row goes through
@@ -213,12 +231,14 @@ tile on the portal.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-142 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+149 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
-reason a case goes to a person, a gateway error, a rate-limit retry, the
-name rules, the worker on an auto-verified case, Pause/Resume for the team lead),
+reason a case goes to a person, the bad ID photos and the suggested resubmit
+reason, the filled-in Resubmit dialog, a redrawn case read again, a gateway
+error, a rate-limit or dropped-connection retry, the name rules, the worker
+on an auto-verified case, Pause/Resume for the team lead),
 `tests/test_console_book.py` (the console on the reconciliation
 log: the book's shape, the rules at intake against what the file records,
 the documents, Data Confirm on cleared, held, garbled-name, old-POA and
@@ -294,8 +314,11 @@ and L2.
    fraud ID); **KYC-2026-3043** lists a year of birth only and is held.
 7. *AI Agent*: a few minutes after the server starts, **KYC-2026-3011** is
    Verified by itself; its page shows the AI Agent card with every check
-   passed. A blurred auto-verified passport such as **KYC-2026-3119** stays
-   in Data Confirming with the reasons. *AI Screening* shows the agent's
+   passed. A bad photo of the passport stays in Data Confirming with the
+   reasons and a suggested Resubmit ID reason: **KYC-2026-3088** has a phone
+   lying on it, **KYC-2026-3027** is cracked and worn, **KYC-2026-3832** is
+   shot at an angle, **KYC-2026-3217** is cut off, **KYC-2026-3198** is
+   blurred. *AI Screening* shows the agent's
    progress; *Due Diligence* → filter *AI Agent* shows what it handled.
 8. *AI Screening* → *Against the reconciliation log*: 592 cleared by the
    rules, 592 recorded as false positives; the 351 left for analysts hold
@@ -306,7 +329,8 @@ and L2.
 
 The document images are drawn from the file's data (it carries none); the
 capture defects on about 9% of cases are planted, as in the hub, and the
-case page says so.
+case page says so. They are synthetic drawings of the kinds of failure real
+uploads show; no real customer's document is in the repository.
 
 ## A demo script on the scripted book (`CONSOLE_CASES=demo`)
 
