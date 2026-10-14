@@ -20,7 +20,8 @@ TEXT_FILTERS = (("case_id", "id"), ("client_id", "client_id"), ("name", "name"),
 EXACT_FILTERS = (("reviewer", "current_reviewer"), ("prev", "previous_reviewer"), ("source", "source"),
                  ("vendor", "vendor"), ("gifter", "gifter"), ("nat", "nationality"), ("issuing", "issuing"),
                  ("poa", "poa"), ("level", "level"), ("pending", "pending_reason"), ("edd", "edd_rfi"),
-                 ("qcrev", "qc_reviewer"), ("qcresult", "qc_result"), ("workflow", "workflow"), ("agent", "agent"))
+                 ("qcrev", "qc_reviewer"), ("qcresult", "qc_result"), ("workflow", "workflow"), ("agent", "agent"),
+                 ("verdict", "verdict"))
 DATE_FILTERS = (("dob", "dob"), ("created", "created_at"), ("sub", "submitted_at"))
 INERT = ("regional", "change")          # on the grid, as on the real tool, but not part of this demo
 
@@ -47,6 +48,7 @@ def _row(c, analyst_email):
         "mine": bool(analyst_email) and c["current_reviewer"] == analyst_email,
         "workflow": c["screening"].get("workflow", ""),
         "agent": _agent(c),
+        "verdict": _verdict(c),
     }
 
 
@@ -59,6 +61,12 @@ def _agent(c):
             and c["screening"].get("workflow") == "auto-verified"):
         return "not_run"
     return ""
+
+
+def _verdict(c):
+    """Does Claude's own verdict agree with the rules' decision? "" before one."""
+    v = (c.get("ai_agent") or {}).get("verdict") or {}
+    return "" if "agrees" not in v else ("agree" if v["agrees"] else "disagree")
 
 
 def read_query(args):

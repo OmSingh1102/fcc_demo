@@ -12,12 +12,19 @@ and hands the case to a person whenever it cannot be sure.
    case they leave nothing on verifies itself. Any check fails, or Claude
    cannot be reached: the case stays in Data Confirming, labelled
    human-in-the-loop, with the reasons and what the agent read.
+4. Claude's own verdict, a second opinion beside the rules: a text-only call
+   gets the read, the customer's record and the bank's document policy, and
+   answers verify / send to a person with a confidence. It is shown and
+   counted (does it agree with the rules?) but never acts on the case. It is
+   a separate call so the record cannot leak into the read: a hidden date of
+   birth must stay unread, not be filled in from the CRM.
 
 It only takes individuals whose screening the rules already
 cleared (the auto-verified workflow); a company (KYB) and every case with an
 alert left stay with people. The result sits on the case as case["ai_agent"].
 """
 import base64
+import json
 import time
 
 from fincrime.data import vocab
@@ -75,6 +82,24 @@ _ID = dict(_DOC, properties=dict(_DOC["properties"],
 SCHEMA = {"type": "object", "additionalProperties": False, "properties": {"id": _ID, "poa": _DOC},
           "required": ["id", "poa"]}
 
+# Claude's own verdict: advisory, beside the rules' decision.
+VERDICT_SYSTEM = ("You are a senior KYC analyst at a bank giving a second opinion. You get a customer's record, the "
+                  "bank's document policy, the ID-verification vendor's result, and what an earlier reading step read "
+                  "from the customer's ID and proof of address. Decide whether you would verify this customer's identity "
+                  "and address from these documents (verify) or send the case to a person (send_to_person). Judge only "
+                  "what is given; a field that was not read was not legible. Give your confidence (0-100) that your "
+                  "decision is right and one short sentence why.")
+VERDICT_SCHEMA = {"type": "object", "additionalProperties": False, "properties": {
+    "decision": {"type": "string", "enum": ["verify", "send_to_person"]},
+    "confidence": {"type": "integer", "description": "0-100: how sure you are that your decision is right"},
+    "reason": {"type": "string", "description": "One short sentence"}},
+    "required": ["decision", "confidence", "reason"]}
+POLICY = ("The ID must be fully legible (all four edges and the MRZ in shot, nothing covering it, not blurred or "
+          "damaged), not expired, and its name, date of birth, nationality and number must match the record (a "
+          "spelling variant, a nickname, another word order or an added middle name is acceptable). The proof of "
+          "address must be legible, issued within the last 6 months, and show the customer's registered address.")
+VERDICT_LABELS = {"verify": "Verify", "send_to_person": "Send to a person"}
+
 # What an analyst asks the customer for when the ID itself is the problem
 # (vocab.RESUBMIT_ID_REASONS); the agent suggests it, the analyst decides.
 RESUBMIT_CROPPED = "Cropped"
@@ -114,14 +139,77 @@ def read(case, render, call=None, sleep=time.sleep):
                     _image(svg_to_png(render(case, poa[0])))]
     else:
         content.append({"type": "text", "text": "There is no proof of address: return `poa` unreadable with empty fields."})
+    return _ask(call, SYSTEM, content, SCHEMA, 3000, sleep)
+
+
+def _ask(call, system, content, schema, max_tokens, sleep):
+    """One model call; a busy gateway (429) or a dropped connection is worth
+    another try."""
     for attempt in range(RETRIES):
         try:
-            return call(SYSTEM, content, SCHEMA, max_tokens=3000)
+            return call(system, content, schema, max_tokens=max_tokens)
         except WorkflowError as exc:
-            # a busy gateway (429) or a dropped connection is worth another try
             if not any(m in str(exc) for m in (" 429", "Could not reach")) or attempt == RETRIES - 1:
                 raise
             sleep(RETRY_WAIT * (attempt + 1))
+
+
+# ── Claude's own verdict (advisory) ──────────────────────────────────────────
+
+def verdict_input(case, got, now=None):
+    """What the verdict call is told: today, the policy, the record, the
+    vendor's result and the read. Never the rules' checks or decision."""
+    now = now or dates.now()
+    client, vc = case["client"], case.get("vendor_check") or {}
+    poa = workflow.poa_docs(case)
+    record = {"legal_name": client["legal_name"], "date_of_birth": client["dob"], "nationality": client["nationality"],
+              "id_type": client.get("id_type", ""), "id_number": client.get("id_number", ""),
+              "registered_address": client.get("address", ""), "proof_of_address_required": bool(case.get("poa_required")),
+              "proof_of_address_document": poa[0]["name"] if poa else ""}
+    vendor = vc.get("result", "") + (f" ({vc['vendor_reason']})" if vc.get("vendor_reason") else "")
+    return (f"Today is {now:%Y-%m-%d}.\nPolicy: {POLICY}\nCustomer record: {json.dumps(record, ensure_ascii=False)}\n"
+            f"ID-verification vendor: {vendor or 'no result'}\n"
+            f"Read from the documents: {json.dumps(got, ensure_ascii=False)}")
+
+
+def opinion(case, got, call=None, sleep=time.sleep):
+    """Claude's verdict on a read: {decision, confidence, reason, ...} or
+    {error}. Touches nothing."""
+    started = time.monotonic()
+    out = {"at": dates.now_str(), "model": MODEL}
+    try:
+        ans, usage, seconds = _ask(call or llm.call, VERDICT_SYSTEM, [{"type": "text", "text": verdict_input(case, got)}],
+                                   VERDICT_SCHEMA, 2000, sleep)
+        decision = ans.get("decision") if isinstance(ans, dict) else None
+        if decision not in VERDICT_LABELS:
+            raise WorkflowError("The model's verdict was not verify or send_to_person.")
+        out.update(decision=decision, confidence=max(0, min(100, int(ans.get("confidence") or 0))),
+                   reason=str(ans.get("reason") or "")[:300], usage=usage, seconds=seconds)
+    except (WorkflowError, TypeError, ValueError) as exc:
+        out["error"] = str(exc)
+    out.setdefault("seconds", round(time.monotonic() - started, 1))
+    return out
+
+
+def rules_say(record):
+    """The rules' decision in the verdict's words: the documents passed every
+    check (verified, or confirmed with an alert left) or went to a person."""
+    return "verify" if record.get("decision") in ("verified", "screening") else "send_to_person"
+
+
+def attach_verdict(record, verdict):
+    """Put the verdict on the agent's record, with whether it agrees."""
+    if not verdict.get("error"):
+        verdict["agrees"] = verdict["decision"] == rules_say(record)
+    record["verdict"] = verdict
+    return verdict
+
+
+def needs_verdict(case):
+    """A case the agent read before verdicts existed: it gets one from its
+    stored read, with no new look at the images."""
+    rec = case.get("ai_agent") or {}
+    return bool(rec.get("read")) and not rec.get("error") and "verdict" not in rec
 
 
 # ── the checks ───────────────────────────────────────────────────────────────
@@ -279,6 +367,8 @@ def perceive(case, render, call=None, sleep=time.sleep):
     except WorkflowError as exc:
         out["error"] = str(exc)
     out["seconds"] = out["seconds"] or round(time.monotonic() - started, 1)
+    if not out["error"]:
+        out["verdict"] = opinion(case, out["read"], call=call, sleep=sleep)
     return out
 
 
@@ -307,6 +397,8 @@ def decide(case, alert_case, wc, perceived):
         workflow._audit(case, ACTOR, "Sent to a person", "; ".join(record["reasons"]))
     else:
         record["decision"] = "verified" if case["status"] == "Verified" else "screening"
+    if record.get("verdict"):
+        attach_verdict(record, record["verdict"])            # shown and counted; the rules above decided
     case["ai_agent"] = record
     return record
 

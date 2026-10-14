@@ -111,7 +111,19 @@ def agent_card(tenant_cases, runtime):
     verified = [c for c in done if c["ai_agent"]["decision"] == "verified"]
     file_split = Counter(c["recon"]["outcome"] for c in verified if c.get("recon") and not c["recon"].get("uploaded"))
     recent = sorted(done, key=lambda c: c["ai_agent"].get("at", ""), reverse=True)[:8]
-    return {"running": bool(runtime.get("running")), "busy": len(runtime.get("busy") or ()),
+    # Claude's own verdict beside the rules: how often the two agree, and where not
+    judged = [c["ai_agent"]["verdict"] | {"rules": ai_agent.rules_say(c["ai_agent"])} for c in done
+              if (c["ai_agent"].get("verdict") or {}).get("decision")]
+    agree = [v for v in judged if v["agrees"]]
+    differ = [v for v in judged if not v["agrees"]]
+    verdict = {"judged": len(judged), "agree": len(agree), "pct": round(100 * len(agree) / len(judged)) if judged else 0,
+               "verify_vs_person": sum(1 for v in differ if v["rules"] == "verify"),
+               "person_vs_verify": sum(1 for v in differ if v["rules"] == "send_to_person"),
+               "conf_agree": round(sum(v["confidence"] for v in agree) / len(agree)) if agree else 0,
+               "conf_differ": round(sum(v["confidence"] for v in differ) / len(differ)) if differ else 0,
+               "waiting": sum(1 for c in done if ai_agent.needs_verdict(c)),
+               "failed": sum(1 for c in done if (c["ai_agent"].get("verdict") or {}).get("error"))}
+    return {"verdict": verdict, "running": bool(runtime.get("running")), "busy": len(runtime.get("busy") or ()),
             "started_by": runtime.get("started_by", ""), "started_at": runtime.get("started_at", ""),
             "stopped": runtime.get("stopped", ""), "workers": runtime.get("workers", 0), "model": ai_agent.MODEL,
             "queue": len(queue), "done": len(done), "verified": decided.get("verified", 0),

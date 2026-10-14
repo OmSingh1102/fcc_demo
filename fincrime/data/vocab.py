@@ -152,6 +152,8 @@ SYSTEM_USER = "System User"
 AI_AGENT = "AI Agent"
 AI_AGENT_FILTER = {"verified": "Handled by AI", "screening": "Confirmed by AI, alert left", "human": "Sent to a person",
                    "not_run": "Not read yet"}
+# Claude's own verdict beside the rules' decision (advisory; engines/ai_agent).
+AI_VERDICT_FILTER = {"agree": "Agrees with the rules", "disagree": "Disagrees with the rules"}
 # Every KYC case carries one of these once it has been screened (SOP: current
 # automation; the client's two workflows, 2026-09-24).
 REVIEW_WORKFLOWS = {"auto-verified": "Auto-verified", "human-in-the-loop": "Human-in-the-loop"}

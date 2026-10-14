@@ -41,16 +41,22 @@ def perfect_read(case, **id_overrides):
     return {"id": idr, "poa": poa}
 
 
-class Stub:
-    """Stands in for llm.call: records what it was sent, answers `answer`."""
+VERIFY = {"decision": "verify", "confidence": 93, "reason": "Clear passport; every detail matches the record."}
 
-    def __init__(self, answer=None, error=None):
-        self.answer, self.error, self.sent = answer, error, []
+
+class Stub:
+    """Stands in for llm.call: records what it was sent, answers `answer` to
+    the read and `verdict` to the verdict call."""
+
+    def __init__(self, answer=None, error=None, verdict=None):
+        self.answer, self.error, self.verdict, self.sent = answer, error, verdict or VERIFY, []
 
     def __call__(self, system, content, schema, max_tokens=3000):
         self.sent.append(content)
         if self.error:
             raise self.error
+        if schema is ai_agent.VERDICT_SCHEMA:
+            return self.verdict, {"input": 900, "output": 60, "cached": 0}, 3.0
         return self.answer, {"input": 3000, "output": 200, "cached": 0}, 8.5
 
 
@@ -74,8 +80,8 @@ class AiAgentTestCase(unittest.TestCase):
         fcc._load_seed()
         self.K = fcc.KYC_BY_ID
 
-    def run_agent(self, case, answer=None, error=None, **id_overrides):
-        stub = Stub(answer or perfect_read(case, **id_overrides), error)
+    def run_agent(self, case, answer=None, error=None, verdict=None, **id_overrides):
+        stub = Stub(answer or perfect_read(case, **id_overrides), error, verdict)
         alert, wc = fcc._linked(case)
         return ai_agent.run_case(case, alert, wc, fcc._render_document, call=stub, sleep=lambda s: None), stub
 
@@ -147,6 +153,8 @@ class AiAgentTestCase(unittest.TestCase):
             calls = []
 
             def flaky(system, content, schema, max_tokens=3000):
+                if schema is ai_agent.VERDICT_SCHEMA:
+                    return VERIFY, {}, 1.0
                 calls.append(1)
                 if len(calls) == 1:
                     raise WorkflowError(failure)
@@ -197,6 +205,64 @@ class AiAgentTestCase(unittest.TestCase):
             rec, _ = self.run_agent(self.clean(), **overrides)
             self.assertEqual((rec["decision"], rec["resubmit"]), ("human", want), overrides)
             self.assertTrue(not want or want in ai_agent.vocab.RESUBMIT_ID_REASONS)
+
+    # ── Claude's own verdict, beside the rules ──────────────────────────────
+    def test_the_verdict_sits_beside_the_rules_and_decides_nothing(self):
+        c = self.clean()
+        rec, stub = self.run_agent(c)
+        self.assertEqual(rec["decision"], "verified")
+        self.assertEqual((rec["verdict"]["decision"], rec["verdict"]["confidence"], rec["verdict"]["agrees"]), ("verify", 93, True))
+        # the verdict call is text only and carries the read and the record, never the rules' result
+        sent = stub.sent[1]
+        self.assertEqual([b["type"] for b in sent], ["text"])
+        self.assertIn(c["client"]["legal_name"], sent[0]["text"])
+        self.assertIn('"readable": true', sent[0]["text"])
+        self.assertNotIn("verified", sent[0]["text"].replace("Approved", ""))
+        # the image read never sees the record: a hidden date of birth cannot be filled in from it
+        self.assertNotIn(c["client"]["dob"], " ".join(b.get("text", "") for b in stub.sent[0]))
+        # a verdict that differs is recorded as such and changes nothing
+        other = self.clean()
+        rec, _ = self.run_agent(other, verdict={"decision": "send_to_person", "confidence": 61, "reason": "Unsure."})
+        self.assertEqual((rec["decision"], other["status"]), ("verified", "Verified"))
+        self.assertFalse(rec["verdict"]["agrees"])
+        # a person-bound case where Claude would verify also disagrees
+        rec, _ = self.run_agent(self.clean(), dob="")
+        self.assertEqual(rec["decision"], "human")
+        self.assertFalse(rec["verdict"]["agrees"])
+
+    def test_a_failed_or_odd_verdict_changes_nothing(self):
+        c = self.clean()
+        rec, _ = self.run_agent(c, verdict={"decision": "maybe", "confidence": 50, "reason": ""})
+        self.assertEqual(rec["decision"], "verified")
+        self.assertIn("not verify or send_to_person", rec["verdict"]["error"])
+        self.assertNotIn("agrees", rec["verdict"])
+        rec, _ = self.run_agent(self.clean(), error=WorkflowError("The model gateway answered 500: busy"))
+        self.assertNotIn("verdict", rec)                                   # no read, nothing to judge
+
+    def test_earlier_reads_get_a_verdict_from_the_stored_read(self):
+        c = self.clean()
+        self.run_agent(c)
+        del c["ai_agent"]["verdict"]                                       # as read before verdicts existed
+        status = c["status"]
+        self.assertTrue(ai_agent.needs_verdict(c))
+        stub = Stub(verdict={"decision": "verify", "confidence": 88, "reason": "Fine."})
+        with mock.patch.object(ai_agent.llm, "call", stub), mock.patch.object(ai_agent, "eligible", lambda x: False):
+            fcc.AI_AGENT.update(running=True, threads=[], busy=set())
+            fcc._agent_worker()
+        self.assertEqual((c["ai_agent"]["verdict"]["confidence"], c["ai_agent"]["verdict"]["agrees"]), (88, True))
+        self.assertEqual(c["status"], status)
+        self.assertEqual([[b["type"] for b in sent] for sent in stub.sent], [["text"]])   # no images sent again
+        self.assertFalse(ai_agent.needs_verdict(c))
+        # the AI Screening page counts it, the case list filters on it
+        self.login("leah.fernandez")
+        page = self.c.get("/ai-screening").data.decode("utf-8")
+        self.assertIn('id="ai-verdict-row"', page)
+        self.assertIn("agrees with the rules on 1 of 1 (100%)", page)
+        self.login("amara.iyer")
+        self.assertIn('id="ai-verdict"', self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8"))
+        listing = self.c.get("/kyc/list?verdict=agree").data.decode("utf-8")
+        self.assertIn(f'data-case-id="{c["id"]}"', listing)
+        self.assertNotIn(f'data-case-id="{c["id"]}"', self.c.get("/kyc/list?verdict=disagree").data.decode("utf-8"))
 
     # ── the name rules ──────────────────────────────────────────────────────
     def test_name_rules(self):
@@ -277,6 +343,8 @@ class AiAgentTestCase(unittest.TestCase):
         answers = [perfect_read(self.K[i]) for i in chosen]                  # the worker takes them in book order
 
         def call(system, content, schema, max_tokens=3000):
+            if schema is ai_agent.VERDICT_SCHEMA:
+                return VERIFY, {"input": 10, "output": 5}, 1.0
             return answers.pop(0), {"input": 10, "output": 5}, 1.0
         with mock.patch.object(ai_agent, "eligible", only), mock.patch.object(ai_agent.llm, "call", call):
             fcc.AI_AGENT.update(running=True, threads=[], busy=set())

@@ -1175,16 +1175,16 @@ def ai_screening_rules():
 # stored on the case, so a restart does not read a case twice.
 AI_AGENT_WORKERS = 2          # the gateway refuses more concurrent connections
 AI_AGENT_LOCK = threading.Lock()
-AI_AGENT = {"running": False, "busy": set(), "threads": [], "done": 0, "errors": 0, "started_by": "", "started_at": "",
-            "stopped": "", "autostarted": False}
+AI_AGENT = {"running": False, "busy": set(), "threads": [], "done": 0, "errors": 0, "verdicts": 0, "started_by": "",
+            "started_at": "", "stopped": "", "autostarted": False}
 AGENT_LABELS = {"verified": "Handled by AI", "screening": "Confirmed by AI · alert left for an analyst",
                 "human": "Sent to a person"}
 
 
 def _agent_view(case, actor, levels):
     """What the case page shows: the agent's read and checks, once it has
-    worked the case."""
-    return {"show": bool(case.get("ai_agent")), "labels": AGENT_LABELS}
+    worked the case, and Claude's own verdict beside them."""
+    return {"show": bool(case.get("ai_agent")), "labels": AGENT_LABELS, "verdict_labels": ai_agent.VERDICT_LABELS}
 
 
 def _agent_finish(case, perceived):
@@ -1204,14 +1204,38 @@ def _agent_finish(case, perceived):
     return record
 
 
+def _agent_verdict(case):
+    """A case read before verdicts existed: Claude's verdict from the stored
+    read (one text call, no images), stored beside the decision."""
+    verdict = ai_agent.opinion(case, case["ai_agent"]["read"])
+    with AI_AGENT_LOCK:
+        if ai_agent.needs_verdict(case):
+            ai_agent.attach_verdict(case["ai_agent"], verdict)
+            AI_AGENT["verdicts"] = AI_AGENT.get("verdicts", 0) + 1
+            _save("kyc", case)
+
+
 def _agent_worker():
     while AI_AGENT["running"]:
+        backfill = False
         with AI_AGENT_LOCK:
             case = next((c for c in KYC_CASES if ai_agent.eligible(c) and not c.get("ai_agent")
                          and c["id"] not in AI_AGENT["busy"]), None)
+            if case is None:            # new cases first; then verdicts for earlier reads
+                case = next((c for c in KYC_CASES if ai_agent.needs_verdict(c) and c["id"] not in AI_AGENT["busy"]), None)
+                backfill = case is not None
             if case is None:
                 break
             AI_AGENT["busy"].add(case["id"])
+        if backfill:
+            try:
+                _agent_verdict(case)
+            except Exception:        # one bad case must not stop the queue
+                app.logger.exception("AI Agent verdict failed on %s", case["id"])
+                case["ai_agent"]["verdict"] = {"error": "internal error", "at": dates.now_str(), "model": ai_agent.MODEL}
+            finally:
+                AI_AGENT["busy"].discard(case["id"])
+            continue
         try:
             perceived = ai_agent.perceive(case, _render_document)
             with AI_AGENT_LOCK:

@@ -43,6 +43,13 @@
         <tbody>
         {% if ai.why %}<tr><td class="strong nowrap" style="width:260px">Checks that failed<div class="tiny muted" style="font-weight:400">a case can fail several</div></td>
             <td>{% for check, n in ai.why %}<span class="badge amber">{{ check }}: {{ n }}</span> {% endfor %}</td></tr>{% endif %}
+        {% set vd = ai.verdict %}{% if vd.judged or vd.waiting %}<tr id="ai-verdict-row"><td class="strong nowrap">Claude's own verdict<div class="tiny muted" style="font-weight:400">a second opinion; the rules decide</div></td>
+            <td>{% if vd.judged %}<span class="badge {{ 'emerald' if vd.pct >= 90 else 'amber' }}">agrees with the rules on {{ vd.agree }} of {{ vd.judged }} ({{ vd.pct }}%)</span>
+                {% if vd.verify_vs_person %}<a class="badge rose" href="{{ url_for('kyc_list', verdict='disagree', agent='verified') }}">rules verified, Claude would send to a person: {{ vd.verify_vs_person }}</a>{% endif %}
+                {% if vd.person_vs_verify %}<a class="badge amber" href="{{ url_for('kyc_list', verdict='disagree', agent='human') }}">rules sent to a person, Claude would verify: {{ vd.person_vs_verify }}</a>{% endif %}
+                <span class="small muted">average confidence {{ vd.conf_agree }}% when it agrees{% if vd.verify_vs_person or vd.person_vs_verify %}, {{ vd.conf_differ }}% when it does not{% endif %}</span>{% endif %}
+                {% if vd.waiting %}<span class="badge slate">{{ vd.waiting }} earlier read(s) waiting for a verdict</span>{% endif %}
+                {% if vd.failed %}<span class="badge slate">{{ vd.failed }} verdict call(s) failed</span>{% endif %}</td></tr>{% endif %}
         {% if ai.has_file %}<tr><td class="strong nowrap">Handled by AI, against the file</td>
             <td>{% if ai.verified %}<span class="badge {{ 'emerald' if not ai.file_tp else 'rose' }}">{{ ai.file_fp }} of {{ ai.verified }} recorded as false positives</span>
                 <span class="badge {{ 'emerald' if not ai.file_tp else 'rose' }}">true matches verified: {{ ai.file_tp }}</span>{% if ai.file_other %} <span class="badge slate">{{ ai.file_other }} escalated or pending in the file</span>{% endif %}

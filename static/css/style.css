@@ -587,7 +587,9 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 .tab-dot.rose { background: #e11d48; }
 .tab-panel[hidden] { display: none; }
 .tab-panel > .card:first-child { margin-top: 0; }
-.tab-panel > .card { overflow-x: auto; }                 /* a wide table scrolls in its card, not the page */
+.tab-panel > .card { overflow-x: auto; }
+.verdict-box { margin: 4px 0 8px; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: var(--radius-md); background: var(--primary-tint); }
+.verdict-box.differs { border-left-color: #e11d48; background: #fff5f6; }                 /* a wide table scrolls in its card, not the page */
 #ai-agent .tbl .badge { white-space: normal; text-align: left; }
 
 .fact-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }

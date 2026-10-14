@@ -183,6 +183,22 @@
         {% else %}
         <div class="note info small mb-8">Every check passed and the AI Agent confirmed the data; a World-Check alert is left, so the case went to Data Screening for an analyst.</div>
         {% endif %}
+        {% set v = ag.verdict %}{% if v %}
+        <div class="verdict-box {{ 'differs' if v.decision and not v.agrees }}" id="ai-verdict">
+            {% if v.decision %}
+            <div class="row" style="gap:8px;flex-wrap:wrap">
+                <b class="small">Claude's own verdict</b>
+                <span class="badge {{ 'emerald' if v.decision == 'verify' else 'amber' }}" id="ai-verdict-decision">{{ agent.verdict_labels[v.decision] }} · {{ v.confidence }}%</span>
+                {% if v.agrees %}<span class="badge slate">{{ icon('check') }} Agrees with the rules</span>
+                {% else %}<span class="badge rose">{{ icon('alert-triangle') }} Disagrees with the rules</span>{% endif %}
+            </div>
+            <div class="small" style="margin-top:4px">{{ v.reason }}</div>
+            <div class="tiny muted" style="margin-top:4px">A second opinion, for comparison: the checks below decided the case, not this verdict.</div>
+            {% else %}
+            <div class="small muted">Claude's own verdict could not be read: {{ v.error }}</div>
+            {% endif %}
+        </div>
+        {% endif %}
     </div>
     {% if ag.checks %}
     <table class="tbl dense">
