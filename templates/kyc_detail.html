@@ -1,38 +1,170 @@
 {% extends "base.html" %}
 {% from "_badges.html" import status_badge, outcome_badge, hit_mark %}
-{% from "_stepper.html" import stepper %}
 {% from "_modals.html" import modal_open, modal_close %}
 {% from "_viewer.html" import viewer_tools %}
 {% block title %}{{ case.client.legal_name }} - KYC Case{% endblock %}
 
 {% block content %}
+<div class="case-layout">
 {% include "_case_header.html" %}
 
-{# ── Verification Points ── #}
-<div class="card mt-12">
-    <div class="card-head"><div class="card-title">Verification Points</div></div>
-    <div class="card-body" style="padding-top:6px">{{ stepper(points) }}</div>
-</div>
+<section class="case-main">
+    <div class="tabs case-tabs" role="tablist" aria-label="Case sections">
+        <button type="button" class="tab active" role="tab" data-tab="overview" aria-selected="true">{{ icon('user') }} Overview</button>
+        <button type="button" class="tab" role="tab" data-tab="documents" aria-selected="false">{{ icon('image') }} Documents <span class="n">{{ case.documents|length }}</span></button>
+        <button type="button" class="tab" role="tab" data-tab="screening" aria-selected="false">{{ icon('shield') }} Screening{% if case.screening.hit %} <span class="tab-dot rose" title="Screening alert hit"></span>{% endif %}</button>
+        {% if agent.show %}<button type="button" class="tab" role="tab" data-tab="agent" aria-selected="false">{{ icon('activity') }} AI Agent{% if case.ai_agent.decision == 'human' %} <span class="tab-dot amber" title="Sent to a person"></span>{% endif %}</button>{% endif %}
+        <button type="button" class="tab" role="tab" data-tab="decisions" aria-selected="false">{{ icon('clipboard') }} Decisions</button>
+    </div>
 
-{# ── Information Verification: vendor ── #}
-<div class="card mt-12 pad-0">
-    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Information Verification</div></div>
-    <table class="tbl">
-        <thead><tr><th>Vendor Name</th><th>Result</th><th>Reason</th><th>Vendor Reason</th><th>Extracted Infos</th><th>Operation</th></tr></thead>
-        <tbody>
-        <tr>
-            <td>{{ case.vendor_check.vendor }}</td>
-            <td>{{ outcome_badge('Approved' if case.vendor_check.result == 'Approved' else 'Rejected') }}</td>
-            <td>{{ case.vendor_check.reason or '-' }}</td>
-            <td>{{ case.vendor_check.vendor_reason or '-' }}</td>
-            <td><button type="button" class="btn btn-outline btn-xs" onclick="openModal('vendor-modal')">Details</button></td>
-            <td><button type="button" class="btn btn-primary btn-xs" onclick="docPreview('{{ url_for('document_svg', case_id=case.id, doc_id=case.documents[0].id) }}', '{{ case.documents[0].name }}')">View</button></td>
-        </tr>
-        </tbody>
-    </table>
-</div>
+    {# ── Overview: who the customer is and what the ID vendor said ── #}
+    <div class="tab-panel" role="tabpanel" data-panel="overview">
+        <div class="fact-cards">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Identity</div></div>
+                <div class="card-body fact-list">
+                    <div><span class="l">Legal name</span><span class="v strong">{{ case.client.legal_name }}</span></div>
+                    {% if case.client.native_name %}<div><span class="l">Native script</span><span class="v strong">{{ case.client.native_name }}</span></div>{% endif %}
+                    <div><span class="l">Date of birth</span><span class="v strong">{{ case.client.dob or '-' }}</span></div>
+                    <div><span class="l">Nationality</span><span class="v strong">{{ case.client.nationality }}</span></div>
+                    <div><span class="l">ID type</span><span class="v">{{ case.client.id_type }}</span></div>
+                    <div><span class="l">ID number</span><span class="v strong mono">{{ case.client.id_number }}</span></div>
+                    <div><span class="l">Issuing place</span><span class="v">{{ case.client.id_issuing_place }}</span></div>
+                    <div><span class="l">US person</span><span class="v">{{ 'Yes' if case.client.us_person else 'No' }}</span></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Contact &amp; address</div></div>
+                <div class="card-body fact-list">
+                    <div><span class="l">Address</span><span class="v">{{ case.client.address or '-' }}</span></div>
+                    <div><span class="l">Phone</span><span class="v">{{ case.client.phone or '-' }}</span></div>
+                    <div><span class="l">Email</span><span class="v">{{ case.client.email or '-' }}</span></div>
+                    <div><span class="l">Case source</span><span class="v">{{ case.source }}</span></div>
+                    <div><span class="l">Trigger scenario</span><span class="v">-</span></div>
+                    {% if case.resubmit %}<div><span class="l">Resubmissions</span><span class="v">{{ case.resubmit.count }} — {{ case.resubmit.decisions|join(', ') }}</span></div>{% endif %}
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">ID vendor check</div>
+                    {{ outcome_badge('Approved' if case.vendor_check.result == 'Approved' else 'Rejected') }}</div>
+                <div class="card-body fact-list">
+                    <div><span class="l">Vendor</span><span class="v">{{ case.vendor_check.vendor }}</span></div>
+                    <div><span class="l">Reason</span><span class="v">{{ case.vendor_check.reason or '-' }}</span></div>
+                    <div><span class="l">Vendor reason</span><span class="v">{{ case.vendor_check.vendor_reason or '-' }}</span></div>
+                    <div class="fact-actions">
+                        <button type="button" class="btn btn-outline btn-xs" onclick="openModal('vendor-modal')">Extracted infos</button>
+                        <button type="button" class="btn btn-primary btn-xs" onclick="docPreview('{{ url_for('document_svg', case_id=case.id, doc_id=case.documents[0].id) }}', '{{ case.documents[0].name }}')">View ID</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-{# ── AI Agent: Claude's read of the documents and the checks on it ── #}
+        {% if case.agency %}
+        <div class="card mt-12" id="business-info">
+            <div class="card-head"><div class="card-title">Business &amp; agency</div></div>
+            <div class="card-body">
+                {% set a = case.agency %}
+                <div class="desc cols-4">
+                    <div><span class="l">Agency ID</span><span class="v">{{ a.agency_id if a and a.agency_id else '-' }}</span></div>
+                    <div><span class="l">Agency Name</span><span class="v">{{ a.agency_name if a and a.agency_name else '-' }}</span></div>
+                    <div><span class="l">Onboarding Time</span><span class="v">{{ a.onboarding_time if a and a.onboarding_time else '-' }}</span></div>
+                    <div><span class="l">Company Name</span><span class="v strong">{{ a.company_name if a else '-' }}</span></div>
+                    <div><span class="l">Company Registered Address</span><span class="v">{{ a.registered_address if a else '-' }}</span></div>
+                    <div><span class="l">Representative Name</span><span class="v strong">{{ a.representative if a else '-' }}</span></div>
+                    <div><span class="l">Respective Email</span><span class="v">{{ a.email if a and a.email else '-' }}</span></div>
+                    <div><span class="l">Respective Phone Number</span><span class="v">{{ a.phone if a and a.phone else '-' }}</span></div>
+                    {% if a %}
+                    <div><span class="l">Registration number</span><span class="v mono">{{ a.registration_number }}</span></div>
+                    <div><span class="l">Incorporation country</span><span class="v">{{ a.incorporation_country }}</span></div>
+                    <div><span class="l">Risk rating</span><span class="v">{% if case.risk_rating %}{{ outcome_badge(case.risk_rating) }}{% else %}<span class="muted">Not rated</span>{% endif %}
+                        {% if case.risk_recalculated_at %}<span class="tiny muted"> recalculated {{ case.risk_recalculated_at }}</span>{% endif %}</span></div>
+                    <div><span class="l">Checker 1</span><span class="v">{% if case.checker1 %}{{ case.checker1.by|who }} · {{ case.checker1.at }}{% elif case.status == 'DataScreening' %}<span class="muted">pending — the L1 approval</span>{% else %}<span class="muted">-</span>{% endif %}</span></div>
+                    <div><span class="l">Checker 2</span><span class="v">{% if case.checker2 %}{{ case.checker2.by|who }} · {{ case.checker2.at }}{% elif case.pending_reason == 'Pending Checker 2' %}<span class="badge amber">awaiting sign-off</span>{% elif case.status == 'DataScreening' %}<span class="muted">second reviewer, after Checker 1</span>{% else %}<span class="muted">-</span>{% endif %}</span></div>
+                    {% endif %}
+                </div>
+                {% if a %}
+                <div class="row between mt-12">
+                    <table class="tbl dense" style="max-width:520px">
+                        <thead><tr><th>Beneficial owner</th><th>Ownership</th><th>Nationality</th></tr></thead>
+                        <tbody>{% for u in a.ubos %}<tr><td class="strong">{{ u.name }}</td><td>{{ u.pct }}%</td><td>{{ u.nationality }}</td></tr>{% endfor %}</tbody>
+                    </table>
+                    <form method="post" action="{{ url_for('kyc_recalculate_risk', case_id=case.id) }}" style="margin:0">
+                        <button type="submit" class="btn btn-outline btn-sm" {% if closed %}disabled{% endif %} title="SOP 4.2.2: recalculate the risk rating before approving a business">{{ icon('refresh-cw') }} Recalculate Risk Rating</button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    {# ── Documents: the uploads as cards ── #}
+    <div class="tab-panel" role="tabpanel" data-panel="documents" hidden>
+        <div class="doc-grid" id="doc-grid">
+            {% for d in case.documents %}{% set src = url_for('document_svg', case_id=case.id, doc_id=d.id) %}
+            <div class="doc-card">
+                <button type="button" class="doc-thumb" onclick="docPreview('{{ src }}', '{{ d.name }} — {{ d.side }}')" title="Preview">
+                    <img src="{{ src }}" alt="{{ d.name }} — {{ d.side }}" loading="lazy"></button>
+                <div class="doc-meta">
+                    <div class="doc-name">{{ d.name }}</div>
+                    <div class="doc-sub">{{ d.category }} · {{ d.side }}{% if d.quality != 'ok' %} <span class="badge amber">{{ d.quality }}</span>{% endif %}</div>
+                </div>
+                <div class="doc-actions">
+                    <button type="button" class="btn btn-primary btn-xs" onclick="docPreview('{{ src }}', '{{ d.name }} — {{ d.side }}')">Preview</button>
+                    <a class="btn btn-outline btn-xs" href="{{ src }}" target="_blank" rel="noopener">Open in new tab</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {# ── Screening: World-Check rows, the rules, Skopenow, the investigation file ── #}
+    <div class="tab-panel" role="tabpanel" data-panel="screening" hidden>
+        <div class="card">
+            <div class="card-head"><div class="card-title">Screening result</div></div>
+            <div class="card-body">
+                <div class="small mb-8">Screening Alert Hit: {{ hit_mark('Hit' if case.screening.hit else 'No Match') }}</div>
+                <div class="small mb-8 muted">AI screening rules: {{ ai_summary(case) }} <a href="{{ url_for('ai_screening_page') }}">The rules</a></div>
+                <table class="tbl dense">
+                    <thead><tr><th>Platform Name</th><th>User Name</th><th>Screen time</th><th>Name screening list</th><th>Screening result</th><th>Alert ID</th></tr></thead>
+                    <tbody>
+                    {% for r in case.screening.rows %}
+                    <tr>
+                        <td>{{ r.platform }} <span class="tag">{{ loop.index0 // 2 + 1 }}</span></td>
+                        <td>{{ r.user_name }}</td><td class="nowrap">{{ r.screen_time }}</td><td>{{ r.list }}</td>
+                        <td>{{ hit_mark(r.result) }}</td>
+                        <td>{% if r.alert_id %}<span class="cell-hex" title="{{ r.alert_id }}">{{ r.alert_id }}</span>
+                            <a class="btn btn-outline btn-xs" href="{{ url_for('ns_case', alert_case_id=r.alert_id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a>
+                            {% else %}<button type="button" class="btn btn-outline btn-xs" disabled>Details</button>{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% if case.skopenow %}
+                <div class="note info mt-12">Skopenow report: <b>{{ case.skopenow.status }}</b> — requested {{ case.skopenow.requested_at }} by {{ case.skopenow.requested_by }}.
+                    <a href="{{ url_for('kyc_skopenow', case_id=case.id) }}">Open</a></div>
+                {% endif %}
+            </div>
+        </div>
+        {% if case.investigation_file %}
+        <div class="card mt-12">
+            <div class="card-head"><div class="card-title">Investigation file</div></div>
+            <div class="card-body">
+                <div class="row between mb-8" style="gap:12px">
+                    <div class="small">Folder <b class="mono">{{ case.investigation_file.name }}</b> · opened {{ case.investigation_file.created_at }} by {{ case.investigation_file.created_by|who }} (SOP 4.1.3 §6.2 — kept by the case, never a share-drive link that goes stale)</div>
+                    <div class="btn-group tight"><a class="btn btn-outline btn-xs" href="{{ url_for('kyc_file', case_id=case.id) }}">Open folder</a><a class="btn btn-primary btn-xs" href="{{ url_for('kyc_file_zip', case_id=case.id) }}">{{ icon('download') }} ZIP</a></div>
+                </div>
+                <table class="tbl dense">
+                    <thead><tr><th>Item</th><th>Kind</th><th>Added</th><th>By</th></tr></thead>
+                    <tbody>{% for it in file_items %}<tr><td class="strong">{{ it.label }}</td><td>{{ it.kind }}</td><td class="nowrap">{{ it.at }}</td><td class="nowrap">{{ it.by|who }}</td></tr>{% endfor %}</tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    {# ── AI Agent: Claude's read of the documents and the checks on it ── #}
+    <div class="tab-panel" role="tabpanel" data-panel="agent" hidden>
 {% if agent.show %}{% set ag = case.ai_agent %}
 <div class="card mt-12 pad-0" id="ai-agent">
     <div class="card-head" style="padding-bottom:10px">
@@ -69,136 +201,12 @@
 </div>
 {% endif %}
 
-{# ── Information Verification: client, agency, documents, screening, decisions ── #}
-<div class="card mt-12">
-    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Information Verification</div></div>
-    <div class="card-body" style="padding-top:8px">
+    </div>
 
-        <details class="section" open>
-            <summary>Client Basic Info <span class="caret">{{ icon('chevron-down') }}</span></summary>
-            <div class="section-body">
-                <div class="desc cols-4">
-                    <div><span class="l">Legal name (full name)</span><span class="v strong">{{ case.client.legal_name }}</span></div>
-                    <div><span class="l">Date of birth</span><span class="v strong">{{ case.client.dob or '-' }}</span></div>
-                    <div><span class="l">Nationality</span><span class="v strong">{{ case.client.nationality }}</span></div>
-                    <div><span class="l">ID number</span><span class="v strong mono">{{ case.client.id_number }}</span></div>
-                    <div><span class="l">ID issuing place</span><span class="v strong">{{ case.client.id_issuing_place }}</span></div>
-                    <div><span class="l">ID Type</span><span class="v strong">{{ case.client.id_type }}</span></div>
-                    <div><span class="l">Phone number</span><span class="v">{{ case.client.phone or '-' }}</span></div>
-                    <div><span class="l">Email</span><span class="v">{{ case.client.email or '-' }}</span></div>
-                    <div><span class="l">Case source</span><span class="v strong">{{ case.source }}</span></div>
-                    <div><span class="l">Trigger scenario</span><span class="v">-</span></div>
-                    <div><span class="l">US person</span><span class="v">{{ 'Yes' if case.client.us_person else 'No' }}</span></div>
-                    <div><span class="l">Address</span><span class="v">{{ case.client.address or '-' }}</span></div>
-                    {% if case.client.native_name %}<div><span class="l">Name (native script)</span><span class="v strong">{{ case.client.native_name }}</span></div>{% endif %}
-                    {% if case.resubmit %}<div><span class="l">Resubmissions</span><span class="v">{{ case.resubmit.count }} — {{ case.resubmit.decisions|join(', ') }}</span></div>{% endif %}
-                </div>
-            </div>
-        </details>
-
-        <details class="section" {% if case.agency %}open{% endif %}>
-            <summary>Agency-Managed Info <span class="caret">{{ icon('chevron-down') }}</span></summary>
-            <div class="section-body">
-                {% set a = case.agency %}
-                <div class="desc cols-4">
-                    <div><span class="l">Agency ID</span><span class="v">{{ a.agency_id if a and a.agency_id else '-' }}</span></div>
-                    <div><span class="l">Agency Name</span><span class="v">{{ a.agency_name if a and a.agency_name else '-' }}</span></div>
-                    <div><span class="l">Onboarding Time</span><span class="v">{{ a.onboarding_time if a and a.onboarding_time else '-' }}</span></div>
-                    <div><span class="l">Company Name</span><span class="v strong">{{ a.company_name if a else '-' }}</span></div>
-                    <div><span class="l">Company Registered Address</span><span class="v">{{ a.registered_address if a else '-' }}</span></div>
-                    <div><span class="l">Representative Name</span><span class="v strong">{{ a.representative if a else '-' }}</span></div>
-                    <div><span class="l">Respective Email</span><span class="v">{{ a.email if a and a.email else '-' }}</span></div>
-                    <div><span class="l">Respective Phone Number</span><span class="v">{{ a.phone if a and a.phone else '-' }}</span></div>
-                    {% if a %}
-                    <div><span class="l">Registration number</span><span class="v mono">{{ a.registration_number }}</span></div>
-                    <div><span class="l">Incorporation country</span><span class="v">{{ a.incorporation_country }}</span></div>
-                    <div><span class="l">Risk rating</span><span class="v">{% if case.risk_rating %}{{ outcome_badge(case.risk_rating) }}{% else %}<span class="muted">Not rated</span>{% endif %}
-                        {% if case.risk_recalculated_at %}<span class="tiny muted"> recalculated {{ case.risk_recalculated_at }}</span>{% endif %}</span></div>
-                    <div><span class="l">Checker 1</span><span class="v">{% if case.checker1 %}{{ case.checker1.by|who }} · {{ case.checker1.at }}{% elif case.status == 'DataScreening' %}<span class="muted">pending — the L1 approval</span>{% else %}<span class="muted">-</span>{% endif %}</span></div>
-                    <div><span class="l">Checker 2</span><span class="v">{% if case.checker2 %}{{ case.checker2.by|who }} · {{ case.checker2.at }}{% elif case.pending_reason == 'Pending Checker 2' %}<span class="badge amber">awaiting sign-off</span>{% elif case.status == 'DataScreening' %}<span class="muted">second reviewer, after Checker 1</span>{% else %}<span class="muted">-</span>{% endif %}</span></div>
-                    {% endif %}
-                </div>
-                {% if a %}
-                <div class="row between mt-12">
-                    <table class="tbl dense" style="max-width:520px">
-                        <thead><tr><th>Beneficial owner</th><th>Ownership</th><th>Nationality</th></tr></thead>
-                        <tbody>{% for u in a.ubos %}<tr><td class="strong">{{ u.name }}</td><td>{{ u.pct }}%</td><td>{{ u.nationality }}</td></tr>{% endfor %}</tbody>
-                    </table>
-                    <form method="post" action="{{ url_for('kyc_recalculate_risk', case_id=case.id) }}" style="margin:0">
-                        <button type="submit" class="btn btn-outline btn-sm" {% if closed %}disabled{% endif %} title="SOP 4.2.2: recalculate the risk rating before approving a business">{{ icon('refresh-cw') }} Recalculate Risk Rating</button>
-                    </form>
-                </div>
-                {% endif %}
-            </div>
-        </details>
-
-        <details class="section" open>
-            <summary>Documents <span class="caret">{{ icon('chevron-down') }}</span></summary>
-            <div class="section-body flush">
-                <table class="tbl">
-                    <thead><tr><th>Document Name</th><th>Document Category</th><th>Side</th><th>Quality</th><th>Operation</th></tr></thead>
-                    <tbody>
-                    {% for d in case.documents %}
-                    <tr>
-                        <td>{{ d.name }}</td><td>{{ d.category }}</td><td>{{ d.side }}</td>
-                        <td>{% if d.quality == 'ok' %}<span class="muted">-</span>{% else %}<span class="badge amber">{{ d.quality }}</span>{% endif %}</td>
-                        <td class="btn-group tight">
-                            <button type="button" class="btn btn-primary btn-xs" onclick="docPreview('{{ url_for('document_svg', case_id=case.id, doc_id=d.id) }}', '{{ d.name }} — {{ d.side }}')">Preview</button>
-                            <a class="btn btn-outline btn-xs" href="{{ url_for('document_svg', case_id=case.id, doc_id=d.id) }}" target="_blank" rel="noopener">OpenNewTab</a>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </details>
-
-        <details class="section" open>
-            <summary>Screening Result <span class="caret">{{ icon('chevron-down') }}</span></summary>
-            <div class="section-body">
-                <div class="small mb-8">Screening Alert Hit: {{ hit_mark('Hit' if case.screening.hit else 'No Match') }}</div>
-                <div class="small mb-8 muted">AI screening rules: {{ ai_summary(case) }} <a href="{{ url_for('ai_screening_page') }}">The rules</a></div>
-                <table class="tbl dense">
-                    <thead><tr><th>Platform Name</th><th>User Name</th><th>Screen time</th><th>Name screening list</th><th>Screening result</th><th>Alert ID</th></tr></thead>
-                    <tbody>
-                    {% for r in case.screening.rows %}
-                    <tr>
-                        <td>{{ r.platform }} <span class="tag">{{ loop.index0 // 2 + 1 }}</span></td>
-                        <td>{{ r.user_name }}</td><td class="nowrap">{{ r.screen_time }}</td><td>{{ r.list }}</td>
-                        <td>{{ hit_mark(r.result) }}</td>
-                        <td>{% if r.alert_id %}<span class="cell-hex" title="{{ r.alert_id }}">{{ r.alert_id }}</span>
-                            <a class="btn btn-outline btn-xs" href="{{ url_for('ns_case', alert_case_id=r.alert_id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a>
-                            {% else %}<button type="button" class="btn btn-outline btn-xs" disabled>Details</button>{% endif %}</td>
-                    </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-                {% if case.skopenow %}
-                <div class="note info mt-12">Skopenow report: <b>{{ case.skopenow.status }}</b> — requested {{ case.skopenow.requested_at }} by {{ case.skopenow.requested_by }}.
-                    <a href="{{ url_for('kyc_skopenow', case_id=case.id) }}">Open</a></div>
-                {% endif %}
-            </div>
-        </details>
-
-        {% if case.investigation_file %}
-        <details class="section" open>
-            <summary>Investigation File <span class="caret">{{ icon('chevron-down') }}</span></summary>
-            <div class="section-body">
-                <div class="row between mb-8" style="gap:12px">
-                    <div class="small">Folder <b class="mono">{{ case.investigation_file.name }}</b> · opened {{ case.investigation_file.created_at }} by {{ case.investigation_file.created_by|who }} (SOP 4.1.3 §6.2 — kept by the case, never a share-drive link that goes stale)</div>
-                    <div class="btn-group tight"><a class="btn btn-outline btn-xs" href="{{ url_for('kyc_file', case_id=case.id) }}">Open folder</a><a class="btn btn-primary btn-xs" href="{{ url_for('kyc_file_zip', case_id=case.id) }}">{{ icon('download') }} ZIP</a></div>
-                </div>
-                <table class="tbl dense">
-                    <thead><tr><th>Item</th><th>Kind</th><th>Added</th><th>By</th></tr></thead>
-                    <tbody>{% for it in file_items %}<tr><td class="strong">{{ it.label }}</td><td>{{ it.kind }}</td><td class="nowrap">{{ it.at }}</td><td class="nowrap">{{ it.by|who }}</td></tr>{% endfor %}</tbody>
-                </table>
-            </div>
-        </details>
-        {% endif %}
-
-        <details class="section" open>
-            <summary>Review Decision <span class="caret">{{ icon('chevron-down') }}</span></summary>
-            <div class="section-body flush">
+    {# ── Decisions: every check point, and what the file's analyst recorded ── #}
+    <div class="tab-panel" role="tabpanel" data-panel="decisions" hidden>
+        <div class="card pad-0">
+            <div class="card-head" style="padding-bottom:10px"><div class="card-title">Review decisions</div></div>
                 <table class="tbl dense">
                     <thead><tr><th>Check Point</th><th>Decision</th><th>Fail Reason</th><th>POA Fail Reason</th><th>Approve Reason</th><th>Rejection Reason</th><th>ID Summary</th><th>Report</th><th>Operated Time</th><th>By</th></tr></thead>
                     <tbody>
@@ -218,15 +226,13 @@
                     {% endfor %}
                     </tbody>
                 </table>
-            </div>
-        </details>
-
+        </div>
         {% if case.recon and not case.recon.uploaded %}{% set rc = case.recon %}
         {# What the reconciliation log says an analyst did with this case: shown
            for comparison, read by no workflow rule (fincrime/data/recon_book.py). #}
-        <details class="section" open id="recorded-outcome">
-            <summary>Recorded Outcome — Reconciliation Log <span class="caret">{{ icon('chevron-down') }}</span></summary>
-            <div class="section-body">
+        <div class="card mt-12" id="recorded-outcome">
+            <div class="card-head"><div class="card-title">Recorded outcome — reconciliation log</div></div>
+            <div class="card-body">
                 <p class="small muted mb-8">From the uploaded file, for comparison: what the file's analyst decided for this case. The console's own steps and decisions are recorded above. The document images are drawn for the demo; the capture defects on about 9% of cases are synthetic.</p>
                 <div class="desc cols-4">
                     <div><span class="l">File case ID</span><span class="v strong mono">{{ rc.id }}</span></div>
@@ -253,29 +259,10 @@
                     </tbody>
                 </table>
             </div>
-        </details>
+        </div>
         {% endif %}
-
     </div>
-</div>
-
-{# ── Footer actions ── #}
-<div class="row mt-16" style="justify-content:flex-end">
-    <button type="button" class="btn btn-outline btn-sm" onclick="openModal('modify-modal')" {% if closed %}disabled{% endif %}>Modify User Info</button>
-    <a class="btn btn-outline btn-sm" href="{{ url_for('kyc_audit', case_id=case.id, view='changes') }}">{{ icon('list') }} Change Log</a>
-    {% if review and is_mine %}
-    <button type="button" class="btn btn-primary btn-sm" onclick="openModal('{{ {'dc': 'dc-modal', 'edd': 'edd-modal', 'l2': 'l2-modal', 'checker2': 'checker2-modal'}[review] }}')">Review</button>
-    {% else %}
-    {# A greyed Review says why, in text — a tooltip alone was missed. #}
-    {% set stage, needed = review_needs %}
-    {% if review and case.current_reviewer %}{% set why = 'Reserved by ' ~ case.current_reviewer ~ ' — ask them to release it, or use Assign to Others' %}
-    {% elif review %}{% set why = 'Reserve the case first (top right)' %}
-    {% elif closed %}{% set why = 'Case is closed' %}
-    {% elif stage %}{% set why = stage ~ ' needs ' ~ needed|join(' or ') ~ ' — sign in as ' ~ level_names %}
-    {% else %}{% set why = 'Nothing to review at this stage' %}{% endif %}
-    <span class="small muted" id="review-why">{{ why }}</span>
-    <button type="button" class="btn btn-primary btn-sm" disabled title="{{ why }}">Review</button>
-    {% endif %}
+</section>
 </div>
 
 {# ── Modals ── #}
@@ -333,6 +320,23 @@
 
 {% block extra_js %}
 <script>
+/* Case tabs: one panel at a time; the tab rides in the URL hash so a reload
+   or a link (#documents) lands on it. Hidden panels stay in the page. */
+(function () {
+    var tabs = document.querySelectorAll('.case-tabs .tab');
+    function show(name, push) {
+        var found = false;
+        tabs.forEach(function (t) { if (t.dataset.tab === name) { found = true; } });
+        if (!found) { name = 'overview'; }
+        tabs.forEach(function (t) { var on = t.dataset.tab === name; t.classList.toggle('active', on); t.setAttribute('aria-selected', on ? 'true' : 'false'); });
+        document.querySelectorAll('.tab-panel').forEach(function (p) { p.hidden = p.dataset.panel !== name; });
+        if (push) { try { history.replaceState(null, '', location.pathname + location.search + '#' + name); } catch (e) {} }
+    }
+    tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.tab, true); }); });
+    show((location.hash || '').replace('#', ''), false);
+    window.addEventListener('hashchange', function () { show(location.hash.replace('#', ''), false); });
+})();
+
 function docPreview(src, caption) {
     var stage = document.getElementById('doc-stage');
     viewerInit(stage).show(src);   /* templates/_viewer.html: wheel zoom, drag, buttons */

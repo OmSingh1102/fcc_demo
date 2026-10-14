@@ -581,6 +581,28 @@ class FlowTestCase(unittest.TestCase):
         self.assertTrue(all(new_tab(a) for a in opens))
         self.assertTrue(any((a.get("href") or "").startswith("/documents/") for a in opens))
 
+    def test_case_page_is_a_sidebar_and_tabs(self):
+        """The case page: the customer, progress and every action in a
+        sidebar; the content in tabs, all of it in the page (hidden, not
+        dropped); one card per document with the same image URL."""
+        self.login("amara.iyer")
+        m = self.K["mercer"]
+        page = self.c.get(f"/kyc/detail/{m['id']}").data.decode("utf-8")
+        rail = page[page.index('class="case-rail"'):page.index('class="case-main"')]
+        for action in (">Review<", ">Reserve<", ">Release<", ">Assign<", "Change Status", "Modify User Info", "Change Log", "Audit History"):
+            self.assertIn(action, rail)
+        self.assertIn('class="stepper vertical"', rail)
+        for tab in ("overview", "documents", "screening", "decisions"):
+            self.assertIn(f'data-tab="{tab}"', page)
+            self.assertIn(f'data-panel="{tab}"', page)
+        self.assertNotIn('data-tab="agent"', page)                      # no AI Agent read on this case
+        self.assertEqual(page.count('class="doc-card"'), len(m["documents"]))
+        for d in m["documents"]:
+            self.assertIn(f"/documents/{m['id']}/{d['id']}.svg", page)
+        self.assertIn('id="vendor-modal"', page)
+        self.assertIn("Screening result", page)
+        self.assertIn("Review decisions", page)
+
     def test_review_button_explains_itself(self):
         """A greyed Review button says why in text beside it: nothing to
         review yet, the level the stage needs, who holds the case, or closed."""
@@ -602,7 +624,7 @@ class FlowTestCase(unittest.TestCase):
         self.login("nisha.rao")
         self.post(f"/kyc/{s['id']}/release")
         self.login("amara.iyer")
-        self.assertEqual(why(), "Reserve the case first (top right)")
+        self.assertEqual(why(), "Reserve the case first (the Reserve button below)")
         self.post(f"/kyc/{s['id']}/reserve")
         self.assertEqual(why(), "ENABLED")
         self.confirm(s)                                    # no hit, an individual: auto-verifies

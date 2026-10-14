@@ -2,9 +2,10 @@
    `points` comes from workflow.verification_points(): done steps get a tick,
    the current step a filled numbered dot, later steps a grey number. The
    Data Screening step carries its (automatic) screen time even while it is
-   still ahead of the case, exactly as the real page shows it. #}
-{% macro stepper(points) -%}
-<div class="stepper">
+   still ahead of the case. `vertical` stacks the steps as a timeline (the
+   case page's sidebar). #}
+{% macro stepper(points, vertical=False) -%}
+<div class="stepper{{ ' vertical' if vertical }}">
     {% for p in points %}
     <div class="step {{ p.state }}">
         <span class="step-dot">{% if p.state == 'done' %}{{ icon('check') }}{% else %}{{ p.n }}{% endif %}</span>
