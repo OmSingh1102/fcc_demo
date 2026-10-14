@@ -418,6 +418,26 @@ class DocumentTests(unittest.TestCase):
         self.assertIn('data-capture="flat_scan"', documents.render(flat, "passport"))
         self.assertIsNone(documents.render(c, "nope"))
 
+    def test_photo_defects_are_drawn_and_rejected(self):
+        # the failures real uploads show: something on the page, a shot at an
+        # angle, a cracked card, cut off, blurred - each drawn as a phone
+        # photo on a cloth, stamped with the drawing date, and bounced
+        codes = {"obstructed": "DOC_OBSTRUCTED", "angled": "DOC_ANGLE", "damaged": "DOC_DAMAGED",
+                 "partial": "DOC_PARTIAL", "blur": "DOC_BLUR"}
+        for capture, code in codes.items():
+            c = next(c for c in book() if c["synth"]["capture"] == capture)
+            svg = documents.render(c, "passport")
+            self.assertIn(f'data-defect="{capture}"', svg)
+            self.assertIn('fill="url(#cloth)"', svg)
+            self.assertEqual(c["synth"]["drawn"], documents.REDRAWN)
+            self.assertIn(code, c["intake"]["codes"], capture)
+            self.assertEqual(c["intake"]["decision"], "Reject")
+            self.assertTrue(c["intake"]["message"], capture)
+        clean = next(c for c in book() if c["synth"]["capture"] == "none" and not c["synth"]["tampered"])
+        self.assertEqual(clean["synth"]["drawn"], "")
+        self.assertIn('viewBox="-28 -28', documents.render(clean, "passport"))        # all four corners in shot
+        self.assertNotIn("data-defect", documents.render(clean, "passport"))
+
     def test_rejections_carry_a_customer_message(self):
         rejected = [c for c in book() if c["status"] == triage.STATUS_AUTO_REJECTED]
         self.assertTrue(rejected)

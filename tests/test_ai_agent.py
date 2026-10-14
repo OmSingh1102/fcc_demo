@@ -33,7 +33,7 @@ def perfect_read(case, **id_overrides):
     idr = {"readable": True, "problems": [], "surname": pp["viz"]["surname"], "given_names": pp["viz"]["given"],
            "dob": v["customer"]["dob"], "nationality_code": ISO3.get(case["client"]["nationality"], ""),
            "document_number": pp["number"], "expiry": s["passport_expiry"], "address": "", "issued_on": s["passport_issued"],
-           "note": ""}
+           "note": "", "edges_visible": True, "mrz_visible": True}
     idr.update(id_overrides)
     poa = {"readable": True, "problems": [], "surname": "", "given_names": "", "dob": "", "nationality_code": "",
            "document_number": "", "expiry": "", "address": v["documents"]["poa"]["address"], "issued_on": s["poa_issued_on"],
@@ -142,18 +142,61 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual(c["status"], "DataConfirming")
 
     def test_rate_limit_waits_and_tries_again(self):
-        c = self.clean()
-        calls = []
+        for failure in ("The model gateway answered 429: too many connections", "Could not reach the model gateway."):
+            c = self.clean(lambda c: "ai_agent" not in c)
+            calls = []
 
-        def flaky(system, content, schema, max_tokens=3000):
-            calls.append(1)
-            if len(calls) == 1:
-                raise WorkflowError("The model gateway answered 429: too many connections")
-            return perfect_read(c), {}, 5.0
-        alert, wc = fcc._linked(c)
-        rec = ai_agent.run_case(c, alert, wc, fcc._render_document, call=flaky, sleep=lambda s: None)
-        self.assertEqual(len(calls), 2)
-        self.assertNotEqual(rec["decision"], "human", rec["reasons"])
+            def flaky(system, content, schema, max_tokens=3000):
+                calls.append(1)
+                if len(calls) == 1:
+                    raise WorkflowError(failure)
+                return perfect_read(c), {}, 5.0
+            alert, wc = fcc._linked(c)
+            rec = ai_agent.run_case(c, alert, wc, fcc._render_document, call=flaky, sleep=lambda s: None)
+            self.assertEqual(len(calls), 2, failure)
+            self.assertNotEqual(rec["decision"], "human", rec["reasons"])
+
+    # ── bad photos of the ID ────────────────────────────────────────────────
+    def capture(self, kind):
+        return self.pick(lambda c: recon_book.view(c["recon"]["id"])["synth"]["capture"] == kind)
+
+    def test_a_phone_on_the_passport_passes_the_vendor_but_not_the_agent(self):
+        c = self.capture("obstructed")
+        self.assertEqual(c["vendor_check"]["result"], "Approved")                   # the vendor missed it, as on real uploads
+        self.assertNotIn("Vendor rejected", c["manual_review_reason"])
+        self.assertEqual(c["documents"][0]["quality"], "covered")
+        self.assertEqual(c["recon"]["drawn"], recon_book.hub_documents.REDRAWN)
+        rec = self.assert_human(c, "ID could not be read: something covers part of it", problems=["covered"], dob="",
+                                expiry="", mrz_visible=False)
+        self.assertEqual(rec["resubmit"], ai_agent.RESUBMIT_UNCLEAR)
+        self.assertIn(ai_agent.RESUBMIT_UNCLEAR, ai_agent.vocab.RESUBMIT_ID_REASONS)
+        # the picture hides the dates: a reader that names no problem still cannot verify it
+        rec = self.assert_human(self.capture("angled"), "Date of birth missing on the ID", dob="", expiry="")
+        self.assertIn("Expiry date not readable", rec["reasons"])
+
+    def test_a_slight_tilt_alone_stops_nothing(self):
+        rec, _ = self.run_agent(self.clean(), problems=["angled"])
+        self.assertEqual(rec["decision"], "verified", rec["reasons"])
+        rec = self.assert_human(self.clean(), "something covers part of it, photographed at an angle", problems=["angled", "covered"])
+        self.assertEqual(rec["resubmit"], ai_agent.RESUBMIT_UNCLEAR)
+
+    def test_edges_and_mrz_out_of_shot(self):
+        rec = self.assert_human(self.clean(), "its edges are not all in the picture", edges_visible=False)
+        self.assertEqual(rec["resubmit"], ai_agent.RESUBMIT_CROPPED)
+        rec = self.assert_human(self.clean(), "the MRZ is not fully visible", mrz_visible=False)
+        self.assertEqual(rec["resubmit"], ai_agent.RESUBMIT_UNCLEAR)
+
+    def test_the_suggested_resubmit_reason(self):
+        for overrides, want in ((dict(problems=["damaged"]), ai_agent.RESUBMIT_DAMAGED),
+                                (dict(readable=False, problems=["blurred", "too_dark"]), ai_agent.RESUBMIT_ILLEGIBLE),
+                                (dict(problems=["angled", "covered"]), ai_agent.RESUBMIT_UNCLEAR),
+                                (dict(problems=["covered", "angled"], edges_visible=False), ai_agent.RESUBMIT_UNCLEAR),
+                                (dict(problems=["cut_off", "angled"], edges_visible=False), ai_agent.RESUBMIT_CROPPED),
+                                (dict(expiry="2025-09-19"), ai_agent.RESUBMIT_EXPIRED),
+                                (dict(surname="OKONKWO", given_names="CHIDI"), "")):   # not the photo: nothing to retake
+            rec, _ = self.run_agent(self.clean(), **overrides)
+            self.assertEqual((rec["decision"], rec["resubmit"]), ("human", want), overrides)
+            self.assertTrue(not want or want in ai_agent.vocab.RESUBMIT_ID_REASONS)
 
     # ── the name rules ──────────────────────────────────────────────────────
     def test_name_rules(self):
@@ -198,6 +241,34 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertIn("Handled by AI", page)
         self.assertNotIn("Run AI agent", page)
         self.assertIn(c["id"], self.c.get("/kyc/list?agent=verified").data.decode("utf-8"))
+
+    def test_the_resubmit_dialog_arrives_filled_in(self):
+        c = self.capture("obstructed")
+        c["current_reviewer"] = ""
+        self.run_agent(c, problems=["covered"], dob="", expiry="")
+        self.login("amara.iyer")
+        page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
+        self.assertIn('id="ai-agent-resubmit"', page)
+        self.assertIn('id="rs-suggested"', page)
+        self.assertIn('value="Resubmit ID" onchange="rsToggle()" checked', page)
+        self.assertIn(f"<option selected>{ai_agent.RESUBMIT_UNCLEAR}</option>", page)
+        self.c.post(f"/kyc/{c['id']}/reserve")
+        self.c.post(f"/kyc/{c['id']}/resubmit", data={"decision": "Resubmit ID", "id_reason": ai_agent.RESUBMIT_UNCLEAR})
+        self.assertEqual((c["status"], c["resubmit"]["id_reason"]), ("ResubmitID", ai_agent.RESUBMIT_UNCLEAR))
+        self.assertNotIn('id="ai-agent-resubmit"', self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8"))
+
+    def test_a_case_stored_from_an_older_drawing_starts_again(self):
+        c = self.capture("damaged")
+        self.run_agent(c, problems=["damaged"])
+        stale = dict(c, recon=dict(c["recon"], drawn=""))                   # as stored before the redraw
+        StateStore.save("kyc", stale)
+        kept = self.clean()
+        self.run_agent(kept)
+        StateStore.save("kyc", kept)
+        fcc._load_seed()
+        self.assertNotIn("ai_agent", fcc.KYC_BY_ID[c["id"]])                 # back to its seeded state, read again
+        self.assertEqual(fcc.KYC_BY_ID[c["id"]]["status"], "DataConfirming")
+        self.assertEqual(fcc.KYC_BY_ID[kept["id"]]["ai_agent"]["decision"], "verified")    # the rest is kept
 
     def test_the_worker_works_the_queue_and_stops(self):
         chosen = [c["id"] for c in fcc.KYC_CASES if ai_agent.eligible(c)][:3]

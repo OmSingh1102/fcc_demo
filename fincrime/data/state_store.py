@@ -114,10 +114,11 @@ class StateStore:
     # ── reading ─────────────────────────────────────────────────────────────
 
     @classmethod
-    def restore(cls, kind: str, by_id: dict) -> int:
+    def restore(cls, kind: str, by_id: dict, skip=()) -> int:
         """Re-apply stored records of `kind` onto the freshly seeded `by_id`
         dicts, in place. Returns how many were applied. Unknown ids are skipped:
-        a record the seed no longer produces has nowhere to go."""
+        a record the seed no longer produces has nowhere to go; so are the ids
+        in `skip`, which keep their seeded state."""
         applied = 0
         try:
             with closing(cls._connect()) as conn, conn:
@@ -127,7 +128,7 @@ class StateStore:
             return 0
         for rid, blob in rows:
             target = by_id.get(rid)
-            if target is None:
+            if target is None or rid in skip:
                 continue
             try:
                 data = json.loads(blob)

@@ -323,14 +323,34 @@ def _load_seed():
         for batch in sorted(StateStore.records("upload"), key=lambda b: b.get("at", "")):
             _add_uploaded([r for r in batch.get("rows", []) if r.get("kyc_case_id") not in KYC_BY_ID])
 
-    restored = (StateStore.restore("kyc", KYC_BY_ID) + StateStore.restore("alert", ALERT_BY_ID)
-                + StateStore.restore("wc", WC_BY_ID) + StateStore.restore("analyst", ANALYST_BY_KEY)
+    redrawn = _redrawn_cases()
+    if redrawn:
+        app.logger.info("%d stored case(s) were read from an older drawing of their ID; they start again.", len(redrawn))
+    restored = (StateStore.restore("kyc", KYC_BY_ID, skip=redrawn) + StateStore.restore("alert", ALERT_BY_ID, skip=redrawn)
+                + StateStore.restore("wc", WC_BY_ID, skip=redrawn) + StateStore.restore("analyst", ANALYST_BY_KEY)
                 + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS}))
     if restored:
         app.logger.info("Restored %d stored record(s) onto the seed.", restored)
         relabelled = relabel(KYC_CASES, ALERT_CASES, WC_CASES, ANALYSTS)
         if relabelled:
             app.logger.info("Relabelled %d stored value(s) to the console's current names.", relabelled)
+
+
+def _redrawn_cases():
+    """Ids (KYC, screening and watchlist) of stored cases whose ID image has
+    been redrawn since they were stored: what was read or decided on them
+    was about another picture, so they keep their seeded state and the AI
+    Agent reads them again."""
+    out = set()
+    for stored in StateStore.records("kyc"):
+        case = KYC_BY_ID.get(stored.get("id", ""))
+        if case is None or "recon" not in case:
+            continue
+        if (stored.get("recon") or {}).get("drawn", "") != case["recon"].get("drawn", ""):
+            out.add(case["id"])
+            alert, wc = _linked(case)
+            out.update(r["id"] for r in (alert, wc) if r)
+    return out
 
 
 def _add_uploaded(rows):
@@ -564,6 +584,7 @@ def kyc_detail(case_id):
         poa_checks=checks, poa_failed=bool(failed),
         poa_sanction_fail=any(c["label"].startswith("Sanctioned-country") for c in failed),
         poa_resubmit_reason=next((_POA_RESUBMIT[c["label"]] for c in failed if c["label"] in _POA_RESUBMIT), ""),
+        id_resubmit_reason=(case.get("ai_agent") or {}).get("resubmit", "") if case["status"] == "DataConfirming" else "",
         file_items=investigation.items(case, alert, wc) if case.get("investigation_file") else [],
         agent=_agent_view(case, actor, levels))
 

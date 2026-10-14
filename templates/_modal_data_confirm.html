@@ -80,10 +80,11 @@
 {{ modal_open('dc-resubmit', 'Resubmit', 'sm', stack=True) }}
 <form method="post" action="{{ url_for('kyc_resubmit', case_id=case.id) }}">
     <div class="modal-body">
+        {% if id_resubmit_reason %}<div class="note info small mb-8" id="rs-suggested">Filled in from the AI Agent's read of the ID. Check the image before you send it.</div>{% endif %}
         <div class="field">
             <label><span class="req">*</span>Decision</label>
             <div class="stack" style="margin-top:4px">
-                <label class="check"><input type="checkbox" name="decision" value="Resubmit ID" onchange="rsToggle()"> Resubmit ID</label>
+                <label class="check"><input type="checkbox" name="decision" value="Resubmit ID" onchange="rsToggle()" {% if id_resubmit_reason %}checked{% endif %}> Resubmit ID</label>
                 <label class="check"><input type="checkbox" name="decision" value="Resubmit POA" onchange="rsToggle()" {% if not case.poa_required %}disabled title="No POA on this case"{% elif poa_resubmit_reason %}checked{% endif %}> Resubmit POA</label>
             </div>
         </div>
@@ -91,7 +92,7 @@
             <label><span class="req">*</span>Resubmit ID Reason</label>
             <select class="input" name="id_reason">
                 <option value="">Select</option>
-                {% for r in vocab.RESUBMIT_ID_REASONS %}<option>{{ r }}</option>{% endfor %}
+                {% for r in vocab.RESUBMIT_ID_REASONS %}<option {% if r == id_resubmit_reason %}selected{% endif %}>{{ r }}</option>{% endfor %}
             </select>
         </div>
         <div class="field" id="rs-poa" style="display:none">

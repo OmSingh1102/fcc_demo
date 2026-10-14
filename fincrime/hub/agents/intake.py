@@ -21,6 +21,15 @@ REASONS = {
                   "message": "A reflection covers part of the ID. Please retake the photo away from direct light and without flash."},
     "DOC_BLUR": {"label": "Blurred image", "decision": "Reject", "tone": "warning",
                  "message": "The photo is too blurred to read. Please hold the phone steady, let the camera focus, and retake it."},
+    "DOC_OBSTRUCTED": {"label": "Something lies on the ID", "decision": "Reject", "tone": "warning",
+                       "message": "Something is lying on top of your ID, so part of it cannot be read. Please take everything off the "
+                                  "document and retake the photo so the whole page is visible."},
+    "DOC_ANGLE": {"label": "ID not photographed straight on", "decision": "Reject", "tone": "warning",
+                  "message": "The photo of your ID is taken at an angle or from too far away. Please lay the document flat, hold the "
+                             "phone straight above it so the page fills the frame, and retake it in good light."},
+    "DOC_DAMAGED": {"label": "Damaged ID", "decision": "Reject", "tone": "serious",
+                    "message": "Your ID is cracked or worn, so some of its details cannot be read. Please upload an undamaged "
+                               "government-issued photo ID, such as a valid passport or national ID card."},
     "DOC_EXPIRED": {"label": "Expired passport", "decision": "Reject", "tone": "serious",
                     "message": "The passport you uploaded has expired. Please upload a valid passport or another government-issued photo ID."},
     "DOC_MRZ_CHECK_FAIL": {"label": "MRZ check digits fail", "decision": "Refer", "tone": "critical", "message": ""},
@@ -73,6 +82,12 @@ def run(case, settings):
         hit("DOC_GLARE", "A reflection covers the lower part of the data page; the MRZ cannot be read in full.")
     elif "blur" in defects:
         hit("DOC_BLUR", "The passport image is too blurred to read the data page reliably.")
+    elif "obstructed" in defects:
+        hit("DOC_OBSTRUCTED", "A phone lies on the data page; the dates of birth and expiry and part of the MRZ are hidden.")
+    elif "angled" in defects:
+        hit("DOC_ANGLE", "The passport is photographed at an angle in dim light, and a phone hides its lower corner.")
+    elif "damaged" in defects:
+        hit("DOC_DAMAGED", "The passport is cracked and worn; the number, the dates and the MRZ's dates cannot be read.")
     else:
         findings.append(finding("CAPTURE", "Camera-captured image; all four corners and the MRZ visible.", "good"))
     # expiry, from the printed dates
@@ -83,7 +98,7 @@ def run(case, settings):
     else:
         findings.append(finding("EXPIRY", f"Passport valid until {s['passport_expiry']}.", "good"))
     # MRZ check digits and VIZ against MRZ (when readable)
-    mrz_readable = not ({"partial", "glare", "blur"} & defects)
+    mrz_readable = not ({"partial", "glare", "blur", "obstructed", "angled", "damaged"} & defects)
     if mrz_readable:
         ok, problems, line2 = documents.mrz_checks(case)
         if ok:

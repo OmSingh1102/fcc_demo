@@ -8,6 +8,7 @@ digits, the VIZ against the MRZ, the expiry, the proof-of-address age - so
 the defect is synthetic but the detection is not, and the screens say so.
 """
 import hashlib
+import math
 from datetime import timedelta
 
 from fincrime.documents import svg_cards
@@ -19,11 +20,24 @@ from fincrime.utils.text import esc, mrz_field
 CAPTURE_PER_MILLE = 80             # cases with a capture defect on the passport photo
 TAMPER_PER_MILLE = 20              # cases whose passport fails its own check digits
 POA_OLD_PER_MILLE = 30             # cases whose proof of address is 7-11 months old
-_CAPTURE_BUCKETS = ("flat_scan", "flat_scan", "flat_scan", "partial", "partial", "partial", "glare", "glare",
-                    "blur", "blur", "expired", "expired")
-DEFECT_LABEL = {"flat_scan": "Flat scan / PDF, not a camera photo", "partial": "Partial image: edges and MRZ cut off",
-                "glare": "Glare over the data page", "blur": "Blurred image", "expired": "Expired document",
-                "tampered": "Data page and MRZ disagree"}
+# Index 1 stays the flat scan the console's showcase case (KYC-2026-3118) carries.
+_CAPTURE_BUCKETS = ("damaged", "flat_scan", "obstructed", "partial", "partial", "obstructed", "glare", "angled",
+                    "blur", "angled", "expired", "expired")
+DEFECT_LABEL = {"flat_scan": "Flat scan / PDF, not a camera photo", "partial": "Cut off: the card runs out of the picture",
+                "glare": "Glare over the data page", "blur": "Blurred, dark image", "expired": "Expired document",
+                "obstructed": "Something lies on the data page", "angled": "Shot at an angle, from too far",
+                "damaged": "Cracked, worn card", "tampered": "Data page and MRZ disagree"}
+# Drawn as a phone photo of the document lying on a cloth, the way real
+# customers' failed uploads look (an analyst's reference frames): each one
+# hides at least a date or the number, so the AI Agent's fixed checks fail
+# even when the model does not name the problem.
+PHOTO_DEFECTS = ("partial", "blur", "obstructed", "angled", "damaged")
+# When those were last redrawn. The console stamps it on the case, and a
+# stored case read from an older drawing starts again (app._load_seed).
+REDRAWN = "2026-10-14"
+# The cloth under the photo: base, dark thread, light thread.
+SURFACES = (("#cbbfa8", "#8f8068", "#ebe2d0"), ("#3f5b80", "#283e5c", "#7290b5"),
+            ("#5b4737", "#3a2c21", "#806753"), ("#7c7e79", "#575954", "#a7a9a3"))
 COUNTRY_HEADER = {"IN": "REPUBLIC OF INDIA", "VN": "SOCIALIST REPUBLIC OF VIET NAM", "US": "UNITED STATES OF AMERICA"}
 SECONDARY_TITLE = {"PAN Card": "PERMANENT ACCOUNT NUMBER CARD", "Aadhaar": "AADHAAR", "Voter ID (EPIC)": "ELECTOR PHOTO IDENTITY CARD",
                    "Driving Licence": "DRIVING LICENCE", "CCCD (chip Citizen ID)": "CĂN CƯỚC CÔNG DÂN",
@@ -66,7 +80,7 @@ def synthesise(case):
         defects.append("tampered")
     files = [
         {"id": "passport", "kind": "passport", "side": "front", "label": "Passport data page", "defects": defects,
-         "capture": "flat_scan" if capture == "flat_scan" else "photo"},
+         "capture": "flat_scan" if capture == "flat_scan" else "photo", "surface": (h >> 64) % len(SURFACES)},
         {"id": "passport-back", "kind": "passport", "side": "back", "label": "Passport back page", "defects": [], "capture": "photo"},
         {"id": "secondary", "kind": docs["secondary"]["kind"], "side": "front", "label": docs["secondary"]["type"],
          "defects": [], "capture": "photo"},
@@ -75,7 +89,8 @@ def synthesise(case):
     ]
     case["synth"] = {"capture": capture, "tampered": tampered, "poa_age_days": poa_age, "poa_issued_on": _iso(issued),
                      "received_at": dates.fmt(received), "passport_issued": _iso(pp_issue), "passport_expiry": _iso(pp_expiry),
-                     "sex": sex, "id_number": f"{_h('hub-id', cid) % 10 ** 10:010d}"}
+                     "sex": sex, "id_number": f"{_h('hub-id', cid) % 10 ** 10:010d}",
+                     "drawn": REDRAWN if capture in PHOTO_DEFECTS else ""}
     case["files"] = files
     return case
 
@@ -128,15 +143,127 @@ def _long_date(iso):
     return d.strftime("%d %b %Y").upper() if d else ""
 
 
+def _surface(file):
+    """The cloth the document lies on, and a vignette for the photo's frame."""
+    base, dark, light = SURFACES[file.get("surface", 0) % len(SURFACES)]
+    return (f'<defs><pattern id="cloth" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(32)">'
+            f'<rect width="10" height="10" fill="{base}"/><path d="M0 2.5H10M0 7.5H10" stroke="{dark}" stroke-width="2.2" opacity="0.45"/>'
+            f'<path d="M2.5 0V10M7.5 0V10" stroke="{light}" stroke-width="1.2" opacity="0.35"/></pattern>'
+            f'<radialGradient id="vignette" cx="0.5" cy="0.5" r="0.75"><stop offset="0.5" stop-color="#000" stop-opacity="0"/>'
+            f'<stop offset="1" stop-color="#000" stop-opacity="0.55"/></radialGradient>'
+            f'<filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="9"/></filter></defs>'
+            f'<rect x="-3000" y="-3000" width="7000" height="7000" fill="url(#cloth)"/>')
+
+
+def _crack(points, width=1.6):
+    """A crack in the laminate: a dark edge under a light split."""
+    d = "M" + " L".join(f"{x} {y}" for x, y in points)
+    return (f'<path d="{d}" fill="none" stroke="#4a4234" stroke-width="{width + 1.8}" stroke-linejoin="round" opacity="0.75"/>'
+            f'<path d="{d}" fill="none" stroke="#fbf8f0" stroke-width="{width}" stroke-linejoin="round" transform="translate(-0.8 -0.6)"/>')
+
+
+def _damage(W, H):
+    """A cracked, worn card: two cracks across the page, a fold, chipped
+    corners, and worn patches where the date of birth, the expiry and the
+    passport number were printed and across the MRZ's dates."""
+    out = _crack([(296, 0), (316, 38), (350, 60), (372, 96), (420, 106), (470, 90), (522, 128), (566, 150), (W, 172)])
+    out += _crack([(0, 302), (58, 288), (122, 302), (180, 270), (262, 262), (332, 238), (408, 244), (468, 206), (540, 216),
+                   (600, 196), (W, 204)], 1.4)
+    out += _crack([(180, 270), (196, 330), (176, 372), (198, H)], 1.1)
+    out += f'<path d="M150 0 L84 {H}" stroke="#fff" stroke-width="3" opacity="0.45"/><path d="M152 0 L86 {H}" stroke="#6b604c" stroke-width="1" opacity="0.35"/>'
+    # rubbed-off print: jagged-edged, grainy scuffs with abrasion streaks,
+    # so they read as wear on the card rather than something lying on it
+    def scuff(x0, y0, x1, y1, seed):
+        cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+        pts = []
+        for i in range(36):
+            a = 2 * math.pi * i / 36
+            j = 0.82 + 0.3 * ((seed * 7 + i * 13) % 11) / 10
+            pts.append(f"{cx + rx * j * math.cos(a):.1f} {cy + ry * j * math.sin(a):.1f}")
+        return '<path d="M' + " L".join(pts) + ' Z" fill="#e6dfd0"/>'
+    patches = (scuff(428, 192, 572, 226, 1), scuff(368, 82, 494, 110, 2), scuff(436, 266, 566, 294, 3),
+               scuff(180, 397, 398, 429, 4))
+    streaks = "".join(f'<path d="M{x} {y} l{n} {d}" stroke="#fffdf6" stroke-width="1.3" opacity="0.8"/>'
+                      for x, y, n, d in ((436, 204, 128, -3), (444, 214, 116, 2), (376, 92, 110, -2), (382, 101, 100, 3),
+                                         (444, 278, 114, -2), (452, 286, 104, 1), (190, 408, 200, -3), (198, 418, 186, 2)))
+    out += ('<defs><filter id="grit" x="0" y="0" width="100%" height="100%">'
+            '<feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="2" seed="11" result="g"/>'
+            '<feColorMatrix in="g" type="matrix" values="0 0 0 0 0.5  0 0 0 0 0.45  0 0 0 0 0.38  0 0 0 1.1 -0.32" result="speck"/>'
+            '<feComposite in="speck" in2="SourceGraphic" operator="in" result="specks"/>'
+            '<feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="specks"/></feMerge></filter></defs>'
+            '<g filter="url(#grit)">' + "".join(patches) + '</g>' + streaks)
+    out += (f'<ellipse cx="96" cy="350" rx="70" ry="34" fill="#8a6a3a" opacity="0.16"/>'
+            f'<path d="M{W - 34} 0 L{W} 0 L{W} 30 L{W - 12} 22 Z" fill="url(#cloth)"/><path d="M0 {H - 26} L22 {H - 14} L30 {H} L0 {H} Z" fill="url(#cloth)"/>')
+    return out
+
+
+def _phone(cx, cy, angle):
+    """A phone lying on the page, with its shadow."""
+    body = (f'<rect x="-88" y="-185" width="176" height="370" rx="26"/>')
+    return (f'<g transform="translate({cx + 10} {cy + 14}) rotate({angle})" fill="#000" opacity="0.5" filter="url(#soft)">{body}</g>'
+            f'<g transform="translate({cx} {cy}) rotate({angle})">'
+            f'<rect x="-88" y="-185" width="176" height="370" rx="26" fill="#141414" stroke="#3a3a3a" stroke-width="3"/>'
+            f'<rect x="-80" y="-177" width="160" height="354" rx="20" fill="none" stroke="#262626" stroke-width="1.5"/>'
+            f'<rect x="-74" y="-170" width="74" height="74" rx="18" fill="#1d1d1d" stroke="#2e2e2e" stroke-width="2"/>'
+            f'<circle cx="-52" cy="-148" r="13" fill="#060606" stroke="#444" stroke-width="2"/>'
+            f'<circle cx="-52" cy="-118" r="13" fill="#060606" stroke="#444" stroke-width="2"/>'
+            f'<circle cx="-22" cy="-133" r="11" fill="#060606" stroke="#444" stroke-width="2"/>'
+            f'<circle cx="-16" cy="-160" r="4" fill="#d8d2b8" opacity="0.8"/>'
+            f'<path d="M60 -170 L60 170" stroke="#2a2a2a" stroke-width="6" opacity="0.6"/></g>')
+
+
+def _photo(W, H, body, file, defect):
+    """A phone photo of the page on a cloth, with the planted defect:
+    obstructed  a phone lies over the dates, on the page and in the MRZ;
+    partial     shot too close: the number, the dates and the MRZ fall outside;
+    angled      tilted and skewed in a dim frame, a phone over its lower corner;
+    blur        camera shake in low light;
+    damaged     cracks, a fold and worn patches over the dates and the number."""
+    cx, cy = W / 2, H / 2
+    card = (f'<g transform="rotate(4 {cx} {cy}) translate(6 10)"><rect width="{W}" height="{H}" rx="14" fill="#000" opacity="0.4" filter="url(#soft)"/></g>')
+    over, shade = "", 0.0
+    if defect == "obstructed":
+        view, turn = (-60, -50, W + 120, H + 100), -3
+        over = _phone(380, 300, 52)
+    elif defect == "partial":
+        view, turn = (-40, -36, 412, 388), 2.5
+        shade = 0.12
+    elif defect == "angled":
+        view, turn = (-200, -150, W + 400, H + 300), 0
+        shade = 0.34
+        over = _phone(510, 385, 48)
+    elif defect == "blur":
+        view, turn = (-140, -110, W + 280, H + 220), -5
+        shade = 0.36
+    else:                                     # damaged
+        view, turn = (-50, -44, W + 100, H + 88), 1.5
+        body += _damage(W, H)
+    if defect == "angled":
+        place = f"translate(420 300) rotate(-14) skewX(-20) scale(0.9 0.64) translate({-cx} {-cy})"
+    else:
+        place = f"rotate({turn} {cx} {cy})"
+    scene = (_surface(file) + f'<g transform="{place}">{card}{body}</g>' + over)
+    vx, vy, vw, vh = view
+    scene += f'<rect x="{vx}" y="{vy}" width="{vw}" height="{vh}" fill="url(#vignette)"/>'
+    if shade:
+        scene += f'<rect x="{vx}" y="{vy}" width="{vw}" height="{vh}" fill="#120c04" opacity="{shade}"/>'
+    if defect == "blur":
+        scene = (f'<defs><filter id="shake" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6 2.2"/></filter></defs>'
+                 f'<g filter="url(#shake)">{scene}</g>')
+    width = 760
+    height = round(width * vh / vw)
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vx} {vy} {vw} {vh}" width="{width}" height="{height}" font-family="{FONT}" '
+            f'style="background:#2b2b2b" data-capture="photo" data-defect="{defect}">{scene}</svg>')
+
+
 def _wrap_hub(W, H, body, file):
     """Close the SVG with the capture look and the planted defect."""
     defects = set(file.get("defects") or [])
-    view = f"0 0 {W} {H}"
+    for defect in PHOTO_DEFECTS:
+        if defect in defects:
+            return _photo(W, H, body, file, defect)
+    view = f"-28 -28 {W + 56} {H + 56}"            # the whole card in shot, all four corners on the table
     inner = body
-    if "partial" in defects:
-        view = f"{int(W * 0.08)} 0 {int(W * 0.84)} {int(H * 0.72)}"
-    if "blur" in defects:
-        inner = f'<g filter="url(#blur)">{inner}</g>'
     if "glare" in defects:
         inner += (f'<defs><radialGradient id="glare" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#fff" stop-opacity="0.98"/>'
                   f'<stop offset="0.55" stop-color="#fff" stop-opacity="0.85"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>'
@@ -145,13 +272,13 @@ def _wrap_hub(W, H, body, file):
         inner = (f'<defs><filter id="scan"><feColorMatrix type="saturate" values="0.35"/></filter></defs>'
                  f'<g filter="url(#scan)">{inner}</g>'
                  f'<rect x="0.5" y="0.5" width="{W - 1}" height="{H - 1}" fill="none" stroke="#b7b7b2" stroke-width="1"/>')
-        return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view}" width="{W}" height="{H}" font-family="{FONT}" '
+        return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" font-family="{FONT}" '
                 f'style="background:#e9e9e6" data-capture="flat_scan"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#e9e9e6"/>{inner}</svg>')
     # a camera photo: the card lies on a dark table, slightly turned, with a shadow
     inner = (f'<rect x="-2000" y="-2000" width="5000" height="5000" fill="#2b2b2b"/>'
              f'<g transform="rotate(-1.6 {W / 2} {H / 2}) translate(4 6)"><rect x="0" y="0" width="{W}" height="{H}" rx="14" fill="#000" opacity="0.45"/></g>'
              f'<g transform="rotate(-1.6 {W / 2} {H / 2})">{inner}</g>')
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view}" width="{W}" height="{H}" font-family="{FONT}" '
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view}" width="{W + 56}" height="{H + 56}" font-family="{FONT}" '
             f'style="background:#2b2b2b" data-capture="photo">{inner}</svg>')
 
 

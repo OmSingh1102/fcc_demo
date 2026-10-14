@@ -73,6 +73,9 @@ RESUBMIT_ID_REASONS = [
     "Cropped",
     "We require the name written on the front of the ID, not the back",
     "This ID is not in a suitable state",
+    # what analysts recorded on real uploads that were blurred, dark, covered or shot at an angle
+    "The document you have provided is illegible",
+    "Please resubmit a clear, good quality valid proof of identity and ensure all information on the document is visible",
 ]
 
 RESUBMIT_POA_REASONS = [

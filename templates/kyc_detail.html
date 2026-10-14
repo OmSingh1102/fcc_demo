@@ -45,6 +45,7 @@
     <div class="card-body" style="padding-top:0">
         {% if ag.reasons %}
         <div class="note warn small mb-8"><b>Sent to a person:</b> {{ ag.reasons|join('; ') }}</div>
+        {% if ag.resubmit and case.status == 'DataConfirming' %}<div class="small mb-8" id="ai-agent-resubmit"><b>Suggested:</b> Resubmit ID — “{{ ag.resubmit }}”. The Resubmit dialog opens with it filled in; the decision is the analyst's.</div>{% endif %}
         {% elif ag.decision == 'verified' %}
         <div class="note ok small mb-8">Every check passed. The AI Agent confirmed the data, the screening rules had cleared every alert, and the case verified with no analyst step.</div>
         {% else %}

@@ -35,8 +35,12 @@ from fincrime.utils import dates
 KEY_PREFIX = "recon-"
 
 # Analyst-facing words for the hub's synthetic capture defects: the console's
-# document quality badge and what the ID-verification vendor said.
-QUALITY = {"flat_scan": "scan", "partial": "cropped", "blur": "blurred", "glare": "glare", "expired": "expired"}
+# document quality badge and what the ID-verification vendor said. The vendor
+# declines only what it detects; a phone lying on the page, a shot at an
+# angle or a cracked card passes it (as real uploads did), and only the AI
+# Agent's look at the image stops them.
+QUALITY = {"flat_scan": "scan", "partial": "cropped", "blur": "blurred", "glare": "glare", "expired": "expired",
+           "obstructed": "covered", "angled": "angled", "damaged": "damaged"}
 VENDOR_REASON = {
     "flat_scan": "The image is a flat scan or PDF of the document, not a camera photo.",
     "partial": "Document edges not visible.",
@@ -254,14 +258,15 @@ def case_records(v, routed_to=""):
     received = dates.parse(s["received_at"]) or dates.BOOT
     hours = max(0.25, (dates.BOOT - received).total_seconds() / 3600)
     defect = s["capture"] if s["capture"] != "none" else ("tampered" if s["tampered"] else "")
+    declined = defect in VENDOR_REASON
     company = _company(v) if cust["corporate"] else None
     common = dict(
         key=key, case_id=v["id"], nationality=nat, issuing=nat, status="DataConfirming", us_person=nat == "US",
         tags=(["Priority Review"] if cust["risk"] == "High" else []) + (["Uploaded"] if v.get("uploaded") else []),
         poa_required=True,
-        manual_review_reason=["Namescreen hit - WC or CMS"] + (["Vendor rejected"] if defect else []),
+        manual_review_reason=["Namescreen hit - WC or CMS"] + (["Vendor rejected"] if declined else []),
         created_hours_ago=hours, vendor=vocab.VENDORS[_h("recon-vendor", v["id"]) % len(vocab.VENDORS)],
-        vendor_result="Declined" if defect else "Approved", vendor_reason=VENDOR_REASON.get(defect, ""),
+        vendor_result="Declined" if declined else "Approved", vendor_reason=VENDOR_REASON.get(defect, ""),
         docs=_docs(v, company), address=cust["address"], country=v["country_name"], screening_hit=True,
         risk_rating=cust["risk"], routed_to=routed_to,
     )
@@ -283,7 +288,8 @@ def case_records(v, routed_to=""):
     mrz = pp["mrz"]
     kyc["vendor_check"]["extracted"].update(name=" ".join(mrz["primary_tokens"] + mrz["secondary"]), dob=cust["dob"],
                                             id_number=pp["number"], id_type="Passport", expiry=s["passport_expiry"])
-    kyc["recon"] = dict(_recorded(v), uploaded=bool(v.get("uploaded")))
+    # drawn: when this case's ID image was last redrawn (hub documents.REDRAWN), "" when never
+    kyc["recon"] = dict(_recorded(v), uploaded=bool(v.get("uploaded")), drawn=s.get("drawn", ""))
     alert, wc = pair_screening(kyc, key, [_match(v, key)])
     return kyc, alert, wc
 

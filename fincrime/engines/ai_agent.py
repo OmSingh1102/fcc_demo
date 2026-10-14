@@ -31,20 +31,30 @@ from fincrime.utils import dates
 ACTOR = vocab.AI_AGENT
 MODEL = llm.MODEL
 ALPHA2 = {v: k for k, v in ISO3.items()}
-SPOILERS = {"blurred": "blurred", "cut_off": "cut off", "glare": "glare"}
+SPOILERS = {"blurred": "blurred", "cut_off": "cut off", "glare": "glare", "covered": "something covers part of it",
+            "angled": "photographed at an angle or from too far", "damaged": "the document is cracked or worn",
+            "too_dark": "too dark"}
+# A tilt is common on good photos (the model sometimes names one), so on its
+# own it stops nothing; it is listed when something else on the ID is wrong.
+SOFT = {"angled"}
 FILLERS = {"FNU", "LNU", "NFN", "NLN", "-", "."}
-RETRIES = 3           # the gateway allows few concurrent calls; a 429 waits and tries again
+RETRIES = 3           # the gateway allows few concurrent calls; a 429 or a dropped connection waits and tries again
 RETRY_WAIT = 10.0
 
 SYSTEM = ("You read identity documents for a KYC check at a bank. You are given images of a customer's documents. "
           "Report only what is printed and legible in the images. Never guess, infer or complete a value: if a field "
-          "is not printed, cut off, blurred or hidden by glare, return an empty string for it. Mark a document "
-          "unreadable when any of name, date of birth, document number or expiry on an ID cannot be read with "
-          "certainty. Dates as YYYY-MM-DD.")
+          "is not printed, cut off, blurred, hidden by glare or covered by something, return an empty string for it. "
+          "Mark a document unreadable when any of name, date of birth, document number or expiry on an ID cannot be "
+          "read with certainty. Name every capture problem you see: blurred; cut_off (part of the document is outside "
+          "the picture); glare; covered (an object such as a phone, a finger or paper lies over part of it); angled "
+          "(photographed at a steep angle or from so far away that the text is small; a slight tilt is normal, not a "
+          "problem); damaged (cracked, torn, worn or faded); too_dark. "
+          "Dates as YYYY-MM-DD.")
 
 _DOC = {"type": "object", "additionalProperties": False, "properties": {
     "readable": {"type": "boolean"},
-    "problems": {"type": "array", "items": {"type": "string", "enum": ["blurred", "cut_off", "glare", "other"]}},
+    "problems": {"type": "array", "items": {"type": "string", "enum": ["blurred", "cut_off", "glare", "covered", "angled",
+                                                                      "damaged", "too_dark", "other"]}},
     "surname": {"type": "string", "description": "Surname as printed (on a proof of address: the holder's full name)"},
     "given_names": {"type": "string", "description": "Given names as printed, else empty"},
     "dob": {"type": "string"},
@@ -56,8 +66,23 @@ _DOC = {"type": "object", "additionalProperties": False, "properties": {
     "note": {"type": "string", "description": "One short sentence on anything wrong with the document, else empty"}},
     "required": ["readable", "problems", "surname", "given_names", "dob", "nationality_code", "document_number", "expiry", "address",
                  "issued_on", "note"]}
-SCHEMA = {"type": "object", "additionalProperties": False, "properties": {"id": _DOC, "poa": _DOC},
+# The ID's read also says whether the whole document and its MRZ are in shot.
+_ID = dict(_DOC, properties=dict(_DOC["properties"],
+    edges_visible={"type": "boolean", "description": "All four corners and edges of the document are inside the picture"},
+    mrz_visible={"type": "boolean", "description": "Both machine-readable (MRZ) lines at the bottom of a passport page are fully "
+                                                   "visible and legible, with nothing over them"}),
+           required=_DOC["required"] + ["edges_visible", "mrz_visible"])
+SCHEMA = {"type": "object", "additionalProperties": False, "properties": {"id": _ID, "poa": _DOC},
           "required": ["id", "poa"]}
+
+# What an analyst asks the customer for when the ID itself is the problem
+# (vocab.RESUBMIT_ID_REASONS); the agent suggests it, the analyst decides.
+RESUBMIT_CROPPED = "Cropped"
+RESUBMIT_DAMAGED = "This ID is not in a suitable state"
+RESUBMIT_ILLEGIBLE = "The document you have provided is illegible"
+RESUBMIT_UNCLEAR = ("Please resubmit a clear, good quality valid proof of identity and ensure all information on the "
+                    "document is visible")
+RESUBMIT_EXPIRED = "The document you have submitted is expired"
 
 
 # ── which case, which images ─────────────────────────────────────────────────
@@ -93,7 +118,8 @@ def read(case, render, call=None, sleep=time.sleep):
         try:
             return call(SYSTEM, content, SCHEMA, max_tokens=3000)
         except WorkflowError as exc:
-            if " 429" not in str(exc) or attempt == RETRIES - 1:
+            # a busy gateway (429) or a dropped connection is worth another try
+            if not any(m in str(exc) for m in (" 429", "Could not reach")) or attempt == RETRIES - 1:
                 raise
             sleep(RETRY_WAIT * (attempt + 1))
 
@@ -144,6 +170,31 @@ def _poa_address(read, country):
     return read
 
 
+def resubmit_reason(got, record_checks):
+    """The Resubmit ID reason that fits what the agent found on the ID, or ""
+    when the ID itself is fine (a name or address mismatch is not the
+    customer's photo to retake)."""
+    idr = (got or {}).get("id") or {}
+    problems = set(idr.get("problems") or [])
+    failed = {c["check"] for c in record_checks if not c["ok"]}
+    if "ID readable" in failed:
+        if "cut_off" in problems:
+            return RESUBMIT_CROPPED
+        if "damaged" in problems:
+            return RESUBMIT_DAMAGED
+        if problems & {"blurred", "too_dark"}:
+            return RESUBMIT_ILLEGIBLE
+        if problems & {"covered", "angled", "glare"}:
+            return RESUBMIT_UNCLEAR
+        if idr.get("edges_visible") is False:        # out of shot, and nothing else named
+            return RESUBMIT_CROPPED
+        return RESUBMIT_UNCLEAR
+    expiry = next((c for c in record_checks if c["check"] == "Expiry"), None)
+    if expiry and not expiry["ok"] and expiry["note"].startswith("ID expired"):
+        return RESUBMIT_EXPIRED
+    return ""
+
+
 def _check(out, check, crm, document, ok, note=""):
     out.append({"check": check, "crm": crm or "", "document": document or "", "ok": bool(ok), "note": note})
 
@@ -155,10 +206,17 @@ def checks(case, got, now=None):
     client = case["client"]
     idr, poa = got.get("id") or {}, got.get("poa") or {}
     out = []
-    spoilt = [SPOILERS[p] for p in idr.get("problems", []) if p in SPOILERS]
-    _check(out, "ID readable", "", "readable" if idr.get("readable") and not spoilt else "not readable",
-           idr.get("readable") and not spoilt,
-           "" if idr.get("readable") and not spoilt else f"ID could not be read: {', '.join(spoilt) or idr.get('note') or 'unclear'}")
+    named = [p for p in idr.get("problems", []) if p in SPOILERS]
+    spoilt = [SPOILERS[p] for p in named if p not in SOFT]
+    if idr.get("edges_visible") is False and "cut off" not in spoilt:
+        spoilt.append("its edges are not all in the picture")
+    if idr.get("mrz_visible") is False and _id_doc(case).get("category") == "Passport":
+        spoilt.append("the MRZ is not fully visible")
+    if spoilt:
+        spoilt += [SPOILERS[p] for p in named if p in SOFT]
+    ok = bool(idr.get("readable")) and not spoilt
+    _check(out, "ID readable", "", "readable" if ok else "not readable", ok,
+           "" if ok else f"ID could not be read: {', '.join(spoilt) or idr.get('note') or 'unclear'}")
 
     printed = " ".join(x for x in (idr.get("surname", ""), idr.get("given_names", "")) if x)
     same, name_value = name_verdict(client["legal_name"], idr.get("surname", ""), idr.get("given_names", ""))
@@ -244,6 +302,7 @@ def decide(case, alert_case, wc, perceived):
             record["reasons"] = [str(exc)]
     if record["reasons"]:
         record["decision"] = "human"
+        record["resubmit"] = resubmit_reason(record["read"], record["checks"])
         case["screening"]["workflow"] = "human-in-the-loop"
         workflow._audit(case, ACTOR, "Sent to a person", "; ".join(record["reasons"]))
     else:
