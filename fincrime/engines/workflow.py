@@ -225,14 +225,17 @@ def poa_checks(case, now=None):
         return [{"label": "Proof of address uploaded", "ok": False, "detail": "No proof of address on the case."}]
     d = docs[0]
     checks = []
+    kind = d.get("kind", "")
     issued = dates.parse(d.get("issued_on") or "")
-    if issued is None:
+    if kind in vocab.POA_NO_AGE_LIMIT:
+        checks.append({"label": "Issued within the last 6 months", "ok": True,
+                       "detail": f"not required: {vocab.ACCEPTED_POA_TYPES[kind]} is a permanent card"})
+    elif issued is None:
         checks.append({"label": "Issued within the last 6 months", "ok": False, "detail": "The document shows no issue date."})
     else:
         age = ((now or dates.now()) - issued).days
         checks.append({"label": "Issued within the last 6 months", "ok": age <= vocab.POA_MAX_AGE_DAYS,
                        "detail": f"issued {d['issued_on']}, {age} days ago (limit {vocab.POA_MAX_AGE_DAYS})"})
-    kind = d.get("kind", "")
     checks.append({"label": "Accepted document type (internal library)", "ok": kind in vocab.ACCEPTED_POA_TYPES,
                    "detail": vocab.ACCEPTED_POA_TYPES.get(kind, kind.replace("_", " ") or "unknown type")})
     country = (d.get("country") or "").upper()

@@ -1175,7 +1175,7 @@ def ai_screening_rules():
 # stored on the case, so a restart does not read a case twice.
 AI_AGENT_WORKERS = 2          # the gateway refuses more concurrent connections
 AI_AGENT_LOCK = threading.Lock()
-AI_AGENT = {"running": False, "busy": set(), "threads": [], "done": 0, "errors": 0, "verdicts": 0, "started_by": "",
+AI_AGENT = {"running": False, "busy": set(), "threads": [], "done": 0, "errors": 0, "verdicts": 0, "rechecked": 0, "started_by": "",
             "started_at": "", "stopped": "", "autostarted": False}
 AGENT_LABELS = {"verified": "Handled by AI", "screening": "Confirmed by AI · alert left for an analyst",
                 "human": "Sent to a person"}
@@ -1204,6 +1204,18 @@ def _agent_finish(case, perceived):
     return record
 
 
+def _agent_recheck(case):
+    """Under the lock: the agent's current checks on a stored read (no model
+    call); save what changed."""
+    alert, wc = _linked(case)
+    ai_agent.recheck(case, alert, wc)
+    AI_AGENT["rechecked"] += 1
+    _save("kyc", case)
+    if alert:
+        _save("alert", alert)
+        _save("wc", wc)
+
+
 def _agent_verdict(case):
     """A case read before verdicts existed: Claude's verdict from the stored
     read (one text call, no images), stored beside the decision."""
@@ -1221,7 +1233,12 @@ def _agent_worker():
         with AI_AGENT_LOCK:
             case = next((c for c in KYC_CASES if ai_agent.eligible(c) and not c.get("ai_agent")
                          and c["id"] not in AI_AGENT["busy"]), None)
-            if case is None:            # new cases first; then verdicts for earlier reads
+            if case is None:            # new cases first; then cases changed checks may now pass (no model call)
+                case = next((c for c in KYC_CASES if ai_agent.needs_recheck(c) and c["id"] not in AI_AGENT["busy"]), None)
+                if case is not None:
+                    _agent_recheck(case)
+                    continue
+            if case is None:            # then verdicts for earlier reads
                 case = next((c for c in KYC_CASES if ai_agent.needs_verdict(c) and c["id"] not in AI_AGENT["busy"]), None)
                 backfill = case is not None
             if case is None:

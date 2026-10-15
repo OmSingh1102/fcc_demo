@@ -107,12 +107,16 @@ def _vn_mergers():
 POLICY = ("The ID must be fully legible (all four edges and the MRZ in shot, nothing covering it, not blurred or "
           "damaged), not expired, and its name, date of birth, nationality and number must match the record (a "
           "spelling variant, a nickname, another word order or an added middle name is acceptable). The proof of "
-          "address must be legible, issued within the last 6 months, and show the customer's registered address. "
+          "address must be legible, issued within the last 6 months (except an Aadhaar card: it is a permanent "
+          "card, so its date of issue does not matter), and show the customer's registered address. "
           "On 1 July 2025 Vietnam merged provinces and abolished district-level units, so an address may name a "
           "former province or district where the other names the province it joined; that is the same place. "
           f"Former → current: {_vn_mergers()}.")
 # Bumped when POLICY changes: verdicts given under an older one are redone.
-POLICY_VERSION = 2
+POLICY_VERSION = 3
+# Bumped when the checks change: a case they sent to a person, and no one has
+# touched since, is checked again on its stored read (recheck).
+RULES_VERSION = 2
 VERDICT_LABELS = {"verify": "Verify", "send_to_person": "Send to a person"}
 
 # What an analyst asks the customer for when the ID itself is the problem
@@ -363,7 +367,8 @@ def checks(case, got, now=None):
                "" if verdict == "same" else f"Address on the proof of address does not match the CRM ({verdict.replace('_', ' ')})")
         failures = workflow.poa_failures(case, now)
         issued = dates.parse(poa.get("issued_on", ""))
-        if issued is not None and (now - issued).days > vocab.POA_MAX_AGE_DAYS:
+        kind = (workflow.poa_docs(case) or [{}])[0].get("kind", "")
+        if issued is not None and (now - issued).days > vocab.POA_MAX_AGE_DAYS and kind not in vocab.POA_NO_AGE_LIMIT:
             failures.append({"label": "Issued within the last 6 months", "detail": f"the document reads {poa['issued_on']}"})
         _check(out, "Proof of address checks", "", "; ".join(f["detail"] for f in failures) or "passed", not failures,
                "; ".join(f"{f['label']}: {f['detail']}" for f in failures))
@@ -393,7 +398,7 @@ def decide(case, alert_case, wc, perceived):
     """The quick half: check the read and act on it. Mutates the case (and,
     when it confirms, the screening and watchlist cases the rules touch);
     the caller saves them."""
-    record = dict(perceived, checks=[], reasons=[])
+    record = dict(perceived, checks=[], reasons=[], rules=RULES_VERSION)
     values = {}
     if record["error"]:
         record["reasons"] = [f"AI Agent could not read the documents: {record['error']}"]
@@ -418,6 +423,32 @@ def decide(case, alert_case, wc, perceived):
         attach_verdict(record, record["verdict"])            # shown and counted; the rules above decided
     case["ai_agent"] = record
     return record
+
+
+def needs_recheck(case):
+    """A case the agent sent to a person under older checks, still in Data
+    Confirming, and untouched since: no one reserved it or acted on it."""
+    rec = case.get("ai_agent") or {}
+    return (rec.get("decision") == "human" and bool(rec.get("read")) and not rec.get("error")
+            and rec.get("rules", 1) != RULES_VERSION and case["status"] == "DataConfirming"
+            and not case.get("current_reviewer")
+            and all(e.get("actor") == ACTOR for e in case.get("audit", []) if e.get("at", "") >= rec.get("at", "")))
+
+
+def recheck(case, alert_case, wc):
+    """The current checks on the stored read, with no new look at the images.
+    A case that now passes them is confirmed as decide() confirms one; a case
+    that still fails stays with a person, its reasons brought up to date."""
+    old = case["ai_agent"]
+    found, _ = checks(case, old["read"])
+    if any(not c["ok"] for c in found):
+        old.update(checks=found, reasons=[c["note"] for c in found if not c["ok"]], rules=RULES_VERSION,
+                   resubmit=resubmit_reason(old["read"], found))
+        return old
+    workflow._audit(case, ACTOR, "Checked again", "The agent's checks changed; the stored read now passes every one.")
+    case["screening"]["workflow"] = "auto-verified"
+    return decide(case, alert_case, wc, {k: v for k, v in old.items()
+                                         if k in ("at", "model", "read", "usage", "seconds", "error", "verdict")})
 
 
 def run_case(case, alert_case, wc, render, call=None, sleep=time.sleep):

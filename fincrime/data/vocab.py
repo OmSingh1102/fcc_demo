@@ -217,6 +217,9 @@ ACCEPTED_POA_TYPES = {"utility_bill": "Utility bill", "bank_statement": "Bank st
                       "aadhaar": "Aadhaar (address side)", "residence_confirmation": "Residence confirmation (Form CT07)",
                       "military_orders": "Military orders / LES"}
 POA_MAX_AGE_DAYS = 183
+# A permanent card that proves the address: the age limit is for bills and
+# statements, not for a card's date of issue.
+POA_NO_AGE_LIMIT = ("aadhaar",)
 # Demo list only — the real hub reads the internal library of sanctioned and
 # prohibited jurisdictions. ISO-2 codes, as the seed stores nationalities.
 SANCTIONED_OR_PROHIBITED = {"RU": "Russian Federation", "IR": "Iran", "KP": "North Korea", "SY": "Syria",

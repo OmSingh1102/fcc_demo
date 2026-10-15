@@ -3,6 +3,7 @@ the customer have to do? A possible fraud upload is never bounced to the
 customer; it goes to a person."""
 import time
 
+from fincrime.data import vocab
 from fincrime.hub import documents
 from fincrime.hub.agents import finding, skipped, step
 from fincrime.hub.similarity import fold, squash, tokens
@@ -130,7 +131,9 @@ def run(case, settings):
     # proof of address
     poa = docs["poa"]
     max_days = POA_MAX_DAYS.get(strictness, 183)
-    if s["poa_age_days"] > max_days:
+    if poa["kind"] in vocab.POA_NO_AGE_LIMIT:
+        findings.append(finding("POA", f"{poa['type']}: a permanent card, no age limit.", "good"))
+    elif s["poa_age_days"] > max_days:
         hit("POA_TOO_OLD", f"{poa['type']} issued {s['poa_age_days']} days ago; the limit is {max_days} days.")
     else:
         findings.append(finding("POA", f"{poa['type']} issued {s['poa_age_days']} days ago (within {max_days} days).", "good"))

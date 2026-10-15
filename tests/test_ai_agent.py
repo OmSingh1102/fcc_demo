@@ -287,6 +287,53 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual([[b["type"] for b in sent] for sent in stub.sent], [["text"]])   # no images sent again
         self.assertIn("agrees with the rules on 1 of 1 (100%)", self.c.get("/ai-screening").data.decode("utf-8"))
 
+    # ── an Aadhaar card has no age limit; older decisions are checked again ──
+    def poa_kind(self, kind):
+        return lambda c: (ai_agent.workflow.poa_docs(c) or [{}])[0].get("kind") == kind
+
+    def old_read(self, case):
+        read = perfect_read(case)
+        read["poa"]["issued_on"] = "2024-10-14"                             # an Aadhaar card's date of issue
+        return read
+
+    def test_an_aadhaar_card_has_no_age_limit(self):
+        card = self.clean(self.poa_kind("aadhaar"))
+        rec, _ = self.run_agent(card, answer=self.old_read(card))
+        self.assertEqual(rec["decision"], "verified", rec["reasons"])
+        self.assertIn("except an Aadhaar card", ai_agent.POLICY)
+        # the Data Confirm checks agree, whatever the upload's date
+        other = self.clean(self.poa_kind("aadhaar"))
+        ai_agent.workflow.poa_docs(other)[0]["issued_on"] = "2025-01-02"
+        self.assertEqual(ai_agent.workflow.poa_failures(other), [])
+        # a bill read as two years old still goes to a person
+        bill = self.clean(self.poa_kind("utility_bill"))
+        rec, _ = self.run_agent(bill, answer=self.old_read(bill))
+        self.assertEqual(rec["decision"], "human")
+        self.assertTrue(any("Issued within the last 6 months" in r for r in rec["reasons"]), rec["reasons"])
+
+    def test_a_case_sent_to_a_person_under_older_checks_is_checked_again(self):
+        card = self.clean(self.poa_kind("aadhaar"))
+        touched = self.clean(lambda c: self.poa_kind("aadhaar")(c) and c["id"] != card["id"])
+        bill = self.clean(self.poa_kind("utility_bill"))
+        with mock.patch.object(ai_agent.vocab, "POA_NO_AGE_LIMIT", ()):           # the checks before the fix
+            for c in (card, touched, bill):
+                self.assertEqual(self.run_agent(c, answer=self.old_read(c))[0]["decision"], "human")
+                del c["ai_agent"]["rules"]                                    # decided under the first rules
+        self.login("amara.iyer")
+        self.c.post(f"/kyc/{touched['id']}/reserve")                         # a person has it now: left alone
+        self.assertEqual([ai_agent.needs_recheck(c) for c in (card, touched, bill)], [True, False, True])
+        stub = Stub()
+        with mock.patch.object(ai_agent.llm, "call", stub), mock.patch.object(ai_agent, "eligible", lambda x: False):
+            fcc.AI_AGENT.update(running=True, threads=[], busy=set())
+            fcc._agent_worker()
+        self.assertEqual(stub.sent, [])                                       # no model call, no images
+        self.assertEqual((card["status"], card["ai_agent"]["decision"]), ("Verified", "verified"))
+        self.assertIn(("AI Agent", "Checked again"), [(e["actor"], e["action"]) for e in card["audit"]])
+        self.assertEqual((touched["status"], touched["ai_agent"]["decision"]), ("DataConfirming", "human"))
+        self.assertEqual((bill["status"], bill["ai_agent"]["decision"], bill["ai_agent"]["rules"]),
+                         ("DataConfirming", "human", ai_agent.RULES_VERSION))   # still a person's, checked once
+        self.assertFalse(ai_agent.needs_recheck(bill))
+
     # ── the name rules ──────────────────────────────────────────────────────
     def test_name_rules(self):
         v = ai_agent.name_verdict
