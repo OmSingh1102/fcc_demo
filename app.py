@@ -325,7 +325,7 @@ def _load_seed():
 
     redrawn = _redrawn_cases()
     if redrawn:
-        app.logger.info("%d stored case(s) were read from an older drawing of their ID; they start again.", len(redrawn))
+        app.logger.info("%d stored case(s) were read from an older drawing of their documents; they start again.", len(redrawn))
     restored = (StateStore.restore("kyc", KYC_BY_ID, skip=redrawn) + StateStore.restore("alert", ALERT_BY_ID, skip=redrawn)
                 + StateStore.restore("wc", WC_BY_ID, skip=redrawn) + StateStore.restore("analyst", ANALYST_BY_KEY)
                 + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS}))
@@ -337,8 +337,8 @@ def _load_seed():
 
 
 def _redrawn_cases():
-    """Ids (KYC, screening and watchlist) of stored cases whose ID image has
-    been redrawn since they were stored: what was read or decided on them
+    """Ids (KYC, screening and watchlist) of stored cases whose ID or proof-
+    of-address image has been redrawn since they were stored: what was read or decided on them
     was about another picture, so they keep their seeded state and the AI
     Agent reads them again."""
     out = set()

@@ -13,6 +13,8 @@ Text inside an SVG that is loaded through <img> cannot use the page's web
 font, so the cards name Arial, which is on every Windows and macOS box and
 renders Cyrillic. Everything interpolated is XML-escaped.
 """
+import unicodedata
+
 from fincrime.data import vocab
 from fincrime.utils import dates
 from fincrime.utils.text import esc, mrz_field, mrz_name, split_name, translit
@@ -133,6 +135,50 @@ def _value(x, y, text, size=13, weight="700", fill="#111", family=FONT):
 
 def _field(x, y, label, value, size=12):
     return _label(x, y, label) + _value(x, y + 14, value, size)
+
+
+# Arial Bold advance widths (per 1000 em), enough to tell whether a line of
+# bold text fits its column; an accented letter measures as its base letter.
+_BOLD = dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ", (722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778,
+                                                667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611)))
+_BOLD.update(zip("abcdefghijklmnopqrstuvwxyz", (556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611,
+                                                611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500)))
+_BOLD.update({ch: 556 for ch in "0123456789#$"})
+_BOLD.update({" ": 278, ",": 278, ".": 278, "-": 333, "/": 278, "(": 333, ")": 333, "&": 722, "'": 238, ":": 333,
+              "Đ": 722, "đ": 611})
+
+
+def text_width(text, size):
+    """Roughly how wide `text` prints in bold Arial at `size` px."""
+    return sum(_BOLD.get(ch, _BOLD.get(unicodedata.normalize("NFD", ch)[:1], 600)) for ch in text) * size / 1000
+
+
+def _lines(text, size, width):
+    out, line = [], ""
+    for word in text.split():
+        joined = f"{line} {word}" if line else word
+        if line and text_width(joined, size) > width:
+            out.append(line)
+            line = word
+        else:
+            line = joined
+    return out + [line]
+
+
+def wraps(text, size, width):
+    """Whether `text` needs more than one line in `width` px."""
+    return text_width(text, size) > width
+
+
+def _value_lines(x, y, text, width, max_lines, size=12, step=16):
+    """A value that wraps inside its column instead of running into the next
+    one; when it needs more than `max_lines` lines the type steps down. Text
+    that fits draws exactly as _value draws it."""
+    if not wraps(text, size, width):
+        return _value(x, y, text, size, "600")
+    while size > 8 and len(_lines(text, size, width)) > max_lines:
+        size -= 0.5
+    return "".join(_value(x, y + i * step * size / 12, line, size, "600") for i, line in enumerate(_lines(text, size, width)))
 
 
 def _mrz_lines(x, y, lines, w):
@@ -300,7 +346,7 @@ def national_id_svg(case, doc, title="NATIONAL IDENTITY CARD", code="ID"):
     if doc.get("side") == "back":
         l1, l2, l3 = _mrz_td1(c, number, expiry, code)
         body += _label(24, 84, "Address / Adresse")
-        body += _value(24, 102, c.get("address") or "Address on file", 12, "600")
+        body += _value_lines(24, 102, c.get("address") or "Address on file", CARD_ADDRESS_WIDTH, 2)   # above the authority (y 140)
         body += _label(24, 140, "Issuing authority")
         body += _value(24, 158, f"CIVIL REGISTRY - {ISO3.get(nat, nat)}", 12, "600")
         body += _field(24, 190, "Date of issue", _long_date(issue), 12)
@@ -376,6 +422,17 @@ def trade_licence_svg(case, doc):
     return _wrap(W, H, body, doc)
 
 
+BILL_ADDRESS_WIDTH = 320       # a statement's service address column
+CARD_ADDRESS_WIDTH = 592       # the address line across the back of an ID card
+
+
+def service_address(address, country_code):
+    """The service address as a statement prints it, with the country."""
+    country = vocab.COUNTRY_NAMES.get((country_code or "").upper(), country_code or "")
+    address = address or "Address on file"
+    return f"{address}, {country}" if country and country.lower() not in address.lower() else address
+
+
 def utility_bill_svg(case, doc, provider="Northgate Utilities", kind="ELECTRICITY STATEMENT"):
     c = case["client"]
     W, H = 620, 800
@@ -411,11 +468,8 @@ def utility_bill_svg(case, doc, provider="Northgate Utilities", kind="ELECTRICIT
         body += _label(40, 100, "ACCOUNT HOLDER")
         body += _value(40, 118, c["legal_name"], 14)
         body += _label(40, 140, "SERVICE ADDRESS")
-        country = vocab.COUNTRY_NAMES.get((doc.get("country") or "").upper(), doc.get("country") or "")
-        address = c.get("address") or "Address on file"
-        if country and country.lower() not in address.lower():
-            address = f"{address}, {country}"
-        body += _value(40, 158, address, 12, "600")
+        # wrapped left of the statement date (x 380), above the amount box (y 230)
+        body += _value_lines(40, 158, service_address(c.get("address"), doc.get("country")), BILL_ADDRESS_WIDTH, 4)
         body += _label(380, 100, "ACCOUNT NUMBER") + _value(380, 118, (doc.get("country") or "NG").upper() + "-" + c["id_number"][-8:].replace("-", ""), 13, family=MONO)
         body += _label(380, 140, "STATEMENT DATE") + _value(380, 158, _long_date(issue if not old else period_end), 12)
         body += _label(380, 180, "BILLING PERIOD") + _value(380, 198, f"{period_start} to {period_end}", 11)

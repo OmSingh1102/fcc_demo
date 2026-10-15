@@ -35,6 +35,9 @@ PHOTO_DEFECTS = ("partial", "blur", "obstructed", "angled", "damaged")
 # When those were last redrawn. The console stamps it on the case, and a
 # stored case read from an older drawing starts again (app._load_seed).
 REDRAWN = "2026-10-14"
+# When a long proof-of-address address started to wrap: it used to run over
+# a statement's date or off the edge of an Aadhaar card.
+POA_REDRAWN = "2026-10-15"
 # The cloth under the photo: base, dark thread, light thread.
 SURFACES = (("#cbbfa8", "#8f8068", "#ebe2d0"), ("#3f5b80", "#283e5c", "#7290b5"),
             ("#5b4737", "#3a2c21", "#806753"), ("#7c7e79", "#575954", "#a7a9a3"))
@@ -90,9 +93,19 @@ def synthesise(case):
     case["synth"] = {"capture": capture, "tampered": tampered, "poa_age_days": poa_age, "poa_issued_on": _iso(issued),
                      "received_at": dates.fmt(received), "passport_issued": _iso(pp_issue), "passport_expiry": _iso(pp_expiry),
                      "sex": sex, "id_number": f"{_h('hub-id', cid) % 10 ** 10:010d}",
-                     "drawn": REDRAWN if capture in PHOTO_DEFECTS else ""}
+                     "drawn": max(d for d, redrawn in (("", True), (REDRAWN, capture in PHOTO_DEFECTS),
+                                                      (POA_REDRAWN, poa_wraps(case))) if redrawn)}
     case["files"] = files
     return case
+
+
+def poa_wraps(case):
+    """Whether the proof of address prints its address on more than one line
+    (so it is drawn differently since POA_REDRAWN)."""
+    poa = case["documents"]["poa"]
+    if poa["kind"] == "aadhaar":
+        return svg_cards.wraps(poa["address"] or "Address on file", 12, svg_cards.CARD_ADDRESS_WIDTH)
+    return svg_cards.wraps(svg_cards.service_address(poa["address"], case["country"]), 12, svg_cards.BILL_ADDRESS_WIDTH)
 
 
 # ── MRZ line 2 ───────────────────────────────────────────────────────────────

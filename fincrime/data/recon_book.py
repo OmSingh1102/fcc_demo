@@ -288,7 +288,8 @@ def case_records(v, routed_to=""):
     mrz = pp["mrz"]
     kyc["vendor_check"]["extracted"].update(name=" ".join(mrz["primary_tokens"] + mrz["secondary"]), dob=cust["dob"],
                                             id_number=pp["number"], id_type="Passport", expiry=s["passport_expiry"])
-    # drawn: when this case's ID image was last redrawn (hub documents.REDRAWN), "" when never
+    # drawn: when this case's ID or proof-of-address image was last redrawn (hub documents.REDRAWN,
+    # POA_REDRAWN), "" when never
     kyc["recon"] = dict(_recorded(v), uploaded=bool(v.get("uploaded")), drawn=s.get("drawn", ""))
     alert, wc = pair_screening(kyc, key, [_match(v, key)])
     return kyc, alert, wc

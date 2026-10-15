@@ -94,10 +94,25 @@ VERDICT_SCHEMA = {"type": "object", "additionalProperties": False, "properties":
     "confidence": {"type": "integer", "description": "0-100: how sure you are that your decision is right"},
     "reason": {"type": "string", "description": "One short sentence"}},
     "required": ["decision", "confidence", "reason"]}
+def _vn_mergers():
+    """Vietnam's 2025 mergers (the address rules' list) in words."""
+    joined, seen = {}, set()
+    for old, new in addresses.VN_MERGED.items():
+        if old.replace(" - ", " ") not in seen:
+            seen.add(old.replace(" - ", " "))
+            joined.setdefault(new.title(), []).append(old.title())
+    return "; ".join(f"{', '.join(olds)} → {new}" for new, olds in sorted(joined.items()))
+
+
 POLICY = ("The ID must be fully legible (all four edges and the MRZ in shot, nothing covering it, not blurred or "
           "damaged), not expired, and its name, date of birth, nationality and number must match the record (a "
           "spelling variant, a nickname, another word order or an added middle name is acceptable). The proof of "
-          "address must be legible, issued within the last 6 months, and show the customer's registered address.")
+          "address must be legible, issued within the last 6 months, and show the customer's registered address. "
+          "On 1 July 2025 Vietnam merged provinces and abolished district-level units, so an address may name a "
+          "former province or district where the other names the province it joined; that is the same place. "
+          f"Former → current: {_vn_mergers()}.")
+# Bumped when POLICY changes: verdicts given under an older one are redone.
+POLICY_VERSION = 2
 VERDICT_LABELS = {"verify": "Verify", "send_to_person": "Send to a person"}
 
 # What an analyst asks the customer for when the ID itself is the problem
@@ -176,7 +191,7 @@ def opinion(case, got, call=None, sleep=time.sleep):
     """Claude's verdict on a read: {decision, confidence, reason, ...} or
     {error}. Touches nothing."""
     started = time.monotonic()
-    out = {"at": dates.now_str(), "model": MODEL}
+    out = {"at": dates.now_str(), "model": MODEL, "policy": POLICY_VERSION}
     try:
         ans, usage, seconds = _ask(call or llm.call, VERDICT_SYSTEM, [{"type": "text", "text": verdict_input(case, got)}],
                                    VERDICT_SCHEMA, 2000, sleep)
@@ -206,10 +221,12 @@ def attach_verdict(record, verdict):
 
 
 def needs_verdict(case):
-    """A case the agent read before verdicts existed: it gets one from its
-    stored read, with no new look at the images."""
+    """A case the agent read before verdicts existed, or whose verdict was
+    given under an older policy: it gets one from its stored read, with no
+    new look at the images."""
     rec = case.get("ai_agent") or {}
-    return bool(rec.get("read")) and not rec.get("error") and "verdict" not in rec
+    return (bool(rec.get("read")) and not rec.get("error")
+            and ("verdict" not in rec or rec["verdict"].get("policy", 1) != POLICY_VERSION))
 
 
 # ── the checks ───────────────────────────────────────────────────────────────

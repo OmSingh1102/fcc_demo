@@ -173,7 +173,8 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual(c["vendor_check"]["result"], "Approved")                   # the vendor missed it, as on real uploads
         self.assertNotIn("Vendor rejected", c["manual_review_reason"])
         self.assertEqual(c["documents"][0]["quality"], "covered")
-        self.assertEqual(c["recon"]["drawn"], recon_book.hub_documents.REDRAWN)
+        hub = recon_book.hub_documents
+        self.assertEqual(c["recon"]["drawn"], hub.POA_REDRAWN if hub.poa_wraps(recon_book.view(c["recon"]["id"])) else hub.REDRAWN)
         rec = self.assert_human(c, "ID could not be read: something covers part of it", problems=["covered"], dob="",
                                 expiry="", mrz_visible=False)
         self.assertEqual(rec["resubmit"], ai_agent.RESUBMIT_UNCLEAR)
@@ -263,6 +264,28 @@ class AiAgentTestCase(unittest.TestCase):
         listing = self.c.get("/kyc/list?verdict=agree").data.decode("utf-8")
         self.assertIn(f'data-case-id="{c["id"]}"', listing)
         self.assertNotIn(f'data-case-id="{c["id"]}"', self.c.get("/kyc/list?verdict=disagree").data.decode("utf-8"))
+
+    def test_a_verdict_under_an_older_policy_is_redone(self):
+        # the policy carries Vietnam's 2025 mergers, from the address rules' own list
+        c = self.clean()
+        rec, stub = self.run_agent(c)
+        self.assertIn("Bac Giang → Bac Ninh", stub.sent[1][0]["text"])
+        self.assertIn("Binh Duong", ai_agent.POLICY)
+        self.assertEqual(rec["verdict"]["policy"], ai_agent.POLICY_VERSION)
+        self.assertFalse(ai_agent.needs_verdict(c))
+        del rec["verdict"]["policy"]                                         # as given under the first policy
+        self.assertTrue(ai_agent.needs_verdict(c))
+        self.login("leah.fernandez")
+        page = self.c.get("/ai-screening").data.decode("utf-8")
+        self.assertIn("1 earlier read(s) waiting for a verdict", page)       # waiting, not counted as judged
+        self.assertNotIn("agrees with the rules on", page)
+        stub = Stub(verdict={"decision": "verify", "confidence": 91, "reason": "Fine."})
+        with mock.patch.object(ai_agent.llm, "call", stub), mock.patch.object(ai_agent, "eligible", lambda x: False):
+            fcc.AI_AGENT.update(running=True, threads=[], busy=set())
+            fcc._agent_worker()
+        self.assertEqual((rec["verdict"]["confidence"], rec["verdict"]["policy"]), (91, ai_agent.POLICY_VERSION))
+        self.assertEqual([[b["type"] for b in sent] for sent in stub.sent], [["text"]])   # no images sent again
+        self.assertIn("agrees with the rules on 1 of 1 (100%)", self.c.get("/ai-screening").data.decode("utf-8"))
 
     # ── the name rules ──────────────────────────────────────────────────────
     def test_name_rules(self):

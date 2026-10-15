@@ -5,7 +5,9 @@ routes are covered in test_hub_ui.py.
 Run:  .venv\\Scripts\\python.exe -m unittest -v tests.test_hub
 """
 import copy
+import html
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -429,14 +431,43 @@ class DocumentTests(unittest.TestCase):
             svg = documents.render(c, "passport")
             self.assertIn(f'data-defect="{capture}"', svg)
             self.assertIn('fill="url(#cloth)"', svg)
-            self.assertEqual(c["synth"]["drawn"], documents.REDRAWN)
+            # the latest redraw of its images: this photo, or a wrapped proof of address since
+            self.assertEqual(c["synth"]["drawn"], documents.POA_REDRAWN if documents.poa_wraps(c) else documents.REDRAWN)
             self.assertIn(code, c["intake"]["codes"], capture)
             self.assertEqual(c["intake"]["decision"], "Reject")
             self.assertTrue(c["intake"]["message"], capture)
         clean = next(c for c in book() if c["synth"]["capture"] == "none" and not c["synth"]["tampered"])
-        self.assertEqual(clean["synth"]["drawn"], "")
+        self.assertEqual(clean["synth"]["drawn"], documents.POA_REDRAWN if documents.poa_wraps(clean) else "")
         self.assertIn('viewBox="-28 -28', documents.render(clean, "passport"))        # all four corners in shot
         self.assertNotIn("data-defect", documents.render(clean, "passport"))
+
+    def test_a_long_address_wraps_clear_of_the_statement_date(self):
+        # a long proof-of-address address used to run over a statement's date
+        # (and off the edge of an Aadhaar card); it wraps in its own column now,
+        # and the case is stamped so a read of the old drawing is redone
+        def lines(svg, x):
+            return [html.unescape(t) for t in re.findall(rf'<text x="{x}" y="[\d.]+"[^>]*font-weight="600"[^>]*>([^<]*)</text>', svg)]
+
+        bills = [c for c in book() if c["documents"]["poa"]["kind"] != "aadhaar"]
+        long = next(c for c in bills if documents.poa_wraps(c))
+        address = documents.svg_cards.service_address(long["documents"]["poa"]["address"], long["country"])
+        drawn = lines(documents.render(long, "poa"), 40)
+        self.assertGreater(len(drawn), 1)
+        self.assertEqual(" ".join(drawn), address)
+        self.assertTrue(all(documents.svg_cards.text_width(t, 12) <= documents.svg_cards.BILL_ADDRESS_WIDTH for t in drawn))
+        self.assertLess(40 + documents.svg_cards.BILL_ADDRESS_WIDTH, 380)                  # the date column starts at 380
+        self.assertIn("STATEMENT DATE", documents.render(long, "poa"))
+        self.assertEqual(long["synth"]["drawn"], documents.POA_REDRAWN)
+        # an address that fits draws exactly as before, and the case is not restamped
+        short = next(c for c in bills if not documents.poa_wraps(c) and c["synth"]["capture"] not in documents.PHOTO_DEFECTS)
+        self.assertEqual(lines(documents.render(short, "poa"), 40),
+                         [documents.svg_cards.service_address(short["documents"]["poa"]["address"], short["country"])])
+        self.assertEqual(short["synth"]["drawn"], "")
+        # an Aadhaar keeps its address on the card, in at most two lines above the issuing authority
+        card = next(c for c in book() if c["documents"]["poa"]["kind"] == "aadhaar" and documents.poa_wraps(c))
+        drawn = lines(documents.render(card, "poa"), 24)[:2]
+        self.assertEqual(" ".join(drawn), card["documents"]["poa"]["address"])
+        self.assertTrue(all(24 + documents.svg_cards.text_width(t, 12) <= 616 for t in drawn))
 
     def test_rejections_carry_a_customer_message(self):
         rejected = [c for c in book() if c["status"] == triage.STATUS_AUTO_REJECTED]
