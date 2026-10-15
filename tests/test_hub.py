@@ -145,6 +145,13 @@ class NameTests(unittest.TestCase):
         return names.analyse(c["country"], c["customer"]["name"], p["viz"], p["mrz"], c["documents"]["secondary"]["name"],
                              c["customer"]["corporate"], c["customer"]["ubo"])
 
+    def test_the_holders_sex_from_the_given_names(self):
+        v = names.sex_from_given
+        self.assertEqual((v("JENNIFER KAY", "US"), v("RAJESH KANTILAL", "IN"), v("KIRAN", "IN")), ("F", "M", ""))
+        self.assertEqual((v("THỊ THU TRANG", "VN"), v("VĂN HIẾU", "VN"), v("QUỐC BẢO", "VN")), ("F", "M", "M"))
+        self.assertEqual((v("MINH HOA", "VN"), v("THANH AN", "VN")), ("F", ""))       # the personal name first; both-sex names stay open
+        self.assertEqual((v("NAGA SAI SRI LAKSHMI", "IN"), v("VENKATA NAGA SRINIVAS", "IN")), ("F", "M"))   # past the Telugu prefixes
+
     def test_mojibake_repair(self):
         self.assertEqual(names.repair_mojibake("VÅ© CÃ´ng KhÃ¡nh"), ("Vũ Công Khánh", True))
         self.assertEqual(names.repair_mojibake("Upadhyay Ashish"), ("Upadhyay Ashish", None))
@@ -485,6 +492,23 @@ class DocumentTests(unittest.TestCase):
         drawn = lines(documents.render(card, "poa"), 24)[:2]
         self.assertEqual(" ".join(drawn), card["documents"]["poa"]["address"])
         self.assertTrue(all(24 + documents.svg_cards.text_width(t, 12) <= 616 for t in drawn))
+
+    def test_the_drawn_sex_follows_what_the_file_says(self):
+        # a relationship on the address, an honorific, a married-name change, then the names
+        self.assertEqual(by_id("KYC-2026-3140")["synth"]["sex"], "F")                    # Jennifer Smith
+        self.assertEqual(by_id("KYC-2026-3127")["synth"]["sex"], "M")                    # Ken Sullivan
+        self.assertEqual(by_id("KYC-2026-3604")["synth"]["sex"], "F")                    # D/O on the Aadhaar
+        case = by_id("KYC-2026-3140", fresh=True)
+        case["documents"]["poa"]["address"] = "S/O: Ramesh, 12 Main Road"
+        self.assertEqual(documents.holder_sex(case), "M")
+        case["documents"]["poa"]["address"], case["customer"]["name"] = "12 Main Road", "Smt. Jennifer Smith"
+        case["documents"]["passport"]["viz"]["given"] = "KIRAN"
+        self.assertEqual(documents.holder_sex(case), "F")
+        case["customer"]["name"] = "Kiran Smith"
+        self.assertEqual(documents.holder_sex(case), "")                                # nothing says: the coin toss stays
+        case["raw"] = {"name_variance_type": "Married vs maiden surname"}
+        self.assertEqual(documents.holder_sex(case), "F")
+        self.assertRegex(documents.render(by_id("KYC-2026-3140"), "passport"), r"Sex / Sexe</text><text[^>]*>F</text>")
 
     def test_rejections_carry_a_customer_message(self):
         rejected = [c for c in book() if c["status"] == triage.STATUS_AUTO_REJECTED]

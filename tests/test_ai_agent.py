@@ -4,6 +4,7 @@ and what the agent does with the case.
 
 Run:  .venv\\Scripts\\python.exe -m unittest -v tests.test_ai_agent
 """
+import copy
 import os
 import sys
 import tempfile
@@ -448,6 +449,21 @@ class AiAgentTestCase(unittest.TestCase):
         self.c.post(f"/kyc/{c['id']}/resubmit", data={"decision": "Resubmit ID", "id_reason": ai_agent.RESUBMIT_UNCLEAR})
         self.assertEqual((c["status"], c["resubmit"]["id_reason"]), ("ResubmitID", ai_agent.RESUBMIT_UNCLEAR))
         self.assertNotIn('id="ai-agent-resubmit"', self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8"))
+
+    def test_a_stored_case_takes_its_sex_from_the_file(self):
+        c = self.K["KYC-2026-3140"]                                          # Jennifer Smith
+        alert, wc = fcc._linked(c)
+        self.assertEqual((c["client"]["gender"], alert["screening_info"]["gender"], wc["gender"]), ("F", "Female", "Female"))
+        stale = [copy.deepcopy(r) for r in (c, alert, wc)]                     # as stored under the coin toss
+        stale[0]["client"]["gender"], stale[1]["screening_info"]["gender"], stale[2]["gender"] = "M", "Male", "Male"
+        for kind, record in zip(("kyc", "alert", "wc"), stale):
+            StateStore.save(kind, record)
+        fcc._load_seed()
+        c = fcc.KYC_BY_ID["KYC-2026-3140"]
+        alert, wc = fcc._linked(c)
+        self.assertEqual((c["client"]["gender"], alert["screening_info"]["gender"], wc["gender"]), ("F", "Female", "Female"))
+        self.login("amara.iyer")
+        self.assertIn("Female", self.c.get(f"/wc/{wc['id']}").data.decode("utf-8"))
 
     def test_a_case_stored_from_an_older_drawing_starts_again(self):
         c = self.capture("damaged")

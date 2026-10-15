@@ -9,11 +9,13 @@ the defect is synthetic but the detection is not, and the screens say so.
 """
 import hashlib
 import math
+import re
 from datetime import timedelta
 
 from fincrime.documents import svg_cards
 from fincrime.documents.svg_cards import (FONT, ISO3, MONO, _check_digit, _defs, _field, _footer, _label, _mrz_lines, _pad,
                                           _silhouette, _stamp, _value, _watermark)
+from fincrime.hub import names
 from fincrime.utils import dates
 from fincrime.utils.text import esc, mrz_field
 
@@ -74,7 +76,7 @@ def synthesise(case):
         pp_expiry = received - timedelta(days=30 + (h >> 48) % 370)
     else:
         pp_expiry = pp_issue + timedelta(days=3652)
-    sex = "F" if (h >> 56) % 2 else "M"
+    sex = holder_sex(case) or ("F" if (h >> 56) % 2 else "M")       # a coin toss only when nothing says
     docs = case["documents"]
     defects = []
     if capture != "none":
@@ -97,6 +99,29 @@ def synthesise(case):
                                                       (POA_REDRAWN, poa_wraps(case))) if redrawn)}
     case["files"] = files
     return case
+
+
+# What the file says about the holder's sex, strongest first: a relationship
+# on an Indian address (son / daughter / wife of), an honorific on the name,
+# a married-name change the analysts recorded, then the given names.
+RELATION_SEX = re.compile(r"\b([SDW])\s*/\s*O\b", re.I)
+HONORIFIC_SEX = {"SMT": "F", "MRS": "F", "MS": "F", "MISS": "F", "KUMARI": "F", "SHRI": "M", "MR": "M"}
+MARRIED_NAME = ("married vs maiden surname", "western married surname on form")
+
+
+def holder_sex(case):
+    """'F', 'M' or '' when nothing in the file says."""
+    docs, raw = case["documents"], case.get("raw") or {}
+    for text in (docs["poa"].get("address", ""), docs["secondary"]["address"].get("text", "")):
+        m = RELATION_SEX.match((text or "").strip())
+        if m:
+            return "M" if m.group(1).upper() == "S" else "F"
+    for token in re.findall(r"[A-Za-z]+", case["customer"]["name"])[:1]:
+        if token.upper() in HONORIFIC_SEX:
+            return HONORIFIC_SEX[token.upper()]
+    if (raw.get("name_variance_type") or "").strip().lower() in MARRIED_NAME:
+        return "F"
+    return names.sex_from_given(docs["passport"]["viz"].get("given", ""), case["country"])
 
 
 def poa_wraps(case):

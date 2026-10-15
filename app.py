@@ -336,6 +336,32 @@ def _load_seed():
         relabelled = relabel(KYC_CASES, ALERT_CASES, WC_CASES, ANALYSTS)
         if relabelled:
             app.logger.info("Relabelled %d stored value(s) to the console's current names.", relabelled)
+        resexed = _sync_sex()
+        if resexed:
+            app.logger.info("%d stored case(s) take their sex from the file's names now.", resexed)
+
+
+def _sync_sex():
+    """A file case's sex comes from what the file says about its holder (hub
+    documents.holder_sex); records stored before that rule carry a coin toss.
+    Bring the case, its screening alert and its watchlist case in line with
+    the drawn passport. No one can edit the sex, so nothing a person set is
+    overwritten. Returns how many cases changed."""
+    alerts = {a.get("kyc_case_id"): a for a in ALERT_CASES}
+    changed = 0
+    for case in KYC_CASES:
+        v = recon_book.VIEWS.get((case.get("recon") or {}).get("id", ""))
+        if not v or case.get("agency") or case["client"].get("gender") == v["synth"]["sex"]:
+            continue
+        case["client"]["gender"] = v["synth"]["sex"]
+        label = {"M": "Male", "F": "Female"}[v["synth"]["sex"]]
+        alert = alerts.get(case["id"])
+        if alert:
+            alert.setdefault("screening_info", {})["gender"] = label
+            if alert["id"] in WC_BY_ID:
+                WC_BY_ID[alert["id"]]["gender"] = label
+        changed += 1
+    return changed
 
 
 def _redrawn_cases():

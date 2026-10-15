@@ -158,6 +158,64 @@ def mojibake_lost(text: str) -> str:
     return re.sub("\ufffd+", "\ufffd", fixed) if "\ufffd" in fixed else ""
 
 
+# ── the holder's sex, from the given names ───────────────────────────────────
+# The file has no gender column; the drawn passport's sex marker and the
+# record's gender come from the names it does carry. Folded spellings; a
+# name both sexes use (Kiran, Snehal, Anh, Thanh) is in neither list.
+FEMALE_GIVEN = frozenset("""
+    AARTI ALEXANDRA AMANDA ANA ANITA ANITHA ANKITA ANNAMMA ASHLEY ASHWINI ASWATHY BARBARA BHAVYA BINDU CARMEN CAROL
+    CHRISTINE DANIELA DEBORAH DEEPA DEEPIKA DHARA DIVYA DONNA ELENA ELIZABETH EMILY FARHEEN FATIMA FORAM GABRIELA
+    GAYATHRI ISABEL ITISHREE JACQUELINE JENNIFER JESSICA JYOTI KAREN KATHERINE KAVITA KAVITHA KAVYA KEERTHANA KIMBERLY
+    KOMAL KRUPA LAKSHMI LAURA LEKSHMI LINDA LIPIKA LISA LUCIA MADHURI MANASI MANSI MARGARET MARIA MARY MEENA MEERA MEGHA
+    MELISSA MICHELLE MONIKA MOUMITA NANCY NANDHINI NASREEN NAZIA NEETHU NEHA NIDHI PALLAVI PAROMITA PATRICIA PAYEL POOJA
+    PRAJAKTA PRIYA RASHMI REBECCA RESHMA REVATHI RITU RITUPARNA ROSA RUKSANA RUPALI SAKSHI SAMANTHA SANA SANGEETHA
+    SARAH SARANYA SASMITA SEEMA SHABANA SHALINI SHARMILA SHRUTI SHWETA SOFIA SONALI SOWMYA STEPHANIE SUDESHNA SUSAN
+    SWATI TANUSHREE USHA VERONICA VICTORIA ZAINAB DURGA
+    BICH CHAU CHI HA HAN HANG HANH HOA HONG HUONG KIM LAN LINH LOAN MAI MY NGA NGAN NGOC NHUNG OANH PHUONG QUYEN THAO
+    THU THUY TRANG TRINH TUYET UYEN VY YEN""".split())
+MALE_GIVEN = frozenset("""
+    AARON ABDUL ALEJANDRO ALEXANDER ALOK ANAND ANDREW ANIKET ANIL ANIRBAN ANKIT ANOOP ANTHONY ARINDAM ARJUN ARNAB ARUN
+    ASHISH BALAJI BENJAMIN BHAVESH BILL BISWAJIT BRIAN CARLOS CHARLES CHRISTOPHER DANIEL DAVID DINESH EDUARDO EDWARD
+    ERIC FAISAL FERNANDO GARY GAURAV GOKUL GREGORY HARISH HEMANT HITESH IMTIAZ IRFAN JACOB JAMES JASON JAVIER JAYESH
+    JEFFREY JOHN JONATHAN JORGE JOSHUA KALPESH KANNAN KARTHIK KENNETH KEVIN LUIS MAHESH MANAS MANIKANDAN MANJUNATH
+    MARCUS MARK MATTHEW MICHAEL MOHAMMED MUKESH NICHOLAS NIKHIL NILESH PARESH PARTHA PATRICK PRABHU PRADEEP
+    PRASAD PRASANTA PRASHANT RAGHAVENDRA RAHUL RAJ RAJESH RAMANA RAMESH RAYMOND RICARDO RICHARD ROBERT ROBERTO ROHIT RONALD RYAN SACHIN
+    SAMUEL SANJAY SANJEEB SANTOSH SARAVANAN SATHISH SAURABH SAYAN SCOTT SENTHIL SIVA SREEJITH STEPHEN STEVEN SUBHAJIT
+    SRINIVAS SUBRAT SUMIT SUNIL SWAPNIL TANMOY THOMAS TIMOTHY TUSHAR TYLER VARUN VIGNESH VIJAY VIKRAM VINEETH VINOTH WASIM
+    WILLIAM YOGESH
+    BAO BINH CONG CUONG DAT DINH DUC DUY GIA HAI HIEU HOANG HUNG HUU HUY KHANG KHOA KIET LONG MINH NAM NGHIA PHONG PHUC QUAN
+    QUANG QUOC SON TAI THANG TIEN TOAN TRUNG TUAN VIET VINH""".split())
+# Vietnamese: the middle name THỊ or VĂN says it outright; a few personal
+# names differ only by their marks once folded (Dũng, a man; Dung, a woman).
+VN_MIDDLE_SEX = {"THI": "F", "VAN": "M"}
+# Telugu names open with a deity's name either sex carries (VENKATA LAKSHMI
+# DURGA, NAGA SAI SRI LAKSHMI): the holder's own name follows them.
+GIVEN_PREFIXES = {"VENKATA", "NAGA", "SAI", "SRI", "SREE", "SATYA"}
+VN_MARKED_SEX = {"DŨNG": "M", "DUNG": "F"}
+
+
+def sex_from_given(given: str, country: str = "") -> str:
+    """'F', 'M' or '' from given names as printed ('THỊ THU TRANG',
+    'JENNIFER KAY'): a Vietnamese name by its middle names, then its personal
+    (last) name; any other by its first given name after a Telugu prefix."""
+    printed = (given or "").upper().split()
+    folded = [fold(t) for t in printed]
+    if not folded:
+        return ""
+    if country == "VN":
+        for t in folded[:-1]:
+            if t in VN_MIDDLE_SEX:
+                return VN_MIDDLE_SEX[t]
+        if printed[-1] in VN_MARKED_SEX:
+            return VN_MARKED_SEX[printed[-1]]
+        for t in [folded[-1]] + folded[:-1]:
+            if t in FEMALE_GIVEN or t in MALE_GIVEN:
+                return "F" if t in FEMALE_GIVEN else "M"
+        return ""
+    t = next((t for t in folded if t not in GIVEN_PREFIXES), "")
+    return "F" if t in FEMALE_GIVEN else "M" if t in MALE_GIVEN else ""
+
+
 def strip_parenthetical(text: str):
     """'Aswathy Panicker (George)' → ('Aswathy Panicker', ['George'])."""
     extras = re.findall(r"\(([^()]*)\)", text or "")
