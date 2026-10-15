@@ -144,6 +144,20 @@ def repair_mojibake(text: str):
     return (fixed, True) if not _MOJIBAKE.search(fixed) else (text, False)
 
 
+def mojibake_lost(text: str) -> str:
+    """A broken name whose round trip fails because the text itself lost
+    bytes on the way (the third byte of 'ọ' has no Windows-1252 character):
+    the name decoded with each lost character as U+FFFD, else ''.
+    'Phan Ngá»c Äáº¡t' → 'Phan Ng\ufffdc \ufffdạt'."""
+    if not text or not _MOJIBAKE.search(text):
+        return ""
+    try:
+        fixed = text.encode("cp1252").decode("utf-8", errors="replace")
+    except UnicodeEncodeError:
+        return ""
+    return re.sub("\ufffd+", "\ufffd", fixed) if "\ufffd" in fixed else ""
+
+
 def strip_parenthetical(text: str):
     """'Aswathy Panicker (George)' → ('Aswathy Panicker', ['George'])."""
     extras = re.findall(r"\(([^()]*)\)", text or "")

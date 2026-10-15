@@ -25,6 +25,7 @@ alert left stay with people. The result sits on the case as case["ai_agent"].
 """
 import base64
 import json
+import re
 import time
 
 from fincrime.data import vocab
@@ -116,7 +117,7 @@ POLICY = ("The ID must be fully legible (all four edges and the MRZ in shot, not
 POLICY_VERSION = 3
 # Bumped when the checks change: a case they sent to a person, and no one has
 # touched since, is checked again on its stored read (recheck).
-RULES_VERSION = 2
+RULES_VERSION = 3
 VERDICT_LABELS = {"verify": "Verify", "send_to_person": "Send to a person"}
 
 # What an analyst asks the customer for when the ID itself is the problem
@@ -239,16 +240,25 @@ def _name_key(text):
     return sorted(similarity.tokens(text))
 
 
-def name_verdict(crm, surname, given):
+def name_verdict(crm, surname, given, filed=""):
     """Is the CRM name the person the ID names? The hub's own name rules
     decide: the ID's surname is among the CRM's names (any typing, a
     compound part, a spelling variant) and a given name agrees (exact,
     nickname, short form or spelling variant; an initial alone is not
-    enough). Returns (same, value to confirm)."""
-    crm_fixed, repaired = names.repair_mojibake(crm)
+    enough). `filed` is the name as the file wrote it before the console put
+    it in capitals: broken characters (UTF-8 read as Windows-1252) repair
+    from that text, since capitals change the bytes they stand for, and a
+    byte the file itself lost stands for one letter. Returns (same, value
+    to confirm)."""
+    source = filed if filed and filed.upper() == crm else crm
+    crm_fixed, repaired = names.repair_mojibake(source)
     c, s, g = similarity.tokens(crm_fixed), similarity.tokens(surname), similarity.tokens(given)
     if not c or not (s or g):
         return False, crm
+    if repaired is False:
+        found = _lost_letters_match(names.mojibake_lost(source), s + g)
+        if found:
+            return True, " ".join(found)
     if _name_key(crm_fixed) == sorted(s + g):
         return True, (similarity.fold(" ".join(c)) if repaired else crm)
     if not s:
@@ -266,6 +276,35 @@ def name_verdict(crm, surname, given):
     # the ID's spelling, in the order the CRM keeps (surname first or last)
     surname_first = c[0] in names.surname_forms(s)
     return True, " ".join(s + g if surname_first else g + s)
+
+
+def _lost_letters_match(lossy, printed):
+    """The ID's name tokens, in the record's order, when each token of a
+    record name that lost characters matches a different one of them: a lost
+    character stands for exactly one letter, every other letter is the same.
+    None when they do not."""
+    if not lossy:
+        return None
+    want = [re.compile("".join("[A-Z]" if ch == "\ufffd" else re.escape(similarity.fold(ch)) for ch in tok) + "$")
+            for tok in lossy.split()]
+    left, found = list(printed), []
+    if len(want) != len(left):
+        return None
+    for w in want:
+        hit = next((t for t in left if w.match(t)), None)
+        if hit is None:
+            return None
+        left.remove(hit)
+        found.append(hit)
+    return found
+
+
+def _filed_name(case):
+    """The record's name as the reconciliation log wrote it, for a case
+    built from the file; '' for any other case."""
+    from fincrime.data import recon_book                 # lazy: recon_book imports the seed builders
+    v = recon_book.VIEWS.get((case.get("recon") or {}).get("id", ""))
+    return v["customer"]["name"] if v else ""
 
 
 def _poa_address(read, country):
@@ -328,7 +367,8 @@ def checks(case, got, now=None):
            "" if ok else f"ID could not be read: {', '.join(spoilt) or idr.get('note') or 'unclear'}")
 
     printed = " ".join(x for x in (idr.get("surname", ""), idr.get("given_names", "")) if x)
-    same, name_value = name_verdict(client["legal_name"], idr.get("surname", ""), idr.get("given_names", ""))
+    same, name_value = name_verdict(client["legal_name"], idr.get("surname", ""), idr.get("given_names", ""),
+                                    filed=_filed_name(case))
     _check(out, "Name", client["legal_name"], printed, same,
            "" if same else ("Name not readable on the ID" if not printed else "Name on the ID differs from the CRM"))
 

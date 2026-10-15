@@ -347,6 +347,25 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertTrue(v("KEVIN NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                        # the hub knows Kevin for Khoa
         self.assertFalse(v("BRANDON NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                     # another given name
 
+    def test_a_garbled_record_name_repairs_from_the_files_text(self):
+        # the console keeps the record's name in capitals, and capitals change
+        # the bytes a garbled name stands for: it repairs from the file's text
+        v, filed = ai_agent.name_verdict, "VÃµ Gia SÆ¡n"
+        self.assertEqual(filed.upper(), "VÃΜ GIA SÆ¡N")
+        self.assertFalse(v(filed.upper(), "VÕ", "GIA SƠN")[0])
+        self.assertEqual(v(filed.upper(), "VÕ", "GIA SƠN", filed=filed), (True, "VO GIA SON"))
+        self.assertFalse(v("NGUYEN VAN AN", "VÕ", "GIA SƠN", filed=filed)[0])        # an edited record: the file no longer applies
+        # a byte the file itself lost stands for exactly one letter
+        filed = "Phan Ngá»c Äáº¡t"
+        self.assertEqual(v(filed.upper(), "PHAN", "NGỌC ĐẠT", filed=filed), (True, "PHAN NGOC DAT"))
+        self.assertFalse(v(filed.upper(), "PHAN", "NGỌC TÂM", filed=filed)[0])
+        self.assertFalse(v(filed.upper(), "PHAN", "NGỌC ĐẠT ANH", filed=filed)[0])
+        # the agent finds the file's text for a case of the book
+        c = self.K["KYC-2026-3353"]
+        self.assertEqual(ai_agent._filed_name(c), "VÃµ Gia SÆ¡n")
+        name = next(x for x in ai_agent.checks(c, perfect_read(c))[0] if x["check"] == "Name")
+        self.assertTrue(name["ok"], name)
+
     def test_only_auto_verified_individuals_are_taken(self):
         self.assertTrue(ai_agent.eligible(self.K["KYC-2026-3011"]))      # auto-verified, even though Amara holds it
         self.assertFalse(ai_agent.eligible(self.K["KYC-2026-3012"]))     # an alert left: the analysts' from the start

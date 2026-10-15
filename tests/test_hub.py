@@ -150,6 +150,9 @@ class NameTests(unittest.TestCase):
         self.assertEqual(names.repair_mojibake("Upadhyay Ashish"), ("Upadhyay Ashish", None))
         text, ok = names.repair_mojibake("Pháº¡m Ngá»c Tuáº¥n")
         self.assertFalse(ok)
+        # the bytes the text lost on the way come back as one marker each
+        self.assertEqual(names.mojibake_lost("Phan Ngá»c Äáº¡t"), "Phan Ng\ufffdc \ufffdạt")
+        self.assertEqual(names.mojibake_lost("VÅ© CÃ´ng KhÃ¡nh"), "")                          # nothing lost
         self.assertEqual(similarity.fold("Ðinh Thị Khánh Linh"), "DINH THI KHANH LINH")
 
     def test_examples_from_the_log(self):
@@ -222,6 +225,20 @@ class AddressTests(unittest.TestCase):
         a = addresses.normalise("PO Box 1445, Dallas, TX 75206", "US")
         self.assertTrue(a["po_box"])
         self.assertTrue(addresses.normalise("Unit 2050 Box 4190, APO AP 96278", "US")["military"])
+        # an APO/FPO address has no street: the same unit or PSC and box is the same home, another box is not
+        for apo in ("Unit 2050 Box 4190, APO AP 96278", "PSC 473 Box 51, FPO AP 96349"):
+            self.assertEqual(addresses.compare(addresses.normalise(apo, "US"),
+                                               addresses.normalise(apo + ", United States", "US")), "same")
+        self.assertNotEqual(addresses.compare(addresses.normalise("Unit 2050 Box 4190, APO AP 96278", "US"),
+                                              addresses.normalise("Unit 2050 Box 4191, APO AP 96278", "US")), "same")
+
+    def test_a_trailing_country_is_neither_city_nor_street(self):
+        a = addresses.normalise("6246 East Palmetto Park Road, Boca Raton, FL 33432, United States", "US")
+        self.assertEqual((a["city"], a["street"]), ("BOCA RATON", ["PALMETTO", "PARK"]))
+        # so a neighbourhood still resolves to its USPS city when the country follows
+        a = addresses.normalise("294 Main St Unit 590, Queens, NY 11355", "US")
+        b = addresses.normalise("294 Main Street, Unit 590, Flushing, NY 11355, United States", "US")
+        self.assertEqual(addresses.compare(a, b), "same")
 
     def test_neighbourhood_legacy_and_district_names(self):
         a = addresses.normalise("525 N 45th St, Ballard, WA 98103", "US")

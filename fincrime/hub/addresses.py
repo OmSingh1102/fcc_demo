@@ -190,6 +190,9 @@ def normalise(text, country):
     street_segments = []
 
     if cc == "US":
+        # the country after the address ('..., FL 33432, United States') is neither the city nor the street
+        while folded_segments and folded_segments[-1].replace(".", "") in COUNTRY_WORDS:
+            folded_segments.pop()
         tail = [s for s in folded_segments if re.search(r"\b[A-Z]{2}\s+\d{5}", s) or MILITARY.search(s)]
         body = [s for s in folded_segments if s not in tail]
         if tail:
@@ -409,6 +412,9 @@ def compare(a, b):
         return "different"
     sa, sb = set(a["street"]), set(b["street"])
     overlap = len(sa & sb) / max(1, min(len(sa), len(sb))) if sa and sb else 0.0
+    if a.get("military") and b.get("military") and not sa and not sb:
+        # an APO/FPO address has no street: its unit or PSC and box numbers, all of them, are the home
+        overlap = 1.0 if a["numbers"] and set(a["numbers"]) == set(b["numbers"]) else 0.0
     house = (a["house"] and a["house"] == b["house"]) or (a["numbers"] and set(a["numbers"]) == set(b["numbers"])) \
         or (a["unit"] and a["unit"] == b["unit"] and a["house"] and b["house"] and a["house"] == b["house"])
     if house and overlap >= 0.5 and (city or postal in (True, "near")):
