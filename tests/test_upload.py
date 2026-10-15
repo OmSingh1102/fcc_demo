@@ -117,6 +117,43 @@ class UploadTestCase(unittest.TestCase):
         self.assertIn("The file lacks", flash_text(r))
         self.assertEqual(len(fcc.KYC_CASES), 1005)
 
+    def test_an_upload_can_be_removed(self):
+        self.upload(self.sample())
+        ids = [r["kyc_case_id"] for r in csv.DictReader(io.StringIO(self.last_sample.decode("utf-8-sig")))]
+        new = fcc.KYC_BY_ID[ids[0]]
+        alert, wc = fcc._linked(new)
+        for kind, record in (("kyc", new), ("alert", alert), ("wc", wc)):      # something was done on it
+            fcc._save(kind, record)
+        batch = StateStore.records("upload")[0]
+        self.assertIn('id="remove-upload-1"', self.c.get("/kyc/upload").data.decode("utf-8"))
+        # not while the AI Agent is reading one of its cases
+        fcc.AI_AGENT["busy"].add(ids[0])
+        try:
+            r = self.c.post(f"/kyc/upload/{batch['id']}/remove", follow_redirects=True)
+            self.assertIn("is reading", flash_text(r))
+            self.assertIn(ids[0], fcc.KYC_BY_ID)
+        finally:
+            fcc.AI_AGENT["busy"].discard(ids[0])
+        r = self.c.post(f"/kyc/upload/{batch['id']}/remove", follow_redirects=True)
+        self.assertIn("Removed the upload new_cases.csv: 5 case(s)", flash_text(r))
+        self.assertEqual(len(fcc.KYC_CASES), 1000)
+        self.assertFalse(set(ids) & set(fcc.KYC_BY_ID))
+        self.assertNotIn(alert["id"], fcc.ALERT_BY_ID)
+        self.assertNotIn(wc["id"], fcc.WC_BY_ID)
+        for kind, gone in (("kyc", ids[0]), ("alert", alert["id"]), ("wc", wc["id"])):
+            self.assertNotIn(gone, {x["id"] for x in StateStore.records(kind)})
+        self.assertEqual(self.c.get(f"/kyc/detail/{ids[0]}").status_code, 404)
+        # the batch stays as history, marked removed, and cannot be removed twice
+        page = self.c.get("/kyc/upload").data.decode("utf-8")
+        self.assertIn("Removed by", page)
+        self.assertNotIn('id="remove-upload-1"', page)
+        self.assertIn("not there any more", flash_text(self.c.post(f"/kyc/upload/{batch['id']}/remove", follow_redirects=True)))
+        # a restart does not bring the cases back, and the same file uploads again
+        fcc._load_seed()
+        self.assertEqual(len(fcc.KYC_CASES), 1000)
+        self.assertIn("5 case(s) added", flash_text(self.upload(self.last_sample)))
+        self.assertEqual(len(fcc.KYC_CASES), 1005)
+
     def test_only_on_the_file_book(self):
         fcc.CASE_BOOK = "demo"
         try:

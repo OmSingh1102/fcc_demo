@@ -111,6 +111,20 @@ class StateStore:
     def save_many(cls, pairs) -> int:
         return sum(1 for kind, record in pairs if cls.save(kind, record))
 
+    @classmethod
+    def delete(cls, kind: str, ids) -> int:
+        """Drop the stored records of `kind` with these ids. Returns how many went."""
+        ids = [str(i) for i in ids if i]
+        if not ids:
+            return 0
+        try:
+            with closing(cls._connect()) as conn, conn:
+                return conn.executemany("DELETE FROM record_state WHERE kind = ? AND id = ?",
+                                        [(kind, i) for i in ids]).rowcount
+        except sqlite3.Error as exc:
+            cls._warn(f"could not delete stored {kind} records", exc)
+            return 0
+
     # ── reading ─────────────────────────────────────────────────────────────
 
     @classmethod

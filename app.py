@@ -321,6 +321,8 @@ def _load_seed():
     # batch first, so the actions stored on them below have a case to land on
     if CASE_BOOK == "file":
         for batch in sorted(StateStore.records("upload"), key=lambda b: b.get("at", "")):
+            if batch.get("removed_at"):
+                continue                # removed on the Upload page: kept as history, no cases
             _add_uploaded([r for r in batch.get("rows", []) if r.get("kyc_case_id") not in KYC_BY_ID])
 
     redrawn = _redrawn_cases()
@@ -363,6 +365,26 @@ def _add_uploaded(rows):
         WC_CASES.append(wc)
     _rebuild_indexes()
     return [k for k, _, _ in built], failed
+
+
+def _remove_uploaded(ids):
+    """Take uploaded cases off the live lists and out of the store, with the
+    screening and watchlist records paired with them. The lists are trimmed
+    in place, so the router's binding stays valid. Returns how many went."""
+    ids = set(ids)
+    paired = {a["id"] for a in ALERT_CASES if a.get("kyc_case_id") in ids}   # a watchlist case shares its alert's id
+    gone = sum(1 for c in KYC_CASES if c["id"] in ids)
+    KYC_CASES[:] = [c for c in KYC_CASES if c["id"] not in ids]
+    ALERT_CASES[:] = [a for a in ALERT_CASES if a["id"] not in paired]
+    WC_CASES[:] = [w for w in WC_CASES if w["id"] not in paired]
+    _rebuild_indexes()
+    StateStore.delete("kyc", ids)
+    StateStore.delete("alert", paired)
+    StateStore.delete("wc", paired)
+    for cid in ids:
+        recon_book.VIEWS.pop(cid, None)
+    _bump_state()
+    return gone
 
 
 def _save(kind: str, record: dict):
@@ -1363,6 +1385,28 @@ def kyc_upload():
               "success")
         return redirect(url_for("kyc_list", tags="Uploaded"))
     flash("No case was added. " + "; ".join(skipped[:8]), "error")
+    return redirect(url_for("kyc_upload"))
+
+
+@app.route("/kyc/upload/<batch_id>/remove", methods=["POST"])
+@role_required("L1", "L2", "EDD", "QC")
+def kyc_upload_remove(batch_id):
+    """Remove one upload: its cases go, with everything done on them; the
+    batch stays on the Upload page marked removed, by whom and when."""
+    batch = next((b for b in StateStore.records("upload") if b.get("id") == batch_id and not b.get("removed_at")), None)
+    if batch is None:
+        flash("That upload is not there any more; it may have been removed already.", "error")
+        return redirect(url_for("kyc_upload"))
+    with AI_AGENT_LOCK:
+        reading = next((cid for cid in batch["cases"] if cid in AI_AGENT["busy"]), None)
+        if reading:
+            flash(f"The AI Agent is reading {reading} right now. Remove the upload again in a minute.", "error")
+            return redirect(url_for("kyc_upload"))
+        gone = _remove_uploaded(batch["cases"])
+    batch.update(removed_at=dates.now_str(), removed_by=_actor())
+    _save("upload", batch)
+    app.logger.info("Upload %s (%s) removed by %s: %d case(s).", batch_id, batch.get("file"), _actor(), gone)
+    flash(f"Removed the upload {batch.get('file', '')}: {gone} case(s) and their screening records.", "success")
     return redirect(url_for("kyc_upload"))
 
 

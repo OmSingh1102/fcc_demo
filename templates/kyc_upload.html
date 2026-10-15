@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_modals.html" import confirm_dialog %}
 {% block title %}Upload cases - Due Diligence (KYC/KYB){% endblock %}
 
 {% block content %}
@@ -30,16 +31,23 @@
 
 {% if batches %}
 <div class="card mt-12 pad-0" id="upload-history">
-    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Uploads</div><div class="card-sub">kept until Reset demo</div></div>
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Uploads</div><div class="card-sub">kept until removed here, or Reset demo</div></div>
     <table class="tbl dense">
-        <thead><tr><th>File</th><th>By</th><th>At</th><th class="num">Cases</th><th>Case ids</th></tr></thead>
+        <thead><tr><th>File</th><th>By</th><th>At</th><th class="num">Cases</th><th>Case ids</th><th></th></tr></thead>
         <tbody>
         {% for b in batches %}
-        <tr><td>{{ b.file }}</td><td>{{ b.by|who if b.by else '—' }}</td><td class="nowrap small">{{ b.at }}</td><td class="num">{{ b.cases|length }}</td>
-            <td class="small">{% for cid in b.cases[:8] %}<a class="link mono" href="{{ url_for('kyc_detail', case_id=cid) }}">{{ cid }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if b.cases|length > 8 %} … {{ b.cases|length - 8 }} more{% endif %}</td></tr>
+        <tr{% if b.removed_at %} class="muted"{% endif %}><td>{{ b.file }}</td><td>{{ b.by|who if b.by else '—' }}</td><td class="nowrap small">{{ b.at }}</td><td class="num">{{ b.cases|length }}</td>
+            <td class="small">{% for cid in b.cases[:8] %}{% if b.removed_at %}<span class="mono">{{ cid }}</span>{% else %}<a class="link mono" href="{{ url_for('kyc_detail', case_id=cid) }}">{{ cid }}</a>{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% if b.cases|length > 8 %} … {{ b.cases|length - 8 }} more{% endif %}</td>
+            <td class="nowrap">{% if b.removed_at %}<span class="small">Removed by {{ b.removed_by|who }} · {{ b.removed_at }}</span>
+                {% else %}<button type="button" class="btn btn-outline btn-sm" id="remove-upload-{{ loop.index }}" onclick="openModal('remove-dialog-{{ loop.index }}')">Remove</button>{% endif %}</td></tr>
         {% endfor %}
         </tbody>
     </table>
 </div>
+{% for b in batches if not b.removed_at %}
+{{ confirm_dialog('remove-dialog-' ~ loop.index, 'Remove this upload?',
+                  'This removes the ' ~ (b.cases|length) ~ ' case(s) uploaded from ' ~ b.file ~ ', with everything done on them: the AI Agent\'s reads, screening outcomes and any analyst\'s work. It cannot be undone; upload the file again to bring the cases back.',
+                  url_for('kyc_upload_remove', batch_id=b.id), ok='Remove') }}
+{% endfor %}
 {% endif %}
 {% endblock %}
