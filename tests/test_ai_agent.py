@@ -311,6 +311,21 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual(rec["decision"], "human")
         self.assertTrue(any("Issued within the last 6 months" in r for r in rec["reasons"]), rec["reasons"])
 
+    def test_an_unreadable_proof_of_address_date_goes_to_a_person(self):
+        # the record carries a date, but the document's own date must be legible
+        bill = self.clean(self.poa_kind("utility_bill"))
+        read = perfect_read(bill)
+        read["poa"]["issued_on"] = ""
+        rec, _ = self.run_agent(bill, answer=read)
+        self.assertEqual(rec["decision"], "human")
+        self.assertTrue(any("Issue date readable: the date on the document could not be read" in r for r in rec["reasons"]),
+                        rec["reasons"])
+        # an Aadhaar card has no age limit, so its date does not matter
+        card = self.clean(self.poa_kind("aadhaar"))
+        read = perfect_read(card)
+        read["poa"]["issued_on"] = ""
+        self.assertEqual(self.run_agent(card, answer=read)[0]["decision"], "verified")
+
     def test_a_case_sent_to_a_person_under_older_checks_is_checked_again(self):
         card = self.clean(self.poa_kind("aadhaar"))
         touched = self.clean(lambda c: self.poa_kind("aadhaar")(c) and c["id"] != card["id"])

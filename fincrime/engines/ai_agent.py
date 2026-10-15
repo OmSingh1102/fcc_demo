@@ -410,6 +410,9 @@ def checks(case, got, now=None):
         kind = (workflow.poa_docs(case) or [{}])[0].get("kind", "")
         if issued is not None and (now - issued).days > vocab.POA_MAX_AGE_DAYS and kind not in vocab.POA_NO_AGE_LIMIT:
             failures.append({"label": "Issued within the last 6 months", "detail": f"the document reads {poa['issued_on']}"})
+        if issued is None and poa.get("readable") and kind not in vocab.POA_NO_AGE_LIMIT:
+            # the record's date proves nothing about the document: its own date must be legible
+            failures.append({"label": "Issue date readable", "detail": "the date on the document could not be read"})
         _check(out, "Proof of address checks", "", "; ".join(f["detail"] for f in failures) or "passed", not failures,
                "; ".join(f"{f['label']}: {f['detail']}" for f in failures))
     values = {"name": name_value, "dob": client["dob"], "nationality": client["nationality"]}
