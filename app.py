@@ -1197,7 +1197,7 @@ def ai_screening_rules():
 # stored on the case, so a restart does not read a case twice.
 AI_AGENT_WORKERS = 2          # the gateway refuses more concurrent connections
 AI_AGENT_LOCK = threading.Lock()
-AI_AGENT = {"running": False, "busy": set(), "threads": [], "done": 0, "errors": 0, "verdicts": 0, "rechecked": 0, "started_by": "",
+AI_AGENT = {"running": False, "busy": set(), "tried": set(), "threads": [], "done": 0, "errors": 0, "verdicts": 0, "rechecked": 0, "started_by": "",
             "started_at": "", "stopped": "", "autostarted": False}
 AGENT_LABELS = {"verified": "Handled by AI", "screening": "Confirmed by AI · alert left for an analyst",
                 "human": "Sent to a person"}
@@ -1260,9 +1260,12 @@ def _agent_worker():
                 if case is not None:
                     _agent_recheck(case)
                     continue
-            if case is None:            # then verdicts for earlier reads
-                case = next((c for c in KYC_CASES if ai_agent.needs_verdict(c) and c["id"] not in AI_AGENT["busy"]), None)
+            if case is None:            # then verdicts for earlier reads, one try per case per run
+                case = next((c for c in KYC_CASES if ai_agent.needs_verdict(c) and c["id"] not in AI_AGENT["busy"]
+                             and c["id"] not in AI_AGENT["tried"]), None)
                 backfill = case is not None
+                if backfill:
+                    AI_AGENT["tried"].add(case["id"])
             if case is None:
                 break
             AI_AGENT["busy"].add(case["id"])
@@ -1291,6 +1294,7 @@ def _agent_worker():
         if not AI_AGENT["threads"] and AI_AGENT["running"]:
             AI_AGENT["running"] = False
             AI_AGENT["stopped"] = "Queue finished"
+            AI_AGENT["tried"] = set()       # the next run tries a failed verdict once more
             _bump_state()
 
 
@@ -1298,7 +1302,7 @@ def _agent_start(by):
     with AI_AGENT_LOCK:
         if AI_AGENT["running"]:
             return
-        AI_AGENT.update(running=True, started_by=by, started_at=dates.now_str(), stopped="")
+        AI_AGENT.update(running=True, started_by=by, started_at=dates.now_str(), stopped="", tried=set())
         AI_AGENT["threads"] = [threading.Thread(target=_agent_worker, name=f"ai-agent-{i}", daemon=True)
                                for i in range(AI_AGENT_WORKERS)]
         for t in AI_AGENT["threads"]:

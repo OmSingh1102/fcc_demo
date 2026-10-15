@@ -240,6 +240,28 @@ class AiAgentTestCase(unittest.TestCase):
         rec, _ = self.run_agent(self.clean(), error=WorkflowError("The model gateway answered 500: busy"))
         self.assertNotIn("verdict", rec)                                   # no read, nothing to judge
 
+    def test_a_failed_verdict_is_asked_again_once_per_run_three_times_in_all(self):
+        c = self.clean()
+        rec, _ = self.run_agent(c)
+        rec["verdict"] = {"error": "Could not reach the model gateway.", "policy": ai_agent.POLICY_VERSION}   # failed before tries counted
+        status = c["status"]
+        busy = Stub(error=WorkflowError("The model gateway answered 500: busy"))
+        for run in (1, 2):
+            self.assertTrue(ai_agent.needs_verdict(c))
+            with mock.patch.object(ai_agent.llm, "call", busy), mock.patch.object(ai_agent, "eligible", lambda x: False):
+                fcc.AI_AGENT.update(running=True, threads=[], busy=set())
+                fcc._agent_worker()
+            self.assertEqual(c["ai_agent"]["verdict"]["tries"], run + 1)          # one try per run
+        self.assertFalse(ai_agent.needs_verdict(c))                               # three tries in all: no more
+        self.assertEqual((len(busy.sent), c["status"]), (2, status))
+        # a later success replaces the failure
+        c["ai_agent"]["verdict"]["tries"] = 1
+        with mock.patch.object(ai_agent.llm, "call", Stub()), mock.patch.object(ai_agent, "eligible", lambda x: False):
+            fcc.AI_AGENT.update(running=True, threads=[], busy=set())
+            fcc._agent_worker()
+        self.assertEqual((c["ai_agent"]["verdict"]["decision"], c["ai_agent"]["verdict"]["agrees"]), ("verify", True))
+        self.assertFalse(ai_agent.needs_verdict(c))
+
     def test_earlier_reads_get_a_verdict_from_the_stored_read(self):
         c = self.clean()
         self.run_agent(c)

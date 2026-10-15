@@ -115,6 +115,9 @@ POLICY = ("The ID must be fully legible (all four edges and the MRZ in shot, not
           f"Former → current: {_vn_mergers()}.")
 # Bumped when POLICY changes: verdicts given under an older one are redone.
 POLICY_VERSION = 3
+# A verdict call that failed (a busy gateway) is asked again on later agent
+# runs, one try per run, this many tries in all.
+VERDICT_TRIES = 3
 # Bumped when the checks change: a case they sent to a person, and no one has
 # touched since, is checked again on its stored read (recheck).
 RULES_VERSION = 3
@@ -218,20 +221,31 @@ def rules_say(record):
 
 
 def attach_verdict(record, verdict):
-    """Put the verdict on the agent's record, with whether it agrees."""
-    if not verdict.get("error"):
+    """Put the verdict on the agent's record, with whether it agrees; a failed
+    call counts its tries, after the failed tries before it."""
+    before = record.get("verdict")
+    if verdict.get("error"):
+        again = before is not verdict and bool(before) and bool(before.get("error")) \
+            and before.get("policy", 1) == verdict.get("policy", 1)
+        verdict["tries"] = before.get("tries", 1) + 1 if again else 1
+    else:
         verdict["agrees"] = verdict["decision"] == rules_say(record)
     record["verdict"] = verdict
     return verdict
 
 
 def needs_verdict(case):
-    """A case the agent read before verdicts existed, or whose verdict was
-    given under an older policy: it gets one from its stored read, with no
-    new look at the images."""
+    """A case the agent read before verdicts existed, whose verdict was given
+    under an older policy, or whose verdict call failed fewer than
+    VERDICT_TRIES times: it gets one from its stored read, with no new look
+    at the images."""
     rec = case.get("ai_agent") or {}
-    return (bool(rec.get("read")) and not rec.get("error")
-            and ("verdict" not in rec or rec["verdict"].get("policy", 1) != POLICY_VERSION))
+    if not rec.get("read") or rec.get("error"):
+        return False
+    verdict = rec.get("verdict")
+    if verdict is None or verdict.get("policy", 1) != POLICY_VERSION:
+        return True
+    return bool(verdict.get("error")) and verdict.get("tries", 1) < VERDICT_TRIES
 
 
 # ── the checks ───────────────────────────────────────────────────────────────
