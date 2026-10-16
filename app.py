@@ -327,7 +327,8 @@ def _load_seed():
 
     redrawn = _redrawn_cases()
     if redrawn:
-        app.logger.info("%d stored case(s) were read from an older drawing of their documents; they start again.", len(redrawn))
+        app.logger.info("%d stored record(s) were read from an older drawing of their documents, or without the proof of "
+                        "address's name; they start again.", len(redrawn))
     restored = (StateStore.restore("kyc", KYC_BY_ID, skip=redrawn) + StateStore.restore("alert", ALERT_BY_ID, skip=redrawn)
                 + StateStore.restore("wc", WC_BY_ID, skip=redrawn) + StateStore.restore("analyst", ANALYST_BY_KEY)
                 + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS}))
@@ -368,13 +369,14 @@ def _redrawn_cases():
     """Ids (KYC, screening and watchlist) of stored cases whose ID or proof-
     of-address image has been redrawn since they were stored: what was read or decided on them
     was about another picture, so they keep their seeded state and the AI
-    Agent reads them again."""
+    Agent reads them again. So do the cases whose stored read lacks the
+    proof of address's name (ai_agent.needs_reread)."""
     out = set()
     for stored in StateStore.records("kyc"):
         case = KYC_BY_ID.get(stored.get("id", ""))
         if case is None or "recon" not in case:
             continue
-        if (stored.get("recon") or {}).get("drawn", "") != case["recon"].get("drawn", ""):
+        if (stored.get("recon") or {}).get("drawn", "") != case["recon"].get("drawn", "") or ai_agent.needs_reread(stored):
             out.add(case["id"])
             alert, wc = _linked(case)
             out.update(r["id"] for r in (alert, wc) if r)

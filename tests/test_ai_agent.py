@@ -36,7 +36,8 @@ def perfect_read(case, **id_overrides):
            "document_number": pp["number"], "expiry": s["passport_expiry"], "address": "", "issued_on": s["passport_issued"],
            "note": "", "edges_visible": True, "mrz_visible": True}
     idr.update(id_overrides)
-    poa = {"readable": True, "problems": [], "surname": "", "given_names": "", "dob": "", "nationality_code": "",
+    holder = v["identity"].get("name", {}).get("canonical", v["customer"]["name"])     # as the proof of address prints it
+    poa = {"readable": True, "problems": [], "surname": holder, "given_names": "", "dob": "", "nationality_code": "",
            "document_number": "", "expiry": "", "address": v["documents"]["poa"]["address"], "issued_on": s["poa_issued_on"],
            "note": ""}
     return {"id": idr, "poa": poa}
@@ -371,6 +372,46 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual((bill["status"], bill["ai_agent"]["decision"], bill["ai_agent"]["rules"]),
                          ("DataConfirming", "human", ai_agent.RULES_VERSION))   # still a person's, checked once
         self.assertFalse(ai_agent.needs_recheck(bill))
+
+    def test_the_proof_of_address_is_in_the_customers_name(self):
+        card = self.clean(self.poa_kind("aadhaar"))
+        order = [c["check"] for c in ai_agent.checks(card, perfect_read(card))[0]]
+        self.assertEqual(order[order.index("Proof of address readable") + 1], "Name on proof of address")
+        self.assertIn("An S/O, D/O, W/O or C/O line in an address names a relative", self.run_agent(card)[1].sent[0][2]["text"])
+        self.assertEqual(card["ai_agent"]["decision"], "verified", card["ai_agent"]["reasons"])
+        # the relative an Aadhaar's address names is not the holder
+        other = self.clean(lambda c: self.poa_kind("aadhaar")(c) and c["id"] != card["id"])
+        read = perfect_read(other)
+        read["poa"]["surname"] = "RAKESH TIWARI"
+        self.assert_human(other, "Name on the proof of address differs from the CRM", answer=read)
+        bill = self.clean(self.poa_kind("utility_bill"))
+        read = perfect_read(bill)
+        read["poa"]["surname"] = ""
+        self.assert_human(bill, "No holder name could be read on the proof of address", answer=read)
+        v = ai_agent.poa_name_verdict
+        self.assertTrue(v("SEEMA VERMA", {"surname": "Seema Verma Pandey", "given_names": ""}))        # a married surname added
+        self.assertTrue(v("JEFF WILLIAMS", {"surname": "WILLIAMS", "given_names": "JEFFREY DEAN"}))   # nickname
+        self.assertTrue(v("SAKSHI", {"surname": "SAKSHI", "given_names": ""}))                        # a single name
+        self.assertFalse(v("PRIYA SHARMA", {"surname": "SHARMA", "given_names": ""}))                 # a surname alone is not her
+        self.assertIsNone(v("PRIYA SHARMA", {"surname": "", "given_names": ""}))
+
+    def test_a_read_without_the_proof_of_address_name_starts_again(self):
+        unnamed, named = self.clean(self.poa_kind("utility_bill")), self.clean(self.poa_kind("aadhaar"))
+        touched = self.clean(lambda c: self.poa_kind("utility_bill")(c) and c["id"] != unnamed["id"])
+        for c in (unnamed, named, touched):
+            self.assertEqual(self.run_agent(c)[0]["decision"], "verified", c["ai_agent"]["reasons"])
+            c["ai_agent"]["rules"] = 3                                       # decided under the checks before the name
+            if c is not named:
+                c["ai_agent"]["read"]["poa"]["surname"] = ""                 # a read that was not asked for it
+            StateStore.save("kyc", c)
+        self.assertEqual([ai_agent.needs_reread(c) for c in (unnamed, named, touched)], [True, False, True])
+        ai_agent.workflow._audit(touched, "amara.iyer", "Reopened")          # a person has worked on it since
+        StateStore.save("kyc", touched)
+        self.assertFalse(ai_agent.needs_reread(touched))
+        fcc._load_seed()
+        self.assertNotIn("ai_agent", fcc.KYC_BY_ID[unnamed["id"]])           # back to its seeded state, read again
+        self.assertEqual(fcc.KYC_BY_ID[named["id"]]["ai_agent"]["decision"], "verified")
+        self.assertEqual(fcc.KYC_BY_ID[touched["id"]]["ai_agent"]["decision"], "verified")
 
     # ── the name rules ──────────────────────────────────────────────────────
     def test_name_rules(self):

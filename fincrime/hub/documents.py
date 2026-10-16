@@ -40,6 +40,9 @@ REDRAWN = "2026-10-14"
 # When a long proof-of-address address started to wrap: it used to run over
 # a statement's date or off the edge of an Aadhaar card.
 POA_REDRAWN = "2026-10-15"
+# When an Aadhaar proof of address started to print its holder's name: before,
+# it showed only the address, whose S/O or C/O line names a relative.
+AADHAAR_NAMED = "2026-10-16"
 # The cloth under the photo: base, dark thread, light thread.
 SURFACES = (("#cbbfa8", "#8f8068", "#ebe2d0"), ("#3f5b80", "#283e5c", "#7290b5"),
             ("#5b4737", "#3a2c21", "#806753"), ("#7c7e79", "#575954", "#a7a9a3"))
@@ -96,7 +99,8 @@ def synthesise(case):
                      "received_at": dates.fmt(received), "passport_issued": _iso(pp_issue), "passport_expiry": _iso(pp_expiry),
                      "sex": sex, "id_number": f"{_h('hub-id', cid) % 10 ** 10:010d}",
                      "drawn": max(d for d, redrawn in (("", True), (REDRAWN, capture in PHOTO_DEFECTS),
-                                                      (POA_REDRAWN, poa_wraps(case))) if redrawn)}
+                                                      (POA_REDRAWN, poa_wraps(case)),
+                                                      (AADHAAR_NAMED, docs["poa"]["kind"] == "aadhaar")) if redrawn)}
     case["files"] = files
     return case
 
@@ -416,7 +420,7 @@ def render(case, file_id):
             return svg_cards.bank_statement_svg(adapter, doc)
         if kind == "aadhaar":
             doc2 = dict(doc, side="back")
-            return svg_cards.national_id_svg(adapter, doc2, title="AADHAAR", code="ID")
+            return svg_cards.national_id_svg(adapter, doc2, title="AADHAAR", code="ID", holder=True)
         if kind == "lease":
             return svg_cards.utility_bill_svg(adapter, doc, provider="Residential lease", kind=ptype.upper())
         if kind == "residence_confirmation":

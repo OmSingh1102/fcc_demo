@@ -119,8 +119,10 @@ POLICY_VERSION = 3
 # runs, one try per run, this many tries in all.
 VERDICT_TRIES = 3
 # Bumped when the checks change: a case they sent to a person, and no one has
-# touched since, is checked again on its stored read (recheck).
-RULES_VERSION = 3
+# touched since, is checked again on its stored read (recheck). 4: the name
+# on the proof of address.
+RULES_VERSION = 4
+POA_NAME_RULES = 4    # the first checks to want the proof of address's name: reads before them may lack it (needs_reread)
 VERDICT_LABELS = {"verify": "Verify", "send_to_person": "Send to a person"}
 
 # What an analyst asks the customer for when the ID itself is the problem
@@ -158,7 +160,9 @@ def read(case, render, call=None, sleep=time.sleep):
                _image(svg_to_png(render(case, _id_doc(case))))]
     poa = workflow.poa_docs(case)
     if poa:
-        content += [{"type": "text", "text": "Image 2 is the customer's proof of address. Read it into `poa`."},
+        content += [{"type": "text", "text": "Image 2 is the customer's proof of address. Read it into `poa`, with the "
+                                             "holder's (account holder's, cardholder's) full name as printed in `surname`. "
+                                             "An S/O, D/O, W/O or C/O line in an address names a relative, not the holder."},
                     _image(svg_to_png(render(case, poa[0])))]
     else:
         content.append({"type": "text", "text": "There is no proof of address: return `poa` unreadable with empty fields."})
@@ -313,6 +317,21 @@ def _lost_letters_match(lossy, printed):
     return found
 
 
+def poa_name_verdict(crm, poa, filed=""):
+    """Is the proof of address in the CRM name? A proof of address prints the
+    holder's name in one line, with no surname field, so each of its names is
+    tried as the surname, the rest as the given names, under the ID's rules
+    (name_verdict). True, False, or None when no name was read."""
+    printed = similarity.tokens(" ".join((poa.get("surname", ""), poa.get("given_names", ""))))
+    if not printed:
+        return None
+    if poa.get("surname") and poa.get("given_names") and name_verdict(crm, poa["surname"], poa["given_names"], filed)[0]:
+        return True
+    if len(printed) == 1:
+        return name_verdict(crm, "", printed[0], filed)[0]
+    return any(name_verdict(crm, t, " ".join(printed[:i] + printed[i + 1:]), filed)[0] for i, t in enumerate(printed))
+
+
 def _filed_name(case):
     """The record's name as the reconciliation log wrote it, for a case
     built from the file; '' for any other case."""
@@ -414,6 +433,12 @@ def checks(case, got, now=None):
     if case.get("poa_required"):
         _check(out, "Proof of address readable", "", "readable" if poa.get("readable") else "not readable",
                poa.get("readable"), "" if poa.get("readable") else "Proof of address could not be read")
+        if poa.get("readable"):
+            holder = " ".join(x for x in (poa.get("surname", ""), poa.get("given_names", "")) if x)
+            same = poa_name_verdict(client["legal_name"], poa, filed=_filed_name(case))
+            _check(out, "Name on proof of address", client["legal_name"], holder or "not read", same,
+                   "" if same else ("No holder name could be read on the proof of address" if same is None
+                                    else "Name on the proof of address differs from the CRM"))
         country = client.get("nationality", "")
         verdict = addresses.compare(addresses.normalise(client.get("address", ""), country),
                                     addresses.normalise(_poa_address(poa.get("address", ""), country), country))
@@ -490,6 +515,18 @@ def needs_recheck(case):
             and rec.get("rules", 1) != RULES_VERSION and case["status"] == "DataConfirming"
             and not case.get("current_reviewer")
             and all(e.get("actor") == ACTOR for e in case.get("audit", []) if e.get("at", "") >= rec.get("at", "")))
+
+
+def needs_reread(case):
+    """A case read before the checks wanted the proof of address's name, whose
+    readable proof of address gave none (the read was not asked for it), and
+    no person has touched since: it starts again and is read again
+    (app._load_seed), rather than sent to a person for a name it printed."""
+    rec = case.get("ai_agent") or {}
+    poa = (rec.get("read") or {}).get("poa") or {}
+    return (bool(case.get("poa_required")) and rec.get("rules", 1) < POA_NAME_RULES and bool(poa.get("readable"))
+            and not (poa.get("surname") or poa.get("given_names")) and not case.get("current_reviewer")
+            and all(e.get("actor") in (ACTOR, vocab.SYSTEM_USER) for e in case.get("audit", []) if e.get("at", "") >= rec.get("at", "")))
 
 
 def recheck(case, alert_case, wc):

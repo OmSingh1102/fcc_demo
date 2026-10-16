@@ -329,7 +329,9 @@ def driving_licence_svg(case, doc):
     return _wrap(W, H, body, doc)
 
 
-def national_id_svg(case, doc, title="NATIONAL IDENTITY CARD", code="ID"):
+def national_id_svg(case, doc, title="NATIONAL IDENTITY CARD", code="ID", holder=False):
+    """`holder` prints the holder's name above the address on the back, as
+    an Aadhaar's address side does when it is the proof of address."""
     c = case["client"]
     W, H = 640, 400
     nat = c["nationality"]
@@ -345,12 +347,16 @@ def national_id_svg(case, doc, title="NATIONAL IDENTITY CARD", code="ID"):
     body += f'<text x="{W-24}" y="34" text-anchor="end" font-family="{FONT}" font-size="12" font-weight="700" fill="#d4ecd9">{esc(title)}</text>'
     if doc.get("side") == "back":
         l1, l2, l3 = _mrz_td1(c, number, expiry, code)
-        body += _label(24, 84, "Address / Adresse")
-        body += _value_lines(24, 102, c.get("address") or "Address on file", CARD_ADDRESS_WIDTH, 2)   # above the authority (y 140)
-        body += _label(24, 140, "Issuing authority")
-        body += _value(24, 158, f"CIVIL REGISTRY - {ISO3.get(nat, nat)}", 12, "600")
-        body += _field(24, 190, "Date of issue", _long_date(issue), 12)
-        body += _field(220, 190, "Date of expiry", _long_date(expiry), 12)
+        y = 84
+        if holder:
+            body += _field(24, y, "Name", c["legal_name"], 13)
+            y = 130                                                     # the rest moves down under the name
+        body += _label(24, y, "Address / Adresse")
+        body += _value_lines(24, y + 18, c.get("address") or "Address on file", CARD_ADDRESS_WIDTH, 2)   # above the authority
+        body += _label(24, y + 56, "Issuing authority")
+        body += _value(24, y + 74, f"CIVIL REGISTRY - {ISO3.get(nat, nat)}", 12, "600")
+        body += _field(24, y + 106, "Date of issue", _long_date(issue), 12)
+        body += _field(220, y + 106, "Date of expiry", _long_date(expiry), 12)
         body += _mrz_lines(28, 312, [l1, l2, l3], W - 46)
     else:
         body += _silhouette(24, 74, 130, 165)

@@ -39,6 +39,13 @@ def by_id(cid, fresh=False):
     return copy.deepcopy(c) if fresh else c
 
 
+def poa_drawn(c):
+    """When the case's proof of address was last redrawn, "" when never."""
+    if c["documents"]["poa"]["kind"] == "aadhaar":
+        return documents.AADHAAR_NAMED
+    return documents.POA_REDRAWN if documents.poa_wraps(c) else ""
+
+
 class LoaderTests(unittest.TestCase):
 
     def test_book_loads_every_case(self):
@@ -455,13 +462,13 @@ class DocumentTests(unittest.TestCase):
             svg = documents.render(c, "passport")
             self.assertIn(f'data-defect="{capture}"', svg)
             self.assertIn('fill="url(#cloth)"', svg)
-            # the latest redraw of its images: this photo, or a wrapped proof of address since
-            self.assertEqual(c["synth"]["drawn"], documents.POA_REDRAWN if documents.poa_wraps(c) else documents.REDRAWN)
+            # the latest redraw of its images: this photo, or its proof of address since
+            self.assertEqual(c["synth"]["drawn"], max(documents.REDRAWN, poa_drawn(c)))
             self.assertIn(code, c["intake"]["codes"], capture)
             self.assertEqual(c["intake"]["decision"], "Reject")
             self.assertTrue(c["intake"]["message"], capture)
         clean = next(c for c in book() if c["synth"]["capture"] == "none" and not c["synth"]["tampered"])
-        self.assertEqual(clean["synth"]["drawn"], documents.POA_REDRAWN if documents.poa_wraps(clean) else "")
+        self.assertEqual(clean["synth"]["drawn"], poa_drawn(clean))
         self.assertIn('viewBox="-28 -28', documents.render(clean, "passport"))        # all four corners in shot
         self.assertNotIn("data-defect", documents.render(clean, "passport"))
 
@@ -492,6 +499,23 @@ class DocumentTests(unittest.TestCase):
         drawn = lines(documents.render(card, "poa"), 24)[:2]
         self.assertEqual(" ".join(drawn), card["documents"]["poa"]["address"])
         self.assertTrue(all(24 + documents.svg_cards.text_width(t, 12) <= 616 for t in drawn))
+
+    def test_an_aadhaar_proof_of_address_prints_its_holders_name(self):
+        # its address side alone named only a relative (S/O, C/O); the holder's
+        # name is printed above the address now, and the case is stamped so a
+        # read of the old drawing is redone
+        card = by_id("KYC-2026-3056")                                       # S/O: Rakesh Tiwari
+        svg = html.unescape(documents.render(card, "poa"))
+        self.assertIn(f'>{card["identity"]["name"]["canonical"]}</text>', svg)
+        self.assertLess(svg.index(">Name</text>"), svg.index(">Address / Adresse</text>"))
+        self.assertIn(">S/O: Rakesh Tiwari,", svg)
+        self.assertEqual(card["synth"]["drawn"], documents.AADHAAR_NAMED)
+        # a card's back drawn without the holder is as it was: the address first
+        adapter = documents._adapter(card, card["customer"]["name"], card["documents"]["poa"]["address"])
+        plain = documents.svg_cards.national_id_svg(adapter, {"id": "poa", "kind": "utility_bill", "side": "back", "quality": "ok",
+                                                              "country": "IN"}, title="AADHAAR")
+        self.assertNotIn(">Name</text>", plain)
+        self.assertRegex(plain, r'<text x="24" y="84"[^>]*>Address / Adresse</text>')
 
     def test_the_drawn_sex_follows_what_the_file_says(self):
         # a relationship on the address, an honorific, a married-name change, then the names
