@@ -121,8 +121,9 @@ VERDICT_TRIES = 3
 # Bumped when the checks change: a case they sent to a person, and no one has
 # touched since, is checked again on its stored read (recheck). 4: the name
 # on the proof of address. 5: the holder's own given name (_own_name_kept),
-# and the verified address written to the record (address_update).
-RULES_VERSION = 5
+# and the verified address written to the record (address_update). 6: an old
+# proof of address reported once when its read and recorded dates agree.
+RULES_VERSION = 6
 POA_NAME_RULES = 4    # the first checks to want the proof of address's name: reads before them may lack it (needs_reread)
 OWN_NAME_RULES = 5    # the first to want the holder's own given name: a case confirmed before may name the father
 VERDICT_LABELS = {"verify": "Verify", "send_to_person": "Send to a person"}
@@ -511,7 +512,9 @@ def checks(case, got, now=None):
         failures = workflow.poa_failures(case, now)
         issued = dates.parse(poa.get("issued_on", ""))
         kind = (workflow.poa_docs(case) or [{}])[0].get("kind", "")
-        if issued is not None and (now - issued).days > vocab.POA_MAX_AGE_DAYS and kind not in vocab.POA_NO_AGE_LIMIT:
+        if issued is not None and (now - issued).days > vocab.POA_MAX_AGE_DAYS and kind not in vocab.POA_NO_AGE_LIMIT \
+                and not any(f["label"] == "Issued within the last 6 months" and poa["issued_on"] in f["detail"] for f in failures):
+            # the document's own date, when the upload's record does not already report that date too old
             failures.append({"label": "Issued within the last 6 months", "detail": f"the document reads {poa['issued_on']}"})
         if issued is None and poa.get("readable") and kind not in vocab.POA_NO_AGE_LIMIT:
             # the record's date proves nothing about the document: its own date must be legible

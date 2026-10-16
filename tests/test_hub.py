@@ -142,6 +142,16 @@ class ParserTests(unittest.TestCase):
         loc = parse.wc_location("Hai Phong (formerly Hai Duong), Vietnam")
         self.assertEqual((loc["city"], loc["former"], loc["country"]), ("Hai Phong", "Hai Duong", "Vietnam"))
         self.assertEqual(parse.wc_location("Seattle, WA, USA; Bellevue, WA, USA")["region"], "WA")
+        # a record lists each place linked to the person: the first stays the main one
+        loc = parse.wc_location("Singapore; Dhaka, Bangladesh")
+        self.assertEqual(loc["country"], "Singapore")
+        self.assertEqual([(p["city"], p["country"]) for p in loc["places"]], [("", "Singapore"), ("Dhaka", "Bangladesh")])
+
+    def test_the_place_check_reads_every_place_the_record_lists(self):
+        home = {"current": {"city": "Kingston", "country": "JM"}}
+        two = parse.wc_location("Dallas, TX, USA; Kingston, Jamaica")
+        self.assertEqual(adjudication.place_analysis(home, two, "US")["state"], "agree")      # the second place is the client's city
+        self.assertEqual(adjudication.place_analysis(home, parse.wc_location("Dallas, TX, USA"), "US")["state"], "differ")
 
 
 class NameTests(unittest.TestCase):

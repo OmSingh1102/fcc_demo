@@ -340,6 +340,9 @@ def _load_seed():
         resexed = _sync_sex()
         if resexed:
             app.logger.info("%d stored case(s) take their sex from the file's names now.", resexed)
+        replaced = _sync_wc_places()
+        if replaced:
+            app.logger.info("%d stored watchlist record(s) list every place the file gives now.", replaced)
 
 
 def _sync_sex():
@@ -362,6 +365,26 @@ def _sync_sex():
             if alert["id"] in WC_BY_ID:
                 WC_BY_ID[alert["id"]]["gender"] = label
         changed += 1
+    return changed
+
+
+def _sync_wc_places():
+    """A file case's watchlist match lists every place the record gives
+    (recon_book.wc_places); matches stored before kept only the first. Bring
+    them in line: no one edits a match's places, so nothing a person set is
+    overwritten. Returns how many matches gained a place."""
+    changed = 0
+    for case in KYC_CASES:
+        v = recon_book.VIEWS.get((case.get("recon") or {}).get("id", ""))
+        wc = _linked(case)[1] if v else None
+        if not wc:
+            continue
+        country, locations = recon_book.wc_places(v)
+        for m in wc.get("matches", []):
+            if m.get("wc_id") == v["wc"]["uid"]:
+                changed += m.get("country") != country
+                m["country"] = country
+                m["key_data"].update(location=locations[0], locations=locations)
     return changed
 
 

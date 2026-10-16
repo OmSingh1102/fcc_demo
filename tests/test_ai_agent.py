@@ -565,6 +565,39 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual((c["status"], c["resubmit"]["id_reason"]), ("ResubmitID", ai_agent.RESUBMIT_UNCLEAR))
         self.assertNotIn('id="ai-agent-resubmit"', self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8"))
 
+    def test_a_watchlist_record_lists_every_place_the_file_gives(self):
+        c = self.K["KYC-2026-3887"]                                          # Singapore; Dhaka, Bangladesh
+        alert, wc = fcc._linked(c)
+        m = wc["matches"][0]
+        self.assertEqual(m["country"], "Singapore; Bangladesh")
+        self.assertEqual([(x["city"], x["country"]) for x in m["key_data"]["locations"]], [("", "Singapore"), ("Dhaka", "Bangladesh")])
+        self.assertEqual(m["key_data"]["location"]["country"], "Singapore")                # the first stays the main one
+        self.assertEqual(fcc._linked(self.K["KYC-2026-3014"])[1]["matches"][0]["country"], "India")   # one place: as before
+        # a match stored when it kept only the first place is brought in line
+        stale = copy.deepcopy(wc)
+        stale["matches"][0]["country"] = "Singapore"
+        stale["matches"][0]["key_data"].pop("locations")
+        StateStore.save("wc", stale)
+        fcc._load_seed()
+        m = fcc.WC_BY_ID[wc["id"]]["matches"][0]
+        self.assertEqual((m["country"], len(m["key_data"]["locations"])), ("Singapore; Bangladesh", 2))
+        self.login("amara.iyer")
+        page = self.c.get(f"/wc/{wc['id']}/match/{m['id']}").data.decode("utf-8")
+        self.assertIn("Dhaka", page)
+        self.assertIn("Singapore; Bangladesh", page)
+
+    def test_an_old_proof_of_address_is_reported_once(self):
+        bill = self.clean(self.poa_kind("utility_bill"))
+        read = perfect_read(bill)
+        read["poa"]["issued_on"] = ai_agent.workflow.poa_docs(bill)[0]["issued_on"] = "2025-12-01"   # the record and the document agree
+        rec, _ = self.run_agent(bill, answer=read)
+        note = next(r for r in rec["reasons"] if "Issued within the last 6 months" in r)
+        self.assertEqual(note.count("Issued within the last 6 months"), 1, note)
+        # a document whose own date is old where the record's is not: both are said
+        other = self.clean(lambda c: self.poa_kind("utility_bill")(c) and c["id"] != bill["id"])
+        rec, _ = self.run_agent(other, answer=self.old_read(other))
+        self.assertIn("the document reads 2024-10-14", " ".join(rec["reasons"]))
+
     def test_a_stored_case_takes_its_sex_from_the_file(self):
         c = self.K["KYC-2026-3140"]                                          # Jennifer Smith
         alert, wc = fcc._linked(c)

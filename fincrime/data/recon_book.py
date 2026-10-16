@@ -215,23 +215,34 @@ def _dobs(dob):
     return []
 
 
+def wc_places(v):
+    """The record's listed places as its World-Check match keeps them: the
+    country line ("Singapore; Bangladesh", each country once, the first
+    place's first, as the console compares a client's country against it)
+    and one location row per place."""
+    w = v["wc"]
+    rows = [{"street": "", "city": p["city"], "region": p["region"], "country": p["country"] or v["country_name"], "postcode": ""}
+            for p in (w["location"].get("places") or [w["location"]])]
+    return "; ".join(dict.fromkeys(r["country"] for r in rows)), rows
+
+
 def _match(v, key):
     w = v["wc"]
     types, category, sub, pep, special, position = _category(w)
-    loc = w["location"]
-    country = loc["country"] or v["country_name"]
+    country, locations = wc_places(v)
     h = _h("recon-wc", v["id"])
     entered = date(2012, 1, 1) + timedelta(days=h % 4000)
     updated = min(entered + timedelta(days=30 + (h >> 16) % 1500), date(2026, 9, 30))
     name = w["surname"] if (w["mononym"] or not w["given"]) else f"{w['surname']}, {w['given']}"
-    return wc_match(
+    m = wc_match(
         key=f"{key}-1", wc_id=w["uid"], name=name, strength=w["score"] / 100, types=types, gender="",
         dobs=_dobs(w["dob"]),
-        citizenship=v["country_name"] if "Nationality" in w["matched_attributes"] else country, country=country,
-        category=category, sub_category=sub, pep_status=pep, special_interest=special, position=position,
-        location={"street": "", "city": loc["city"], "region": loc["region"], "country": country, "postcode": ""},
-        bio=w["narrative"], aliases=w["aka"], entered=entered.isoformat(), updated=updated.isoformat(),
+        citizenship=v["country_name"] if "Nationality" in w["matched_attributes"] else locations[0]["country"],
+        country=country, category=category, sub_category=sub, pep_status=pep, special_interest=special, position=position,
+        location=locations[0], bio=w["narrative"], aliases=w["aka"], entered=entered.isoformat(), updated=updated.isoformat(),
     )
+    m["key_data"]["locations"] = locations
+    return m
 
 
 # ── one row → three records ─────────────────────────────────────────────────

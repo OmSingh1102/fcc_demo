@@ -120,7 +120,7 @@
                 <tr><td class="k">Citizenship</td><td>{{ m.citizenship }}</td></tr>
                 {% if kd.location %}<tr><td class="k">Location Details</td><td>
                     <table class="wc-compare"><thead><tr><th>Street</th><th>City</th><th>Region</th><th>Country</th><th>Postcode</th></tr></thead>
-                    <tbody><tr><td>{{ kd.location.street }}</td><td>{{ kd.location.city }}</td><td>{{ kd.location.region }}</td><td>{{ kd.location.country }}</td><td>{{ kd.location.postcode }}</td></tr></tbody></table></td></tr>{% endif %}
+                    <tbody>{% for loc in kd.locations or [kd.location] %}<tr><td>{{ loc.street }}</td><td>{{ loc.city }}</td><td>{{ loc.region }}</td><td>{{ loc.country }}</td><td>{{ loc.postcode }}</td></tr>{% endfor %}</tbody></table></td></tr>{% endif %}
                 <tr><td class="k">Title</td><td></td></tr>
                 <tr><td class="k">Position</td><td>{{ kd.position }}</td></tr>
             </tbody></table>

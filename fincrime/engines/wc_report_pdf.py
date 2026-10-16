@@ -105,7 +105,7 @@ def render_wc_export(wc, alert=None, kyc=None, exported_by=""):
         story += [Paragraph(_t(f"Record {m['wc_id']} — {m['name']}"), h2)]
         detail = [["Category", kd.get("category", "")], ["Sub-category", kd.get("sub_category", "")],
                   ["PEP status", kd.get("pep_status", "")], ["Special interest", ", ".join(kd.get("special_interest", []))],
-                  ["Position", kd.get("position", "")], ["Location", ", ".join(v for v in kd.get("location", {}).values() if v)],
+                  ["Position", kd.get("position", "")], ["Location", "; ".join(", ".join(v for v in loc.values() if v) for loc in kd.get("locations") or [kd.get("location", {})])],
                   ["Biography", fi.get("biography", "")], ["Identification", fi.get("identification", "")],
                   ["Reports", " | ".join(f"{d}: {x}" for d, x in fi.get("reports", []))],
                   ["Sources", " | ".join(u for _d, u in m.get("sources", []))],

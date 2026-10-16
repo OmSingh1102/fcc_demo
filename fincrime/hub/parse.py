@@ -123,9 +123,16 @@ _WC_COUNTRIES = {"USA": "United States", "U.S.A.": "United States", "US": "Unite
 
 def wc_location(text: str) -> dict:
     """'Hai Phong (formerly Hai Duong), Vietnam' / 'Seattle, WA, USA; Bellevue, WA, USA'
-    / 'Can Tho, Vietnam (district not listed)' / 'Dubai, UAE' → the first place."""
+    / 'Can Tho, Vietnam (district not listed)' / 'Dubai, UAE' → the first place,
+    with every place the record lists under `places` (a profile names each
+    place linked to the person: home, office, where they went)."""
     text = (text or "").strip()
-    first = text.split(";")[0].strip()
+    places = [_wc_place(p.strip()) for p in text.split(";") if p.strip()] or [_wc_place("")]
+    return dict(places[0], places=places, all=[p.strip() for p in text.split(";") if p.strip()], raw=text)
+
+
+def _wc_place(first: str) -> dict:
+    """One place of a record's listed places."""
     notes = [n.strip() for n in _PARENS.findall(first)]
     plain = _PARENS.sub("", first)
     parts = [p.strip() for p in plain.split(",") if p.strip()]
@@ -143,8 +150,7 @@ def wc_location(text: str) -> dict:
         if country not in _WC_COUNTRIES and country not in _WC_COUNTRIES.values():
             city = country
     country = _WC_COUNTRIES.get(country, country)
-    return {"city": city, "region": region, "country": country, "former": former, "notes": notes,
-            "all": [p.strip() for p in text.split(";") if p.strip()], "raw": text}
+    return {"city": city, "region": region, "country": country, "former": former, "notes": notes, "raw": first}
 
 
 # ── passport ─────────────────────────────────────────────────────────────────

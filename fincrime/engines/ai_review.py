@@ -116,7 +116,7 @@ def brief(kyc, wc, match):
         "citizenship": match.get("citizenship"), "country": match.get("country"), "list_types": match.get("types", []),
         "category": key_data.get("category"), "sub_category": key_data.get("sub_category"),
         "pep_status": key_data.get("pep_status"), "special_interest": key_data.get("special_interest", []),
-        "position": key_data.get("position"), "location": key_data.get("location"),
+        "position": key_data.get("position"), "location": key_data.get("locations") or key_data.get("location"),
         "biography": further.get("biography"), "identification": further.get("identification"),
         "reports": further.get("reports", []), "keywords": match.get("keywords", []),
         "name_match_strength": match.get("strength"),

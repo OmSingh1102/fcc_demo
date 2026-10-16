@@ -153,12 +153,14 @@ def name_analysis(identity_name, wc):
 # ── place ────────────────────────────────────────────────────────────────────
 
 def place_analysis(identity_address, wc_location, case_country):
+    """The client's residence against every place the record lists (its
+    `places`: a home, an office, where the person went)."""
     current = identity_address.get("current") or {}
     cur_city = fold(current.get("city") or "")
     cur_country = current.get("country") or case_country
     cur_country_name = COUNTRY_NAME.get(cur_country, cur_country)
-    wc_city, wc_country = fold(wc_location.get("city") or ""), wc_location.get("country") or ""
-    wc_cities = {wc_city, fold(wc_location.get("former") or "")}
+    places = wc_location.get("places") or [wc_location]
+    wc_cities = {fold(p.get(k) or "") for p in places for k in ("city", "former")}
     wc_cities = {addresses.VN_CITY.get(c, addresses.IN_LEGACY_CITY.get(c, addresses._US_GROUP.get(c, c))) for c in wc_cities if c}
     cur_cities = {addresses.VN_CITY.get(cur_city, addresses.IN_LEGACY_CITY.get(cur_city, addresses._US_GROUP.get(cur_city, cur_city)))}
     sec = identity_address.get("secondary") or {}
@@ -166,9 +168,10 @@ def place_analysis(identity_address, wc_location, case_country):
         cur_cities.add(fold(sec["city_key"]))
     if wc_cities & cur_cities and wc_cities:
         return {"state": "agree", "detail": f"The record's jurisdiction ({wc_location.get('raw')}) names the client's city."}
-    if wc_country and cur_country_name and fold(wc_country) == fold(cur_country_name):
-        return {"state": "partial", "detail": f"Same country ({wc_country}), different city ({wc_location.get('city') or 'not listed'} vs {current.get('city') or '-'})."}
-    if wc_country:
+    same = next((p for p in places if p.get("country") and cur_country_name and fold(p["country"]) == fold(cur_country_name)), None)
+    if same:
+        return {"state": "partial", "detail": f"Same country ({same['country']}), different city ({same.get('city') or 'not listed'} vs {current.get('city') or '-'})."}
+    if any(p.get("country") for p in places):
         return {"state": "differ", "detail": f"The record's jurisdiction ({wc_location.get('raw')}) differs from the client's residence ({current.get('city') or ''}, {cur_country_name})."}
     return {"state": "unknown", "detail": "No jurisdiction on the record."}
 
