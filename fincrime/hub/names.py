@@ -1,12 +1,11 @@
-"""Name rules for the Identity Normalisation Agent.
+"""Name rules: the AI Agent's name checks and the canonical name the proof of address prints.
 
 analyse() reads the CRM name, the passport's visual zone (VIZ) and machine-
 readable zone (MRZ) and the secondary ID, and returns the legal screening
 name (always the passport spelling, the control the variance playbook
 recommends), the other forms to screen as AKAs, and a list of what changed
-and why. Each rule maps to one of the playbook's variance types so the
-Accuracy page can compare what the agent detected with the historical
-label - which the agent never reads.
+and why. Each rule maps to one of the playbook's variance types; the
+historical label in the file is never read.
 """
 import re
 

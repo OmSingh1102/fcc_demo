@@ -1,10 +1,10 @@
 """Parsers for the reconciliation log's text fields.
 
-Every function here turns one raw cell into structure and judges nothing:
-the agents decide, these only read. The log's World-Check date-of-birth cell
-carries an annotation in parentheses ("(Exact Match)", "(34 yrs diff)"); the
-parser keeps it as `annotation` for the accuracy page and the agents never
-look at it - they work from the date itself.
+Every function here turns one raw cell into structure and judges nothing.
+The log's World-Check date-of-birth cell carries an annotation in
+parentheses ("(Exact Match)", "(34 yrs diff)"); the parser keeps it as
+`annotation`, and the screening rules never look at it - they work from the
+date itself.
 """
 import re
 import unicodedata

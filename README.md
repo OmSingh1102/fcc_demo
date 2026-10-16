@@ -174,12 +174,8 @@ on an auto-verified case, Pause/Resume for the team lead),
 log: the book's shape, the rules at intake against what the file records,
 the documents, Data Confirm on cleared, held, garbled-name, old-POA and
 company cases, the paged lists, routing and search), `tests/test_hub.py`
-(the hub's engine: the parsers, the
-normalisation rules on example rows from the log, the DOB table, the
-agents, the split and its precision, the documents, the actions, the
-persistence), `tests/test_hub_ui.py` (every hub screen, the bulk outcome,
-the settings and re-run, both resets, the two apps leaving each other
-alone) and `tests/test_hub_llm.py` (the Claude agents through the seam),
+(the engine under the file book: the parsers, the name and address rules
+on example rows from the log, the documents),
 plus the console's 47 end-to-end tests on the Flask test client, run on the
 scripted book: the golden path, resubmit,
 escalate, segregation of duties, L2/EDD decisions, Skopenow, Businesses risk

@@ -1,6 +1,5 @@
 """The hub's engine under the console: the book, the parsers, the
-normalisation rules, the documents, the agents and the pipeline. No Flask
-here.
+normalisation rules and the documents. No Flask here.
 
 Run:  .venv\\Scripts\\python.exe -m unittest -v tests.test_hub
 """
@@ -15,20 +14,23 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from fincrime.engines.errors import WorkflowError  # noqa: E402
-from fincrime.hub import addresses, documents, loader, names, parse, pipeline, similarity  # noqa: E402
-from fincrime.hub.agents import adjudication, triage  # noqa: E402
+from fincrime.hub import addresses, documents, loader, names, parse, similarity  # noqa: E402
 
 _BOOK = None
 
 
 def book():
-    """One parsed, synthesised, agent-run book shared by the tests (deep-copied where mutated)."""
+    """One parsed, synthesised book shared by the tests (deep-copied where mutated), each case with
+    the canonical name the console's recon_book.view works out for its proof of address."""
     global _BOOK
     if _BOOK is None:
         cases = loader.load_cases()
         for c in cases:
             documents.synthesise(c)
-        pipeline.run_all(cases, pipeline.default_settings())
+            pp = c["documents"]["passport"]
+            c["identity"] = {"name": names.analyse(c["country"], c["customer"]["name"], pp["viz"], pp["mrz"],
+                                                   c["documents"]["secondary"]["name"], c["customer"]["corporate"],
+                                                   c["customer"]["ubo"])}
         _BOOK = cases
     return _BOOK
 
@@ -36,6 +38,13 @@ def book():
 def by_id(cid, fresh=False):
     c = next(c for c in book() if c["id"] == cid)
     return copy.deepcopy(c) if fresh else c
+
+
+def bad_check_digits(line):
+    """Which of an MRZ line 2's check digits do not hold."""
+    cd = documents._check_digit
+    return [name for name, field, digit in (("document number", line[0:9], line[9]), ("date of birth", line[13:19], line[19]),
+                                            ("expiry", line[21:27], line[27])) if cd(field) != digit]
 
 
 def poa_drawn(c):
@@ -75,17 +84,6 @@ class LoaderTests(unittest.TestCase):
             fh.write("KYC Case ID,Customer Name\nKYC-1,X\n")
         with self.assertRaises(ValueError):
             loader.read_rows(path)
-
-    def test_playbook_and_analysts(self):
-        pb = loader.playbook()
-        self.assertEqual(len(pb), 43)
-        self.assertEqual(pb[0]["example"], "KYC-2026-3117")
-        self.assertEqual(sum(p["cases"] for p in pb), 1000 - 87 + 1000 - 275)
-        roles = {a["key"]: a["role"] for a in loader.analysts()}
-        self.assertEqual(roles["j.vance"], "l2")
-        self.assertEqual(roles["h.pham"], "lead")
-        self.assertEqual(sum(1 for r in roles.values() if r == "analyst"), 8)
-
 
 class ParserTests(unittest.TestCase):
 
@@ -145,13 +143,6 @@ class ParserTests(unittest.TestCase):
         loc = parse.wc_location("Singapore; Dhaka, Bangladesh")
         self.assertEqual(loc["country"], "Singapore")
         self.assertEqual([(p["city"], p["country"]) for p in loc["places"]], [("", "Singapore"), ("Dhaka", "Bangladesh")])
-
-    def test_the_place_check_reads_every_place_the_record_lists(self):
-        home = {"current": {"city": "Kingston", "country": "JM"}}
-        two = parse.wc_location("Dallas, TX, USA; Kingston, Jamaica")
-        self.assertEqual(adjudication.place_analysis(home, two, "US")["state"], "agree")      # the second place is the client's city
-        self.assertEqual(adjudication.place_analysis(home, parse.wc_location("Dallas, TX, USA"), "US")["state"], "differ")
-
 
 class NameTests(unittest.TestCase):
 
@@ -222,7 +213,7 @@ class NameTests(unittest.TestCase):
             if h.startswith("None"):
                 continue
             tot += 1
-            if h in c["identity"]["variance_detected"]:
+            if h in c["identity"]["name"]["variance_detected"]:
                 hit += 1
         self.assertGreaterEqual(hit / tot, 0.9)
 
@@ -311,115 +302,8 @@ class AddressTests(unittest.TestCase):
         self.assertIn("po_box_registered", r["flags"])
 
     def test_most_of_the_book_reconciles(self):
-        resolved = sum(1 for c in book() if c["identity"]["address"]["resolved"])
+        resolved = sum(1 for c in book() if addresses.analyse(c)["resolved"])
         self.assertGreaterEqual(resolved, 950)
-
-
-class AdjudicationTests(unittest.TestCase):
-
-    def test_dob_decision_table(self):
-        self.assertEqual(adjudication.dob_analysis("1962-06-29", parse.wc_dob("1962-06-29 (Exact Match)"))["class"], "exact")
-        self.assertEqual(adjudication.dob_analysis("1985-09-06", parse.wc_dob("1985-06-09 (x)"))["class"], "transposed")
-        d = adjudication.dob_analysis("2001-07-06", parse.wc_dob("1967-09-29 (34 yrs diff)"))
-        self.assertEqual((d["class"], d["delta"]), ("conflict", 34))
-        self.assertEqual(adjudication.dob_analysis("1990-01-01", parse.wc_dob("1991-05-05"))["class"], "near")
-        self.assertEqual(adjudication.dob_analysis("1961-08-09", parse.wc_dob("1961 (Year only)"))["class"], "year_match")
-        self.assertEqual(adjudication.dob_analysis("1988-04-19", parse.wc_dob("2001 (Year only, 13 yrs diff)"))["class"], "year_conflict")
-        self.assertEqual(adjudication.dob_analysis("1997-10-07", parse.wc_dob("1996–1998 (Approx. range)"))["class"], "range_match")
-        self.assertEqual(adjudication.dob_analysis("1990-10-07", parse.wc_dob("1996–1998 (Approx. range)"))["class"], "range_conflict")
-        self.assertEqual(adjudication.dob_analysis("1990-10-07", parse.wc_dob("Not listed"))["class"], "missing")
-
-    def test_representative_rows(self):
-        c = by_id("KYC-2026-3011")
-        self.assertEqual(c["screening"]["decision"], "auto_clear")
-        self.assertGreaterEqual(c["screening"]["confidence"], 90)
-        c = by_id("KYC-2026-3012")
-        self.assertEqual((c["screening"]["verdict"], c["screening"]["decision"]), ("same person", "auto_confirm"))
-        self.assertEqual(c["screening"]["suggested"], "True Positive")
-        c = by_id("KYC-2026-3023")
-        self.assertEqual((c["screening"]["dob"]["class"], c["screening"]["decision"]), ("transposed", "needs_review"))
-        c = by_id("KYC-2026-3043")
-        self.assertEqual((c["screening"]["dob"]["class"], c["screening"]["decision"]), ("year_match", "needs_review"))
-
-    def test_sanctions_guard(self):
-        c = by_id("KYC-2026-3086", fresh=True)
-        settings = pipeline.default_settings()
-        adjudication.run(c, settings)
-        self.assertEqual(c["screening"]["decision"], "needs_review")
-        self.assertIn("sanctions", c["screening"]["hard_stops"])
-        settings["sanctions_guard"] = False
-        adjudication.run(c, settings)
-        self.assertEqual(c["screening"]["decision"], "auto_clear")
-
-    def test_native_script_difference_blocks_a_confirmation_not_a_clear(self):
-        c = by_id("KYC-2026-3019")
-        self.assertIn("script_conflict", c["screening"]["name"]["flags"])
-        self.assertEqual(c["screening"]["decision"], "needs_review")
-        cleared = [x for x in book() if "script_conflict" in x["screening"]["name"]["flags"] and x["screening"]["dob"]["class"] == "conflict"]
-        self.assertTrue(cleared and all(x["screening"]["decision"] == "auto_clear" for x in cleared))
-
-    def test_name_analysis_facts(self):
-        c = by_id("KYC-2026-3034")
-        self.assertIn("suffix_differs", c["screening"]["name"]["flags"])
-        self.assertLessEqual(c["screening"]["name"]["score"], 0.85)
-        c = by_id("KYC-2026-3021")
-        self.assertGreaterEqual(c["screening"]["name"]["score"], 0.95)
-
-
-class PipelineTests(unittest.TestCase):
-
-    def test_split_precision_and_recall(self):
-        cases = book()
-        s = pipeline.split(cases)
-        self.assertEqual(s["n"], 1000)
-        self.assertTrue(0.55 <= s["automated"] / 1000 <= 0.70, s["automated"])
-        self.assertTrue(0.70 <= s["adjudicated"] / 1000 <= 0.82, s["adjudicated"])
-        auto = [c for c in cases if c["screening"]["decision"] == "auto_clear"]
-        self.assertTrue(auto)
-        self.assertTrue(all(c["history"]["outcome"] == "FP" for c in auto))
-        tp = [c for c in cases if c["history"]["outcome"] == "TP"]
-        self.assertGreaterEqual(sum(c["screening"]["verdict"] == "same person" for c in tp) / len(tp), 0.9)
-        self.assertFalse(any(c["screening"]["decision"] == "auto_clear" for c in tp))
-        transposed = [c for c in cases if c["screening"]["dob"]["class"] == "transposed"]
-        self.assertEqual(len(transposed), 22)
-        self.assertFalse(any(c["screening"]["decision"] != "needs_review" for c in transposed))
-        self.assertTrue(all(len(c["trail"]) == 4 for c in cases))
-
-    def test_a_higher_gate_automates_less(self):
-        base = copy.deepcopy(book())
-        settings = pipeline.default_settings()
-        settings["gate"] = 95
-        high = pipeline.run_all(base, settings)
-        self.assertLess(high["automated"], pipeline.split(book())["automated"])
-        settings["gate"] = 97
-        top = pipeline.run_all(base, settings)
-        self.assertEqual(top["auto_clear"], 0)
-
-    def test_identity_agent_off_loses_true_matches(self):
-        base = copy.deepcopy(book())
-        settings = pipeline.default_settings()
-        settings["agents"]["identity"] = False
-        pipeline.run_all(base, settings)
-        flagged_off = sum(c["screening"]["verdict"] == "same person" for c in base if c["history"]["outcome"] == "TP")
-        flagged_on = sum(c["screening"]["verdict"] == "same person" for c in book() if c["history"]["outcome"] == "TP")
-        self.assertLess(flagged_off, flagged_on)
-        self.assertTrue(all(c["trail"][0]["decision"] == "Skipped" for c in base))
-
-    def test_settings_validation_and_history(self):
-        s = pipeline.default_settings()
-        self.assertEqual(pipeline.set_setting(s, "h.pham", "gate", "90"), (85, 90))
-        self.assertEqual(s["history"][-1]["key"], "gate")
-        with self.assertRaises(WorkflowError):
-            pipeline.set_setting(s, "h.pham", "gate", "120")
-        with self.assertRaises(WorkflowError):
-            pipeline.set_setting(s, "h.pham", "nonsense", "1")
-        self.assertEqual(pipeline.set_setting(s, "h.pham", "agent_intake", "0"), (True, False))
-        self.assertEqual(pipeline.set_setting(s, "h.pham", "doc_strictness", "strict"), ("standard", "strict"))
-
-    def test_run_is_fast(self):
-        cases = copy.deepcopy(book())
-        summary = pipeline.run_all(cases, pipeline.default_settings())
-        self.assertLess(summary["seconds"], 4.0)
 
 
 class DocumentTests(unittest.TestCase):
@@ -438,13 +322,10 @@ class DocumentTests(unittest.TestCase):
     def test_check_digits_fail_only_when_tampered(self):
         clean = next(c for c in book() if not c["synth"]["tampered"])
         tampered = next(c for c in book() if c["synth"]["tampered"])
-        self.assertTrue(documents.mrz_checks(clean)[0])
-        ok, problems, line = documents.mrz_checks(tampered)
-        self.assertFalse(ok)
-        self.assertIn("date-of-birth check digit", problems)
+        self.assertEqual(bad_check_digits(documents.mrz_line2(clean)), [])
+        line = documents.mrz_line2(tampered)
+        self.assertEqual(bad_check_digits(line), ["date of birth"])
         self.assertEqual(len(line), 44)
-        self.assertEqual(tampered["intake"]["decision"], "Refer")
-        self.assertEqual(tampered["queue"], triage.QUEUE_L2)
 
     def test_renders_every_upload(self):
         c = by_id("KYC-2026-3146")
@@ -460,22 +341,17 @@ class DocumentTests(unittest.TestCase):
         self.assertIn('data-capture="flat_scan"', documents.render(flat, "passport"))
         self.assertIsNone(documents.render(c, "nope"))
 
-    def test_photo_defects_are_drawn_and_rejected(self):
+    def test_photo_defects_are_drawn(self):
         # the failures real uploads show: something on the page, a shot at an
         # angle, a cracked card, cut off, blurred - each drawn as a phone
-        # photo on a cloth, stamped with the drawing date, and bounced
-        codes = {"obstructed": "DOC_OBSTRUCTED", "angled": "DOC_ANGLE", "damaged": "DOC_DAMAGED",
-                 "partial": "DOC_PARTIAL", "blur": "DOC_BLUR"}
-        for capture, code in codes.items():
+        # photo on a cloth and stamped with the drawing date
+        for capture in ("obstructed", "angled", "damaged", "partial", "blur"):
             c = next(c for c in book() if c["synth"]["capture"] == capture)
             svg = documents.render(c, "passport")
             self.assertIn(f'data-defect="{capture}"', svg)
             self.assertIn('fill="url(#cloth)"', svg)
             # the latest redraw of its images: this photo, or its proof of address since
             self.assertEqual(c["synth"]["drawn"], max(documents.REDRAWN, poa_drawn(c)))
-            self.assertIn(code, c["intake"]["codes"], capture)
-            self.assertEqual(c["intake"]["decision"], "Reject")
-            self.assertTrue(c["intake"]["message"], capture)
         clean = next(c for c in book() if c["synth"]["capture"] == "none" and not c["synth"]["tampered"])
         self.assertEqual(clean["synth"]["drawn"], poa_drawn(clean))
         self.assertIn('viewBox="-28 -28', documents.render(clean, "passport"))        # all four corners in shot
@@ -531,8 +407,7 @@ class DocumentTests(unittest.TestCase):
         for cid, sex in (("KYC-2026-3140", "F"), ("KYC-2026-3127", "M")):
             line = documents.mrz_line2(by_id(cid))
             self.assertEqual((len(line), line[20]), (44, sex))
-            self.assertEqual(documents.mrz_checks(by_id(cid))[:2], (True, []))
-        self.assertFalse(documents.mrz_checks(next(c for c in book() if c["synth"]["tampered"]))[0])
+            self.assertEqual(bad_check_digits(line), [])
 
     def test_a_secondary_id_prints_its_name_and_address_as_the_file_has_them(self):
         def text(cid):
@@ -563,16 +438,6 @@ class DocumentTests(unittest.TestCase):
         case["raw"] = {"name_variance_type": "Married vs maiden surname"}
         self.assertEqual(documents.holder_sex(case), "F")
         self.assertRegex(documents.render(by_id("KYC-2026-3140"), "passport"), r"Sex / Sexe</text><text[^>]*>F</text>")
-
-    def test_rejections_carry_a_customer_message(self):
-        rejected = [c for c in book() if c["status"] == triage.STATUS_AUTO_REJECTED]
-        self.assertTrue(rejected)
-        for c in rejected:
-            self.assertTrue(c["customer_message"], c["id"])
-            self.assertEqual(c["queue"], triage.QUEUE_INTAKE)
-        referred = [c for c in book() if c["intake"]["decision"] == "Refer"]
-        self.assertTrue(all(not c.get("customer_message") for c in referred))
-
 
 if __name__ == "__main__":
     unittest.main()

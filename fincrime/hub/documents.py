@@ -1,11 +1,10 @@
-"""Synthetic uploads for the hub's cases.
+"""Synthetic uploads for the file book's cases.
 
 The reconciliation log carries no document images, so the demo plants a
 deterministic defect plan on each case (a hash of the case id decides) and
 draws the uploads as SPECIMEN SVGs the way the console's svg_cards does.
-The Document Intake Agent then runs real checks on them - the MRZ check
-digits, the VIZ against the MRZ, the expiry, the proof-of-address age - so
-the defect is synthetic but the detection is not, and the screens say so.
+The console's AI Agent reads the passport and the proof of address from
+these drawings, so the defect is synthetic but the detection is not.
 """
 import hashlib
 import math
@@ -25,10 +24,6 @@ POA_OLD_PER_MILLE = 30             # cases whose proof of address is 7-11 months
 # Index 1 stays the flat scan the console's showcase case (KYC-2026-3118) carries.
 _CAPTURE_BUCKETS = ("damaged", "flat_scan", "obstructed", "partial", "partial", "obstructed", "glare", "angled",
                     "blur", "angled", "expired", "expired")
-DEFECT_LABEL = {"flat_scan": "Flat scan / PDF, not a camera photo", "partial": "Cut off: the card runs out of the picture",
-                "glare": "Glare over the data page", "blur": "Blurred, dark image", "expired": "Expired document",
-                "obstructed": "Something lies on the data page", "angled": "Shot at an angle, from too far",
-                "damaged": "Cracked, worn card", "tampered": "Data page and MRZ disagree"}
 # Drawn as a phone photo of the document lying on a cloth, the way real
 # customers' failed uploads look (an analyst's reference frames): each one
 # hides at least a date or the number, so the AI Agent's fixed checks fail
@@ -161,25 +156,6 @@ def mrz_line2(case, tampered=None):
     composite = _check_digit(num + _check_digit(num) + dob + dob_cd + exp + _check_digit(exp) + "<" * 14)
     return _pad(body + "<" + composite, 44)
 
-
-def mrz_checks(case):
-    """Verify the check digits of line 2 as the intake agent sees it.
-    Returns (ok, detail)."""
-    line = mrz_line2(case)
-    num, num_cd = line[0:9], line[9]
-    dob, dob_cd = line[13:19], line[19]
-    exp, exp_cd = line[21:27], line[27]
-    problems = []
-    if _check_digit(num) != num_cd:
-        problems.append("document number check digit")
-    if _check_digit(dob) != dob_cd:
-        problems.append("date-of-birth check digit")
-    if _check_digit(exp) != exp_cd:
-        problems.append("expiry check digit")
-    return (not problems), problems, line
-
-
-# ── drawing ──────────────────────────────────────────────────────────────────
 
 def _long_date(iso):
     d = dates.parse(iso)

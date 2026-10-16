@@ -1,4 +1,4 @@
-"""Address rules for the Identity Normalisation Agent.
+"""Address rules: the AI Agent's address check and the proof of address's write-back use them.
 
 normalise() turns one address line into comparable parts (country, city,
 postal code, unit, house number, street tokens) through the country's own
@@ -8,8 +8,7 @@ and district abbreviations, alley numbering and the 2025 administrative
 mergers in Vietnam. compare() says whether two lines point at the same
 home, the same locality, somewhere else, or another country. analyse()
 runs the four addresses a case carries and reports what it found, with
-flags the Document Intake Agent reads to decide whether a disagreement is
-explained by the documents or needs a human.
+flags that say whether a disagreement is explained by the documents.
 """
 import re
 

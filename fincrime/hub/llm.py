@@ -1,11 +1,11 @@
-"""Claude through Straive's LLM Foundry gateway, for the hub's on-demand
-agents. The same recipe as the console's model assessment
+"""Claude through Straive's LLM Foundry gateway, for the console's AI Agent
+(fincrime/engines/ai_agent.py). The same recipe as the console's model assessment
 (fincrime/engines/ai_review.py): the official Anthropic SDK pointed at the
 gateway's /anthropic route with the gateway token as a bearer token,
 adaptive thinking, medium effort and a JSON schema for the answer.
 
 Configuration, read once at import (documented in .env.example):
-  LLM_FOUNDRY_KEY   the gateway token; unset = the Claude agents are off
+  LLM_FOUNDRY_KEY   the gateway token; unset = the AI Agent is off
   LLM_FOUNDRY_URL   the gateway (default https://llmfoundry.straivedemo.com)
   LLM_MODEL         the Claude model id (default claude-opus-4-8, the strongest
                     the gateway enables)
@@ -16,7 +16,6 @@ for it.
 import json
 import os
 import time
-from urllib.parse import urlsplit
 
 from fincrime.engines.errors import WorkflowError
 
@@ -25,32 +24,7 @@ KEY = os.environ.get("LLM_FOUNDRY_KEY", "")
 MODEL = os.environ.get("LLM_MODEL", "claude-opus-4-8")
 TIMEOUT = 90.0
 
-_state = {"client": None, "calls": 0, "last_error": "", "seconds": []}
-
-
-def configured():
-    return bool(KEY)
-
-
-def switched_on(settings):
-    return bool((settings or {}).get("claude", True))
-
-
-def why_not(settings):
-    """Why the buttons are off, or "" when a call can run."""
-    if not configured():
-        return "Claude is not configured: set LLM_FOUNDRY_KEY (see .env.example)."
-    if not switched_on(settings):
-        return "The Claude agents are switched off on the Agents page."
-    return ""
-
-
-def status(settings=None):
-    why = why_not(settings)
-    secs = _state["seconds"]
-    return {"configured": configured(), "on": switched_on(settings), "ready": not why, "why": why, "model": MODEL,
-            "gateway": urlsplit(GATEWAY).netloc, "calls": _state["calls"], "last_error": _state["last_error"],
-            "avg_seconds": round(sum(secs) / len(secs), 1) if secs else 0.0}
+_state = {"client": None}
 
 
 def _client():
@@ -92,13 +66,3 @@ def call(system, text, schema, max_tokens=3000):
     u = response.usage
     usage = {"input": u.input_tokens, "output": u.output_tokens, "cached": getattr(u, "cache_read_input_tokens", 0) or 0}
     return data, usage, round(time.monotonic() - started, 1)
-
-
-def record(seconds, error=""):
-    """Bookkeeping for the status chip: a call completed, or failed."""
-    if error:
-        _state["last_error"] = error
-        return
-    _state["calls"] += 1
-    _state["last_error"] = ""
-    _state["seconds"].append(seconds)

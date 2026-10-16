@@ -2,9 +2,9 @@
 
 read_rows() opens the CSV (UTF-8, no BOM, en dashes in six headers) and keys
 every row by a normalised header; build_case() turns one row into the case
-record the agents, screens and tests read. The analyst's historical outcome
-is parsed into `history` and nothing in the agents reads it: it is the
-ground truth the Accuracy page measures them against.
+record the console's file book (fincrime/data/recon_book.py) is built from.
+The analyst's historical outcome is parsed into `history`: what the file says
+was done, kept beside the case for comparison only.
 """
 import csv
 import os
@@ -13,7 +13,6 @@ from fincrime.hub import parse
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 LOG_PATH = os.path.join(DATA_DIR, "kyc_wc_recon_log.csv")
-REF_PATH = os.path.join(DATA_DIR, "variance_reference.csv")
 
 REQUIRED = (
     "kyc_case_id", "customer_name", "customer_type", "customer_provided_dob", "customer_registered_address",
@@ -26,23 +25,6 @@ REQUIRED = (
     "name_variance_type", "address_variance_type", "pain_point_detail", "normalisation_resolution_applied",
     "screening_impact", "match_score_after_normalisation", "analyst_handling_time_mins",
 )
-
-# The ten analysts in the log. Roles are the demo's: eight L1 analysts, one
-# L2 compliance reviewer, one team lead who owns the agent settings.
-ROLE_LABEL = {"analyst": "L1 Analyst", "l2": "L2 Compliance", "lead": "Team Lead"}
-_ROLES = {"J. Vance": "l2", "H. Pham": "lead"}
-ANALYST_ORDER = ("M. Chen", "P. Nair", "A. Gupta", "K. Iyer", "D. Brooks", "R. Fernandes", "S. Rahman", "L. Tran",
-                 "J. Vance", "H. Pham")
-
-
-def analysts():
-    out = []
-    for name in ANALYST_ORDER:
-        role = _ROLES.get(name, "analyst")
-        key = name.lower().replace(". ", ".").replace(" ", ".")
-        out.append({"key": key, "name": name, "role": role, "role_label": ROLE_LABEL[role]})
-    return out
-
 
 def read_rows(path=LOG_PATH):
     """Every row, keyed by the normalised header. Raises if a column the
@@ -57,21 +39,6 @@ def read_rows(path=LOG_PATH):
         for raw in reader:
             rows.append({parse.header_key(h): (v or "").strip() for h, v in raw.items() if h is not None})
     return rows
-
-
-def playbook(path=REF_PATH):
-    """The 43-row variance reference: what happens, why it hurts, the
-    recommended control, how many cases, the example case."""
-    with open(path, encoding="utf-8", newline="") as fh:
-        rows = [{parse.header_key(h): (v or "").strip() for h, v in r.items() if h is not None}
-                for r in csv.DictReader(fh)]
-    out = []
-    for r in rows:
-        out.append({"country": r.get("passport_country", ""), "field": r.get("field", ""),
-                    "variance": r.get("variance_type", ""), "what": r.get("what_happens", ""),
-                    "why": r.get("why_it_hurts_screening_kyc", ""), "control": r.get("recommended_control", ""),
-                    "cases": parse.percent(r.get("cases_in_log", "0")), "example": r.get("example_case", "")})
-    return out
 
 
 def build_case(row, seq):
