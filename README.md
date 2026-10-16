@@ -92,9 +92,6 @@ records stored under the old names are relabelled on load
 
 Built the same way as the ChargeShield demo: one Flask `app.py`, Jinja
 templates, a single stylesheet, a SQLite state store, no JS framework.
-A second demo with its own look, the **Straive KYC Operations Hub**, lives
-under `/hub` (see below): AI agents with a human in the loop over a
-1,000-case reconciliation log.
 
 All people, companies, documents and screening records are fictional. The
 identity documents are drawn as SVGs from the seed data and carry a
@@ -158,72 +155,6 @@ audit row on each case. It is advisory: it resolves nothing, never runs at
 intake, and the AI Screening page shows its status and a switch. On Render
 the blueprint asks for the key; leave it blank to run without the feature.
 The case data is fictional, so nothing sensitive leaves the demo.
-
-## Straive KYC Operations Hub (`/hub`)
-
-A second demo in the same app, in Straive's own look rather than the
-client's tools, for pitching the AI-plus-human model to a new client:
-`http://127.0.0.1:8010/hub` (set `HUB_DEFAULT=1` and `/` lands there). Same
-demo password; its own profiles: eight L1 analysts (M. Chen, P. Nair,
-A. Gupta, K. Iyer, D. Brooks, R. Fernandes, S. Rahman, L. Tran), J. Vance
-(L2 Compliance, who decides confirmed matches) and H. Pham (Team Lead, who
-owns the agents' settings, the re-run and the reset).
-
-The case book is the reconciliation log in `fincrime/hub/data/` (synthetic:
-every person, company and watchlist subject is fictional): 1,000 onboarding
-cases across Indian, Vietnamese and US passports, each with one watchlist
-hit, the names and addresses on the CRM record, the passport's visual and
-machine-readable zones, the secondary ID and the proof of address, and the
-analyst's historical disposition. Four deterministic agents run over every
-case at boot, in under two seconds, and leave a trail on each case:
-
-- **Identity Normalisation** – repairs the CRM name from the passport and
-  the secondary ID (mojibake, Đ typings, honorifics, FNU fillers, suffixes,
-  initials, nicknames, prefix and compound surnames, swapped fields,
-  married and maiden names) and reconciles the four addresses (USPS, ZIP and
-  PIN codes, PO Boxes, legacy and district city names, Vietnamese
-  abbreviations, alley numbering, the 2025 mergers). The passport name is
-  screened; every other form is an AKA.
-- **Document Intake** – checks the synthetic uploads the way an onboarding
-  system should: camera photo or flat scan, edges and MRZ present, check
-  digits, visual zone against the MRZ, expiry, proof-of-address type, age
-  and address. Rejections go back to the customer with a message; a page
-  whose check digits fail is referred to L2 as a possible fraud upload.
-- **Watchlist Adjudication** – compares the normalised client with the
-  record: name similarity over every form, the date of birth read from the
-  record itself (exact, day/month transposed, conflict, year only, range,
-  not listed), the jurisdiction. Clears or confirms only above the
-  confidence gate; a sanctions record never clears while the guard is on.
-- **Triage & Routing** – status, queue (auto-closed, back to the customer,
-  L1, L2, EDD), priority and SLA.
-
-Claude, with the same `LLM_FOUNDRY_KEY`, runs on demand from a case: a
-second opinion on the match, a draft compliance narrative, a draft customer
-message. Advisory only; it never reads the historical outcome.
-
-The split is measured, not assumed. At the default gate of 85 about 77% of
-the book is AI-adjudicated (62% needs no analyst at all; a confirmed match
-is routed to L2 or EDD for the relationship decision) and 23% goes to a
-person: year-only, range or missing dates of birth, day/month
-transpositions, the sanctions guard, fraud referrals. Every record the
-agents clear is a historical false positive, every exact-date true match
-is flagged, and the 22 transpositions are held. The Agents page moves the
-gate and re-runs the pipeline over every case nobody has decided; the
-Accuracy page compares the agents with the analysts' record, by variance
-type and by country. The agents read the raw fields only.
-
-A demo path: sign in as H. Pham → Overview → Screening review (tick two
-rows, *Clear as false positive*) → Intake & documents (a flat-scan
-rejection; open the passport in the viewer) → case `KYC-2026-3012`
-(swapped name fields, a confirmed match) → *Second opinion* from Claude →
-Agents: gate 85 → 95, *Re-run the pipeline*, watch the split move →
-Accuracy. Reset hub puts the book back.
-
-The hub landed as four commits (engine, screens, Claude agents, this
-section); `git revert` them newest first to take it out again. The console
-and its tests are untouched apart from the blueprint registration, the
-sign-in guard skipping `/hub`, Reset demo reseeding the hub, and the second
-tile on the portal.
 
 ## Tests
 

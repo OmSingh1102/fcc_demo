@@ -1,15 +1,14 @@
-"""Straive KYC Operations Hub: a second, Straive-branded demo over the
-1,000-case reconciliation log, with AI agents and a human in the loop.
+"""The engine under the console's file book (the reconciliation log): it
+began as the Straive KYC Operations Hub, a second demo whose screens have
+since been removed; the console draws its documents and reads names and
+addresses with these modules.
 
 Package map:
   loader / parse     the CSV becomes case records (every field parsed, nothing judged)
-  names / addresses  rule tables for the Identity Normalisation Agent
+  names / addresses  rule tables for names and addresses (the AI Agent's checks use them)
   similarity         folding, Jaro-Winkler, phonetic keys
   documents          synthetic uploads: a deterministic defect plan and SVG rendering
-  agents/            Document Intake, Identity Normalisation, Watchlist Adjudication,
-                     Triage & Routing (deterministic), plus the Claude agents on demand
-  pipeline           settings and the run over the whole book
-  actions            what an analyst does to a case
-  analytics          the view-models the screens read
-  state / views      the in-memory book, its persistence, and the Flask blueprint
+  llm                the Straive LLM Foundry gateway the AI Agent calls Claude through
+  agents/, pipeline  the hub's deterministic agents and their run over the book
+                     (no longer used by a screen; kept with their tests)
 """

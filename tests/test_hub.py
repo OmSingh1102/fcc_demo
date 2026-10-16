@@ -1,6 +1,6 @@
-"""The hub's engine: the book, the parsers, the normalisation rules, the
-agents, the pipeline, the actions and the persistence. No Flask here; the
-routes are covered in test_hub_ui.py.
+"""The hub's engine under the console: the book, the parsers, the
+normalisation rules, the documents, the agents and the pipeline. No Flask
+here.
 
 Run:  .venv\\Scripts\\python.exe -m unittest -v tests.test_hub
 """
@@ -14,9 +14,8 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from fincrime.data.state_store import StateStore  # noqa: E402
 from fincrime.engines.errors import WorkflowError  # noqa: E402
-from fincrime.hub import actions, addresses, documents, loader, names, parse, pipeline, similarity, state  # noqa: E402
+from fincrime.hub import addresses, documents, loader, names, parse, pipeline, similarity  # noqa: E402
 from fincrime.hub.agents import adjudication, triage  # noqa: E402
 
 _BOOK = None
@@ -573,109 +572,6 @@ class DocumentTests(unittest.TestCase):
             self.assertEqual(c["queue"], triage.QUEUE_INTAKE)
         referred = [c for c in book() if c["intake"]["decision"] == "Refer"]
         self.assertTrue(all(not c.get("customer_message") for c in referred))
-
-
-class ActionTests(unittest.TestCase):
-
-    def setUp(self):
-        self.settings = pipeline.default_settings()
-
-    def test_clear_and_audit(self):
-        c = by_id("KYC-2026-3043", fresh=True)
-        msg = actions.decide(c, "m.chen", "analyst", "clear", "Different person: year only on the record")
-        self.assertIn("Clear as false positive", msg)
-        self.assertEqual(c["status"], "Closed – False positive")
-        self.assertEqual(c["decision"]["basis"], "human")
-        self.assertEqual(c["audit"][-1]["action"], "Decision")
-        with self.assertRaises(WorkflowError):
-            actions.decide(c, "m.chen", "analyst", "clear")
-
-    def test_roles(self):
-        c = by_id("KYC-2026-3012", fresh=True)
-        with self.assertRaises(WorkflowError):
-            actions.decide(c, "m.chen", "analyst", "confirm_edd")
-        actions.decide(c, "j.vance", "l2", "confirm_edd", "EDD approved")
-        self.assertEqual(c["status"], "Closed – True positive (EDD approved)")
-        self.assertEqual(c["group"], "human_closed")
-
-    def test_escalate_pend_and_rfi(self):
-        c = by_id("KYC-2026-3043", fresh=True)
-        actions.decide(c, "m.chen", "analyst", "escalate", "Needs L2")
-        self.assertEqual((c["status"], c["queue"], c["priority"]), ("Escalated", triage.QUEUE_L2, "P1"))
-        c = by_id("KYC-2026-3034", fresh=True)
-        with self.assertRaises(WorkflowError):
-            actions.decide(c, "m.chen", "analyst", "rfi", "")
-        actions.decide(c, "m.chen", "analyst", "rfi", "Please send a utility bill")
-        self.assertEqual(c["customer_message"], "Please send a utility bill")
-        self.assertEqual(c["queue"], triage.QUEUE_INTAKE)
-
-    def test_human_decisions_survive_a_rerun(self):
-        cases = copy.deepcopy(book())
-        c = next(x for x in cases if x["status"] == triage.STATUS_REVIEW)
-        actions.decide(c, "m.chen", "analyst", "clear", "ok")
-        self.settings["gate"] = 95
-        summary = pipeline.run_all(cases, self.settings)
-        self.assertEqual(summary["ran"], 999)
-        self.assertEqual(c["status"], "Closed – False positive")
-
-    def test_intake_override_re_triages(self):
-        c = next(copy.deepcopy(x) for x in book() if x["status"] == triage.STATUS_AUTO_REJECTED and x["screening"]["decision"] == "auto_clear")
-        msg = actions.intake_override(c, "m.chen", "analyst", "accept", self.settings)
-        self.assertIn("documents accepted", msg)
-        self.assertEqual(c["status"], triage.STATUS_AUTO_CLEARED)
-        self.assertTrue(c["locked"])
-        self.assertFalse(pipeline.run_case(c, self.settings))
-        clean = next(copy.deepcopy(x) for x in book() if x["intake"]["decision"] == "Accept")
-        with self.assertRaises(WorkflowError):
-            actions.intake_override(clean, "m.chen", "analyst", "accept", self.settings)
-
-
-class StateTests(unittest.TestCase):
-
-    @classmethod
-    def setUpClass(cls):
-        cls.saved_path = StateStore.path
-        cls.db = os.path.join(tempfile.mkdtemp(prefix="hub-state-"), "state.db")
-        StateStore.path = cls.db
-        os.environ["DEBUG"] = "0"
-
-    @classmethod
-    def tearDownClass(cls):
-        StateStore.path = cls.saved_path
-        os.environ.pop("DEBUG", None)
-
-    def test_boot_persist_reload_reset(self):
-        StateStore.clear()
-        summary = state.boot()
-        self.assertEqual(summary["n"], 1000)
-        self.assertEqual(StateStore.setting(state.VERSION_KEY), state.HUB_SEED_VERSION)
-        c = next(x for x in state.BOOK if x["status"] == triage.STATUS_REVIEW)
-        actions.decide(c, "m.chen", "analyst", "clear", "ok")
-        state.save_case(c)
-        pipeline.set_setting(state.SETTINGS, "h.pham", "gate", "90")
-        state.save_settings()
-        state.reload()
-        again = state.BY_ID[c["id"]]
-        self.assertEqual(again["status"], "Closed – False positive")
-        self.assertEqual(state.SETTINGS["gate"], 90)
-        self.assertEqual(state.STATE["restored"], 1)
-        state.reset()
-        self.assertEqual(state.BY_ID[c["id"]]["status"], triage.STATUS_REVIEW)
-        self.assertEqual(state.SETTINGS["gate"], 85)
-
-    def test_seed_version_change_clears_hub_state_only(self):
-        StateStore.clear()
-        state.boot()
-        StateStore.save("kyc", {"id": "console-record", "x": 1})
-        c = next(x for x in state.BOOK if x["status"] == triage.STATUS_REVIEW)
-        actions.decide(c, "m.chen", "analyst", "clear", "ok")
-        state.save_case(c)
-        StateStore.set_setting(state.VERSION_KEY, "0000-00-00.0")
-        state.boot()
-        self.assertEqual(state.BY_ID[c["id"]]["status"], triage.STATUS_REVIEW)
-        rows = {}
-        StateStore.restore("kyc", rows)
-        self.assertEqual(StateStore.count(), 1)
 
 
 if __name__ == "__main__":

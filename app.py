@@ -48,8 +48,6 @@ from fincrime.engines import (ai_agent, ai_review, ai_screening, investigation, 
                               worldcheck, workflow)
 from fincrime.engines.errors import WorkflowError
 from fincrime.engines.wc_report_pdf import render_wc_export
-from fincrime.hub import state as hub_state
-from fincrime.hub.views import bp as hub_bp
 from fincrime.utils import dates
 from fincrime.utils.text import display_name, initials, translit
 
@@ -94,7 +92,7 @@ DEMO_MODE = os.environ.get("DEMO_MODE", "1") == "1"
 CASE_BOOK = book_from(os.environ.get("CONSOLE_CASES"))
 CASE_BOOK_LABEL = {"file": "reconciliation log (1,000 cases)", "demo": "scripted demo (19 scenarios + filler)"}
 # The records the console owns in the state store; a new seed stamp clears
-# only these, so the hub's stored work (kinds hub_*) survives a book switch.
+# only these.
 CONSOLE_KINDS = ("kyc", "alert", "wc", "analyst", "settings", "upload")
 # Only advertise the password on the card while it is the built-in one.
 _SHOW_DEMO_HINT = "STRAIVE_DEMO_PASSWORD" not in os.environ
@@ -174,10 +172,10 @@ def role_required(*levels):
 def _require_sign_in():
     """Everything outside PUBLIC_ENDPOINTS needs a session. One hook rather
     than a decorator on each route: easier to audit, impossible to forget."""
-    if request.endpoint is None or request.endpoint in PUBLIC_ENDPOINTS or request.blueprint == "hub":
-        return None            # the hub (fincrime/hub/views.py) has its own sign-in and guard
+    if request.endpoint is None or request.endpoint in PUBLIC_ENDPOINTS:
+        return None
     if not session.get("user") or session.get("user") not in ANALYST_BY_KEY:
-        for key in ("user", "email", "name", "role", "roles", "tenant"):     # only the console's keys: a hub session survives
+        for key in ("user", "email", "name", "role", "roles", "tenant"):
             session.pop(key, None)
         return redirect(url_for("portal"))
     # A deep link may name the tenant, the way the real tool's URLs do.
@@ -512,7 +510,6 @@ def _inject_nav():
 
 # The Straive KYC Operations Hub: a second, Straive-branded demo over the
 # 1,000-case reconciliation log, with its own sign-in, screens and state.
-app.register_blueprint(hub_bp, url_prefix="/hub")
 
 
 # ─── Auth routes ───────────────────────────────────────────────────────────────
@@ -524,11 +521,8 @@ def state_version():
 
 @app.route("/")
 def portal():
-    if os.environ.get("HUB_DEFAULT", "0") == "1":      # a pitch URL that lands on the hub
-        return redirect(url_for("hub.sign_in"))
-    if session.get("user") in ANALYST_BY_KEY:
-        return redirect(url_for("kyc_list"))
-    return render_template("portal.html")
+    """The console's front door: the case list when signed in, else sign-in."""
+    return redirect(url_for("kyc_list" if session.get("user") in ANALYST_BY_KEY else "login"))
 
 
 def _login_page(error="", selected="", next_url="", status=200):
@@ -1517,7 +1511,6 @@ def reset_demo():
         abort(404)
     cleared = StateStore.clear()
     _load_seed()
-    hub_state.reload(app.logger.info)
     _bump_state()
     flash("Demo reset — the seeded case book is back." if cleared else "Could not clear the stored state.",
           "success" if cleared else "error")
@@ -1526,10 +1519,8 @@ def reset_demo():
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
 _load_seed()
-hub_state.boot(app.logger.info)
 
 if __name__ == "__main__":
     print(f" * FinCrime Operations Hub on http://{HOST}:{PORT}  (demo password: {DEMO_PASSWORD})")
     print(f" * Console case book: {CASE_BOOK_LABEL[CASE_BOOK]}  (CONSOLE_CASES=file|demo)")
-    print(f" * Straive KYC Operations Hub on http://{HOST}:{PORT}/hub")
     app.run(debug=DEBUG, host=HOST, port=PORT)
