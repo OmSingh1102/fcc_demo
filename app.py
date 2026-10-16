@@ -508,10 +508,6 @@ def _inject_nav():
     }
 
 
-# The Straive KYC Operations Hub: a second, Straive-branded demo over the
-# 1,000-case reconciliation log, with its own sign-in, screens and state.
-
-
 # ─── Auth routes ───────────────────────────────────────────────────────────────
 @app.route("/state/version")
 def state_version():
