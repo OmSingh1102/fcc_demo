@@ -327,8 +327,8 @@ def _load_seed():
 
     redrawn = _redrawn_cases()
     if redrawn:
-        app.logger.info("%d stored record(s) were read from an older drawing of their documents, or without the proof of "
-                        "address's name; they start again.", len(redrawn))
+        app.logger.info("%d stored record(s) were read from an older drawing of their documents, without the proof of "
+                        "address's name, or confirmed on a name the checks now refuse; they start again.", len(redrawn))
     restored = (StateStore.restore("kyc", KYC_BY_ID, skip=redrawn) + StateStore.restore("alert", ALERT_BY_ID, skip=redrawn)
                 + StateStore.restore("wc", WC_BY_ID, skip=redrawn) + StateStore.restore("analyst", ANALYST_BY_KEY)
                 + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS}))
@@ -370,13 +370,15 @@ def _redrawn_cases():
     of-address image has been redrawn since they were stored: what was read or decided on them
     was about another picture, so they keep their seeded state and the AI
     Agent reads them again. So do the cases whose stored read lacks the
-    proof of address's name (ai_agent.needs_reread)."""
+    proof of address's name (ai_agent.needs_reread), and those confirmed on
+    a name the checks now refuse (ai_agent.confirmed_on_older_names)."""
     out = set()
     for stored in StateStore.records("kyc"):
         case = KYC_BY_ID.get(stored.get("id", ""))
         if case is None or "recon" not in case:
             continue
-        if (stored.get("recon") or {}).get("drawn", "") != case["recon"].get("drawn", "") or ai_agent.needs_reread(stored):
+        if ((stored.get("recon") or {}).get("drawn", "") != case["recon"].get("drawn", "") or ai_agent.needs_reread(stored)
+                or ai_agent.confirmed_on_older_names(stored, case)):
             out.add(case["id"])
             alert, wc = _linked(case)
             out.update(r["id"] for r in (alert, wc) if r)
@@ -1266,6 +1268,14 @@ def _agent_recheck(case):
         _save("wc", wc)
 
 
+def _agent_address(case):
+    """Under the lock: a confirmed case's record address corrected to its
+    proof of address's (no model call); save it."""
+    ai_agent.update_address(case)
+    AI_AGENT["addresses"] = AI_AGENT.get("addresses", 0) + 1
+    _save("kyc", case)
+
+
 def _agent_verdict(case):
     """A case read before verdicts existed: Claude's verdict from the stored
     read (one text call, no images), stored beside the decision."""
@@ -1287,6 +1297,10 @@ def _agent_worker():
                 case = next((c for c in KYC_CASES if ai_agent.needs_recheck(c) and c["id"] not in AI_AGENT["busy"]), None)
                 if case is not None:
                     _agent_recheck(case)
+                    continue
+                case = next((c for c in KYC_CASES if ai_agent.needs_address_update(c) and c["id"] not in AI_AGENT["busy"]), None)
+                if case is not None:        # then addresses confirmed before the agent wrote them back
+                    _agent_address(case)
                     continue
             if case is None:            # then verdicts for earlier reads, one try per case per run
                 case = next((c for c in KYC_CASES if ai_agent.needs_verdict(c) and c["id"] not in AI_AGENT["busy"]

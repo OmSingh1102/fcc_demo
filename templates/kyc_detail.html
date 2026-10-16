@@ -183,6 +183,7 @@
         {% else %}
         <div class="note info small mb-8">Every check passed and the AI Agent confirmed the data; a World-Check alert is left, so the case went to Data Screening for an analyst.</div>
         {% endif %}
+        {% if ag.address_updated %}<div class="small mb-8" id="ai-agent-address"><b>Address updated</b> to the proof of address's: {{ ag.address_updated.to }} <span class="muted">(was {{ ag.address_updated.from }})</span></div>{% endif %}
         {% set v = ag.verdict %}{% if v %}
         <div class="verdict-box {{ 'differs' if v.decision and not v.agrees }}" id="ai-verdict">
             {% if v.decision %}

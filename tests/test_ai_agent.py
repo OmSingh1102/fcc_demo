@@ -92,7 +92,8 @@ class AiAgentTestCase(unittest.TestCase):
 
     # ── the clean path ──────────────────────────────────────────────────────
     def test_a_clean_case_is_verified_with_no_person(self):
-        c = self.clean(lambda c: c["screening"]["workflow"] == "auto-verified")
+        c = self.clean(lambda c: c["screening"]["workflow"] == "auto-verified"
+                       and not ai_agent.address_update(c, perfect_read(c)))      # its record's address needs no correction
         rec, stub = self.run_agent(c)
         self.assertEqual(rec["decision"], "verified", rec["reasons"])
         self.assertEqual((c["status"], c["closed_by"], c["previous_reviewer"]), ("Verified", "System User", "AI Agent"))
@@ -425,6 +426,79 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertFalse(v("PATRICIA WILSON", "ROBERTS", "PATRICIA MARIE")[0])                              # another surname
         self.assertTrue(v("KEVIN NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                        # the hub knows Kevin for Khoa
         self.assertFalse(v("BRANDON NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                     # another given name
+
+    def test_a_record_that_keeps_the_fathers_name_is_not_the_holder(self):
+        # an Indian passport's second given name is the father's: a record
+        # that keeps only it names the father (the file's "Father's name as
+        # middle name"); one that drops it keeps the holder
+        v = ai_agent.name_verdict
+        self.assertFalse(v("PRAKASH MORE", "MORE", "MANASI PRAKASH", country="IN")[0])
+        self.assertTrue(v("HITESH BHATT", "BHATT", "HITESH DINESHBHAI", country="IN")[0])
+        self.assertTrue(v("M PRAKASH MORE", "MORE", "MANASI PRAKASH", country="IN")[0])                    # her initial kept
+        # not held to it: a Vietnamese personal name (its last), a longer name, a name often dropped
+        self.assertTrue(v("NGUYEN MINHKHANG", "NGUYỄN", "VĂN MINH KHANG", country="VN")[0])
+        self.assertTrue(v("PHUONG NGUYEN", "NGUYỄN", "NGỌC PHƯƠNG", country="VN")[0])
+        self.assertTrue(v("DURGA BANDARU", "BANDARU", "VENKATA LAKSHMI DURGA", country="IN")[0])
+        self.assertTrue(v("SALMAN PATHAN", "PATHAN", "MOHAMMED SALMAN", country="IN")[0])
+        # the agent sends the book's case to a person, on the ID and on the proof of address alike
+        c = self.K["KYC-2026-3052"]
+        rec = self.assert_human(c, "Name on the ID differs from the CRM")
+        self.assertIn("Name on the proof of address differs from the CRM", rec["reasons"])
+
+    def test_a_case_confirmed_on_the_fathers_name_starts_again(self):
+        father, kept = self.K["KYC-2026-3052"], self.clean()
+        with mock.patch.object(ai_agent, "_own_name_kept", lambda *a, **k: True):   # the checks before the fix
+            for c in (father, kept):
+                self.assertEqual(self.run_agent(c)[0]["decision"], "verified", c["ai_agent"]["reasons"])
+                c["ai_agent"]["rules"] = 4
+                StateStore.save("kyc", c)
+        self.assertEqual(father["client"]["legal_name"], "MANASI PRAKASH MORE")            # the confirmation rewrote it
+        fcc._load_seed()
+        self.assertNotIn("ai_agent", fcc.KYC_BY_ID[father["id"]])                         # back to its seeded state, read again
+        self.assertEqual(fcc.KYC_BY_ID[father["id"]]["client"]["legal_name"], "PRAKASH MORE")
+        self.assertEqual(fcc.KYC_BY_ID[kept["id"]]["ai_agent"]["decision"], "verified")    # the rest is kept
+
+    # ── the verified address written back ──────────────────────────────────
+    def test_the_verified_address_corrects_the_record(self):
+        # a PIN keyed wrong: corrected in the record's own words
+        c = self.K["KYC-2026-3014"]
+        self.assertTrue(c["client"]["address"].endswith("Uttar Pradesh 226001"))
+        rec, _ = self.run_agent(c)
+        self.assertEqual(rec["decision"], "verified", rec["reasons"])
+        self.assertTrue(c["client"]["address"].endswith("Uttar Pradesh 226010"), c["client"]["address"])
+        self.assertEqual(rec["address_updated"]["from"][-6:], "226001")
+        self.assertEqual((c["change_log"][-1]["by"], c["change_log"][-1]["field"]), ("AI Agent", "address"))
+        self.assertIn(("AI Agent", "Address updated"), [(e["actor"], e["action"]) for e in c["audit"]])
+        self.login("amara.iyer")
+        page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
+        self.assertIn('id="ai-agent-address"', page)
+        # a city under its old name: the document's address, without the relative's line
+        c = self.K["KYC-2026-3032"]                                           # Madras; the Aadhaar reads S/O: Krishnan, ... Chennai
+        self.assertIn("Madras", c["client"]["address"])
+        self.assertEqual(self.run_agent(c)[0]["decision"], "verified")
+        self.assertIn("Chennai", c["client"]["address"])
+        self.assertNotIn("S/O", c["client"]["address"])
+        # an address written another way only is left as it is
+        same = self.clean(lambda x: x["id"] not in ("KYC-2026-3014", "KYC-2026-3032")
+                          and not ai_agent.address_update(x, perfect_read(x)))
+        before = same["client"]["address"]
+        self.assertEqual(self.run_agent(same)[0]["decision"], "verified")
+        self.assertEqual((same["client"]["address"], same["ai_agent"].get("address_updated")), (before, None))
+
+    def test_an_address_confirmed_before_is_corrected_with_no_model_call(self):
+        c = self.K["KYC-2026-3014"]
+        with mock.patch.object(ai_agent, "address_update", lambda case, got: ""):    # confirmed before the write-back
+            self.run_agent(c)
+        c["ai_agent"]["rules"] = 4
+        self.assertTrue(ai_agent.needs_address_update(c))
+        stub = Stub()
+        with mock.patch.object(ai_agent.llm, "call", stub), mock.patch.object(ai_agent, "eligible", lambda x: False):
+            fcc.AI_AGENT.update(running=True, threads=[], busy=set())
+            fcc._agent_worker()
+        self.assertEqual(stub.sent, [])                                       # no model call, no images
+        self.assertTrue(c["client"]["address"].endswith("226010"))
+        self.assertEqual(c["ai_agent"]["rules"], ai_agent.RULES_VERSION)
+        self.assertFalse(ai_agent.needs_address_update(c))
 
     def test_a_garbled_record_name_repairs_from_the_files_text(self):
         # the console keeps the record's name in capitals, and capitals change

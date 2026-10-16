@@ -120,9 +120,11 @@ POLICY_VERSION = 3
 VERDICT_TRIES = 3
 # Bumped when the checks change: a case they sent to a person, and no one has
 # touched since, is checked again on its stored read (recheck). 4: the name
-# on the proof of address.
-RULES_VERSION = 4
+# on the proof of address. 5: the holder's own given name (_own_name_kept),
+# and the verified address written to the record (address_update).
+RULES_VERSION = 5
 POA_NAME_RULES = 4    # the first checks to want the proof of address's name: reads before them may lack it (needs_reread)
+OWN_NAME_RULES = 5    # the first to want the holder's own given name: a case confirmed before may name the father
 VERDICT_LABELS = {"verify": "Verify", "send_to_person": "Send to a person"}
 
 # What an analyst asks the customer for when the ID itself is the problem
@@ -258,16 +260,35 @@ def _name_key(text):
     return sorted(similarity.tokens(text))
 
 
-def name_verdict(crm, surname, given, filed=""):
+# Names a holder often goes without (a Telugu prefix, Mohammed): a CRM that
+# drops one keeps the holder's own name all the same.
+DROPPED_FIRST = names.GIVEN_PREFIXES | {"MOHAMMED", "MOHAMMAD", "MUHAMMAD", "MOHD", "MD"}
+
+
+def _own_name_kept(given, rest, country=""):
+    """An ID with two given names, the second of them the father's (an
+    Indian passport's MANASI PRAKASH): the CRM must keep the first, or its
+    initial. A CRM that keeps only the second names the father (PRAKASH
+    MORE): another person. A Vietnamese passport's personal name is its
+    last, and a longer name is often called by its last (VENKATA LAKSHMI
+    DURGA as DURGA), so neither is held to this."""
+    if country == "VN" or len(given) != 2 or given[0] in DROPPED_FIRST:
+        return True
+    own = given[0]
+    return any(names.given_match(own, b) >= 0.9 or (names.is_initial(b) and b == own[0]) for b in rest)
+
+
+def name_verdict(crm, surname, given, filed="", country=""):
     """Is the CRM name the person the ID names? The hub's own name rules
     decide: the ID's surname is among the CRM's names (any typing, a
-    compound part, a spelling variant) and a given name agrees (exact,
-    nickname, short form or spelling variant; an initial alone is not
-    enough). `filed` is the name as the file wrote it before the console put
-    it in capitals: broken characters (UTF-8 read as Windows-1252) repair
-    from that text, since capitals change the bytes they stand for, and a
-    byte the file itself lost stands for one letter. Returns (same, value
-    to confirm)."""
+    compound part, a spelling variant) and the holder's own given name
+    agrees (exact, nickname, short form or spelling variant; an initial
+    alone is not enough; _own_name_kept). `filed` is the name as the file
+    wrote it before the console put it in capitals: broken characters
+    (UTF-8 read as Windows-1252) repair from that text, since capitals
+    change the bytes they stand for, and a byte the file itself lost stands
+    for one letter. `country` is the ID's. Returns (same, value to
+    confirm)."""
     source = filed if filed and filed.upper() == crm else crm
     crm_fixed, repaired = names.repair_mojibake(source)
     c, s, g = similarity.tokens(crm_fixed), similarity.tokens(surname), similarity.tokens(given)
@@ -288,7 +309,7 @@ def name_verdict(crm, surname, given, filed=""):
         # a patronymic initial: BALAJI K for KRISHNAN BALAJI
         any(names.is_initial(t) and t[0] == s[0][0] for t in c))
     rest = [t for t in c if t not in names.surname_forms(s)]
-    giv_ok = not g or any(names.given_match(a, b) >= 0.9 for a in g for b in rest)
+    giv_ok = not g or (any(names.given_match(a, b) >= 0.9 for a in g for b in rest) and _own_name_kept(g, rest, country))
     if not (sur_ok and giv_ok):
         return False, crm
     # the ID's spelling, in the order the CRM keeps (surname first or last)
@@ -317,7 +338,7 @@ def _lost_letters_match(lossy, printed):
     return found
 
 
-def poa_name_verdict(crm, poa, filed=""):
+def poa_name_verdict(crm, poa, filed="", country=""):
     """Is the proof of address in the CRM name? A proof of address prints the
     holder's name in one line, with no surname field, so each of its names is
     tried as the surname, the rest as the given names, under the ID's rules
@@ -325,11 +346,11 @@ def poa_name_verdict(crm, poa, filed=""):
     printed = similarity.tokens(" ".join((poa.get("surname", ""), poa.get("given_names", ""))))
     if not printed:
         return None
-    if poa.get("surname") and poa.get("given_names") and name_verdict(crm, poa["surname"], poa["given_names"], filed)[0]:
+    if poa.get("surname") and poa.get("given_names") and name_verdict(crm, poa["surname"], poa["given_names"], filed, country)[0]:
         return True
     if len(printed) == 1:
-        return name_verdict(crm, "", printed[0], filed)[0]
-    return any(name_verdict(crm, t, " ".join(printed[:i] + printed[i + 1:]), filed)[0] for i, t in enumerate(printed))
+        return name_verdict(crm, "", printed[0], filed, country)[0]
+    return any(name_verdict(crm, t, " ".join(printed[:i] + printed[i + 1:]), filed, country)[0] for i, t in enumerate(printed))
 
 
 def _filed_name(case):
@@ -349,6 +370,49 @@ def _poa_address(read, country):
     if name and head and similarity.fold(tail) == similarity.fold(name)             and addresses.normalise(head, country)["country"] not in ("", country):
         return head.strip()
     return read
+
+
+# What makes a registered address out of date when the proof of address
+# matches it: a city or district under an older or other name (Bangalore,
+# Secunderabad) or Vietnam's pre-2025 units, where the document names the
+# current ones (addresses.normalise flags).
+STALE_ADDRESS = {"legacy_city", "district_alias", "neighbourhood_alias", "pre2025_unit"}
+
+
+def address_update(case, got):
+    """The proof of address's address, when the record's should be corrected
+    to it as an analyst would: the documents' postal code where the record's
+    was keyed wrong (226001 for 226010), or the current place names where
+    the record keeps older ones. '' when the two differ only in how they are
+    written (abbreviations, ZIP+4, the order of a flat and wing)."""
+    country, now = case["client"]["nationality"], case["client"].get("address", "")
+    read = _poa_address(((got or {}).get("poa") or {}).get("address", ""), country)
+    reg, poa = addresses.normalise(now, country), addresses.normalise(read, country)
+    if addresses.compare(reg, poa) != "same":
+        return ""
+    wrong_code = bool(reg["postal5"] and poa["postal5"]) and reg["postal5"] != poa["postal5"]
+    stale = (set(reg["flags"]) & STALE_ADDRESS) - set(poa["flags"])
+    if not wrong_code and not stale:
+        return ""
+    if not stale:
+        # only the code was keyed wrong: correct it in the record's own words (the state the bill leaves out stays)
+        text = re.sub(rf"\b{reg['postal5']}(-\d{{4}})?\b", poa["postal5"], now, count=1)
+    else:
+        # the document's address, as the record keeps one: no relative's line (S/O: Krishnan, ...), no country after its own
+        text = addresses.RELATION.sub("", read).strip()
+        head, _, tail = text.rpartition(",")
+        if head and addresses.COUNTRY_WORDS.get(similarity.fold(tail).strip()) == country:
+            text = head.strip()
+    return "" if similarity.fold(text) == similarity.fold(now) else text
+
+
+def write_address(case, record, address):
+    """Correct the record's registered address to the proof of address's."""
+    before = case["client"].get("address", "")
+    case["client"]["address"] = address
+    workflow._change(case, ACTOR, "address", before, address)
+    workflow._audit(case, ACTOR, "Address updated", f"Registered address corrected to the proof of address's: {address} (was {before}).")
+    record["address_updated"] = {"from": before, "to": address}
 
 
 def resubmit_reason(got, record_checks):
@@ -401,7 +465,7 @@ def checks(case, got, now=None):
 
     printed = " ".join(x for x in (idr.get("surname", ""), idr.get("given_names", "")) if x)
     same, name_value = name_verdict(client["legal_name"], idr.get("surname", ""), idr.get("given_names", ""),
-                                    filed=_filed_name(case))
+                                    filed=_filed_name(case), country=client["nationality"])
     _check(out, "Name", client["legal_name"], printed, same,
            "" if same else ("Name not readable on the ID" if not printed else "Name on the ID differs from the CRM"))
 
@@ -435,7 +499,7 @@ def checks(case, got, now=None):
                poa.get("readable"), "" if poa.get("readable") else "Proof of address could not be read")
         if poa.get("readable"):
             holder = " ".join(x for x in (poa.get("surname", ""), poa.get("given_names", "")) if x)
-            same = poa_name_verdict(client["legal_name"], poa, filed=_filed_name(case))
+            same = poa_name_verdict(client["legal_name"], poa, filed=_filed_name(case), country=client["nationality"])
             _check(out, "Name on proof of address", client["legal_name"], holder or "not read", same,
                    "" if same else ("No holder name could be read on the proof of address" if same is None
                                     else "Name on the proof of address differs from the CRM"))
@@ -494,6 +558,10 @@ def decide(case, alert_case, wc, perceived):
                                   alert_case=alert_case, wc=wc)
         except WorkflowError as exc:
             record["reasons"] = [str(exc)]
+        if not record["reasons"]:
+            address = address_update(case, record["read"])
+            if address:
+                write_address(case, record, address)
     if record["reasons"]:
         record["decision"] = "human"
         record["resubmit"] = resubmit_reason(record["read"], record["checks"])
@@ -517,6 +585,13 @@ def needs_recheck(case):
             and all(e.get("actor") == ACTOR for e in case.get("audit", []) if e.get("at", "") >= rec.get("at", "")))
 
 
+def _untouched(case):
+    """No person has reserved or acted on the case since the agent's read."""
+    rec = case.get("ai_agent") or {}
+    return not case.get("current_reviewer") and all(
+        e.get("actor") in (ACTOR, vocab.SYSTEM_USER) for e in case.get("audit", []) if e.get("at", "") >= rec.get("at", ""))
+
+
 def needs_reread(case):
     """A case read before the checks wanted the proof of address's name, whose
     readable proof of address gave none (the read was not asked for it), and
@@ -525,8 +600,40 @@ def needs_reread(case):
     rec = case.get("ai_agent") or {}
     poa = (rec.get("read") or {}).get("poa") or {}
     return (bool(case.get("poa_required")) and rec.get("rules", 1) < POA_NAME_RULES and bool(poa.get("readable"))
-            and not (poa.get("surname") or poa.get("given_names")) and not case.get("current_reviewer")
-            and all(e.get("actor") in (ACTOR, vocab.SYSTEM_USER) for e in case.get("audit", []) if e.get("at", "") >= rec.get("at", "")))
+            and not (poa.get("surname") or poa.get("given_names")) and _untouched(case))
+
+
+def confirmed_on_older_names(stored, seed):
+    """A case the agent confirmed before the checks wanted the holder's own
+    given name, whose stored read the name checks now refuse against the
+    record as the file gave it (`seed`: the confirmation rewrote the name),
+    and no person has touched since: it starts again and is read again
+    (app._load_seed), and goes to a person."""
+    rec = stored.get("ai_agent") or {}
+    if (rec.get("decision") not in ("verified", "screening") or rec.get("rules", 1) >= OWN_NAME_RULES
+            or not rec.get("read") or not _untouched(stored)):
+        return False
+    found, _ = checks(seed, rec["read"])
+    return any(not c["ok"] for c in found if c["check"] in ("Name", "Name on proof of address"))
+
+
+def needs_address_update(case):
+    """A case the agent confirmed before it wrote the verified address back,
+    whose record keeps an address its proof of address corrects, and no
+    person has touched since (update_address)."""
+    rec = case.get("ai_agent") or {}
+    return (rec.get("decision") in ("verified", "screening") and rec.get("rules", 1) < RULES_VERSION
+            and bool(rec.get("read")) and not rec.get("address_updated") and _untouched(case)
+            and bool(address_update(case, rec["read"])))
+
+
+def update_address(case):
+    """The address write-back on a case confirmed before it existed: no new
+    look at the images; the record's checks are now this version's."""
+    rec = case["ai_agent"]
+    write_address(case, rec, address_update(case, rec["read"]))
+    rec["rules"] = RULES_VERSION
+    return rec
 
 
 def recheck(case, alert_case, wc):
