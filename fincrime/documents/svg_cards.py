@@ -329,9 +329,13 @@ def driving_licence_svg(case, doc):
     return _wrap(W, H, body, doc)
 
 
-def national_id_svg(case, doc, title="NATIONAL IDENTITY CARD", code="ID", holder=False):
+def national_id_svg(case, doc, title="NATIONAL IDENTITY CARD", code="ID", holder=False, name_label="", address=""):
     """`holder` prints the holder's name above the address on the back, as
-    an Aadhaar's address side does when it is the proof of address."""
+    an Aadhaar's address side does when it is the proof of address.
+    `name_label` prints the front's name in one field under that label, as
+    the card writes it (a Vietnamese name family name first, an Indian one
+    surname first or with an initial), instead of a surname and given names;
+    `address` is the address the card prints on its front, if any."""
     c = case["client"]
     W, H = 640, 400
     nat = c["nationality"]
@@ -361,18 +365,26 @@ def national_id_svg(case, doc, title="NATIONAL IDENTITY CARD", code="ID", holder
     else:
         body += _silhouette(24, 74, 130, 165)
         x = 176
-        body += _field(x, 82, "Surname", surname.upper(), 15)
-        body += _field(x, 120, "Given names", given.upper(), 14)
-        if c.get("native_name"):
-            body += _field(x, 158, "Name (native script)", c["native_name"], 13)
-            y0 = 196
+        if name_label:
+            body += _field(x, 82, name_label, (c.get("native_name") or c["legal_name"]).upper(), 15)
+            y0 = 120
         else:
-            y0 = 158
+            body += _field(x, 82, "Surname", surname.upper(), 15)
+            body += _field(x, 120, "Given names", given.upper(), 14)
+            if c.get("native_name"):
+                body += _field(x, 158, "Name (native script)", c["native_name"], 13)
+                y0 = 196
+            else:
+                y0 = 158
         body += _field(x, y0, "Nationality", country.title(), 12)
         body += _field(x + 230, y0, "Sex", "F" if c.get("gender") == "F" else "M", 12)
         body += _field(x, y0 + 38, "Date of birth", _long_date(c["dob"]), 12)
         body += _field(x + 230, y0 + 38, "Date of expiry", _long_date(expiry), 12)
         body += _field(x, y0 + 76, "ID number", number, 14).replace(f'font-family="{FONT}" font-size="14"', f'font-family="{MONO}" font-size="14"')
+        if address:
+            ya = max(y0 + 112, 252)                                     # below the photo, which ends at y 239
+            body += _label(24, ya, "Address")
+            body += _value_lines(24, ya + 18, address, CARD_FRONT_ADDRESS_WIDTH, 3, 11)
         body += f'<rect x="{W-200}" y="{H-70}" width="170" height="26" fill="url(#bars)"/>'
     if any(d.get("quality") == "expired" for d in case["documents"]):
         body += _stamp(W - 130, 320, "EXPIRED")
@@ -430,6 +442,7 @@ def trade_licence_svg(case, doc):
 
 BILL_ADDRESS_WIDTH = 320       # a statement's service address column
 CARD_ADDRESS_WIDTH = 592       # the address line across the back of an ID card
+CARD_FRONT_ADDRESS_WIDTH = 400  # the address under the front's fields, clear of the bar code at x 440
 
 
 def service_address(address, country_code):

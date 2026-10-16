@@ -146,7 +146,8 @@ def _yymmdd(iso):
 
 def mrz_line2(case, tampered=None):
     """Line 2 of the passport MRZ with its 7-3-1 check digits, from the
-    passport number, the date of birth and the expiry. A tampered page
+    passport number, the date of birth, the holder's sex (as the data page
+    prints it; no check digit covers it) and the expiry. A tampered page
     carries a wrong date-of-birth check digit."""
     s = case["synth"]
     issuer = case["documents"]["passport"]["mrz"].get("issuer") or ISO3.get(case["country"], "XXX")
@@ -156,7 +157,7 @@ def mrz_line2(case, tampered=None):
     dob_cd = _check_digit(dob)
     if tampered if tampered is not None else s.get("tampered"):
         dob_cd = str((int(dob_cd) + 1) % 10)
-    body = num + _check_digit(num) + issuer + dob + dob_cd + "<" + exp + _check_digit(exp) + "<" * 14
+    body = num + _check_digit(num) + issuer + dob + dob_cd + (s.get("sex") or "<") + exp + _check_digit(exp) + "<" * 14
     composite = _check_digit(num + _check_digit(num) + dob + dob_cd + exp + _check_digit(exp) + "<" * 14)
     return _pad(body + "<" + composite, 44)
 
@@ -409,7 +410,11 @@ def render(case, file_id):
             adapter["client"]["address"] = address
             return svg_cards.driving_licence_svg(adapter, doc)
         title = SECONDARY_TITLE.get(sec["type"], sec["type"].upper())
-        return svg_cards.national_id_svg(adapter, doc, title=title, code="ID")
+        # the card's name on one line as the file gives it (a Vietnamese card's "Full name", family name first);
+        # the address only where the file says the card prints one
+        return svg_cards.national_id_svg(adapter, doc, title=title, code="ID",
+                                         name_label="Full name" if case["country"] == "VN" else "Name",
+                                         address=sec["address"]["text"] if sec["address"]["printed"] else "")
     if file["id"] == "poa":
         name = case["identity"].get("name", {}).get("canonical", case["customer"]["name"])
         adapter = _adapter(case, name, poa["address"])

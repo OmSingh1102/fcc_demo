@@ -517,6 +517,27 @@ class DocumentTests(unittest.TestCase):
         self.assertNotIn(">Name</text>", plain)
         self.assertRegex(plain, r'<text x="24" y="84"[^>]*>Address / Adresse</text>')
 
+    def test_the_passport_mrz_carries_the_holders_sex(self):
+        # position 21 of line 2 is the sex the data page prints; no check digit covers it
+        for cid, sex in (("KYC-2026-3140", "F"), ("KYC-2026-3127", "M")):
+            line = documents.mrz_line2(by_id(cid))
+            self.assertEqual((len(line), line[20]), (44, sex))
+            self.assertEqual(documents.mrz_checks(by_id(cid))[:2], (True, []))
+        self.assertFalse(documents.mrz_checks(next(c for c in book() if c["synth"]["tampered"]))[0])
+
+    def test_a_secondary_id_prints_its_name_and_address_as_the_file_has_them(self):
+        def text(cid):
+            return html.unescape(" | ".join(re.findall(r">([^<>]+)</text>", documents.render(by_id(cid), "secondary"))))
+        vn = text("KYC-2026-3011")                                            # CCCD: one full name, family name first
+        self.assertIn("Full name | NGUYỄN NGỌC PHƯƠNG", vn)
+        self.assertNotIn("Surname", vn)
+        self.assertIn("Address | 174 Điện Biên Phủ, Phường 25, Quận Bình Thạnh, TP. Hồ Chí Minh", vn)
+        self.assertIn("Name | MANDAVA NAGA SAI SRI LAKSHMI", text("KYC-2026-3039"))   # surname first, as written
+        self.assertIn("Name | BALAJI K", text("KYC-2026-3032"))                       # an initial, as written
+        pan = text("KYC-2026-3012")                                           # a PAN card prints no address
+        self.assertNotIn("Address", pan)
+        self.assertIn("Name | ASHISH UPADHYAY", pan)
+
     def test_the_drawn_sex_follows_what_the_file_says(self):
         # a relationship on the address, an honorific, a married-name change, then the names
         self.assertEqual(by_id("KYC-2026-3140")["synth"]["sex"], "F")                    # Jennifer Smith
