@@ -12,7 +12,7 @@ flags that say whether a disagreement is explained by the documents.
 """
 import re
 
-from fincrime.hub.similarity import fold
+from fincrime.filebook.similarity import fold
 
 # ── tables ───────────────────────────────────────────────────────────────────
 

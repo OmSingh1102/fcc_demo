@@ -9,7 +9,7 @@ was done, kept beside the case for comparison only.
 import csv
 import os
 
-from fincrime.hub import parse
+from fincrime.filebook import parse
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 LOG_PATH = os.path.join(DATA_DIR, "kyc_wc_recon_log.csv")

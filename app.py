@@ -344,8 +344,8 @@ def _load_seed():
 
 
 def _sync_sex():
-    """A file case's sex comes from what the file says about its holder (hub
-    documents.holder_sex); records stored before that rule carry a coin toss.
+    """A file case's sex comes from what the file says about its holder
+    (filebook documents.holder_sex); records stored before that rule carry a coin toss.
     Bring the case, its screening alert and its watchlist case in line with
     the drawn passport. No one can edit the sex, so nothing a person set is
     overwritten. Returns how many cases changed."""
@@ -862,7 +862,7 @@ def document_svg(case_id, doc_id):
 
 def _render_document(case, doc):
     """A reconciliation-log case's passport, secondary ID and proof of
-    address are the hub's images (the file's printed names, MRZ and
+    address are the file book's images (the file's printed names, MRZ and
     addresses); everything else is drawn by svg_cards from the case."""
     if doc.get("hub_file"):
         svg = recon_book.render(case, doc)

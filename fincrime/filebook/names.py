@@ -9,7 +9,7 @@ historical label in the file is never read.
 """
 import re
 
-from fincrime.hub.similarity import fold, has_marks, squash, token_score, tokens
+from fincrime.filebook.similarity import fold, has_marks, squash, token_score, tokens
 
 HONORIFICS = {"MR", "MRS", "MS", "MISS", "DR", "PROF", "ER", "ADV", "CA", "CAPT", "COL", "MAJ", "SHRI", "SRI", "SHREE",
               "SMT", "SHRIMATI", "KUMARI", "KUM", "SARDAR", "HAJI", "SYT", "ONG", "BA", "ANH", "CHI"}

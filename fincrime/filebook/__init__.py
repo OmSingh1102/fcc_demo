@@ -1,7 +1,6 @@
-"""The engine under the console's file book (the reconciliation log). It
-began as the Straive KYC Operations Hub, a second demo whose screens and
-agents have since been removed; the console draws its documents and reads
-names and addresses with these modules.
+"""The engine under the console's file book (the reconciliation log): the
+console draws its documents and reads names and addresses with these
+modules.
 
 Package map:
   loader / parse     the CSV becomes case records (every field parsed, nothing judged)

@@ -1,17 +1,15 @@
 """The console's case book from the reconciliation log.
 
-The 1,000 rows of fincrime/hub/data/kyc_wc_recon_log.csv (the file the user
+The 1,000 rows of fincrime/filebook/data/kyc_wc_recon_log.csv (the file the user
 uploaded; every person and company in it is fictional) become the console's
 open onboarding cases: each row is one KYC case at L1 Data Confirming with
 its one World-Check record, a screening case and a watchlist case, built by
 the same seed builders as the scripted scenarios. The AI screening rules run
 at intake exactly as they do for those (seed.pair_screening).
 
-Parsing is the hub's (fincrime/hub/loader.py, parse.py: Flask-free, no state)
-and so are the document images (fincrime/hub/documents.py): a case shows the
-same passport, secondary ID and proof of address, with the same planted
-capture defect, in both UIs. The file has no images; the hub's defect plan
-is synthetic and the case page says so.
+Parsing is the file book's (fincrime/filebook/loader.py, parse.py: Flask-free, no
+state) and so are the document images (fincrime/filebook/documents.py). The file
+has no images; the defect plan is synthetic and the case page says so.
 
 What an analyst recorded for the row (disposition, notes, variance types,
 handling time) rides along as case["recon"]. Nothing in the console's logic
@@ -27,14 +25,14 @@ from datetime import date, timedelta
 from fincrime.data import vocab
 from fincrime.engines.errors import WorkflowError
 from fincrime.data.seed import AMARA, JON, MARIO, agency_info, kyc_case, pair_screening, wc_match
-from fincrime.hub import documents as hub_documents
-from fincrime.hub import loader as hub_loader
-from fincrime.hub import names as hub_names
+from fincrime.filebook import documents as file_documents
+from fincrime.filebook import loader as file_loader
+from fincrime.filebook import names as file_names
 from fincrime.utils import dates
 
 KEY_PREFIX = "recon-"
 
-# Analyst-facing words for the hub's synthetic capture defects: the console's
+# Analyst-facing words for the synthetic capture defects: the console's
 # document quality badge and what the ID-verification vendor said. The vendor
 # declines only what it detects; a phone lying on the page, a shot at an
 # angle or a cracked card passes it (as real uploads did), and only the AI
@@ -50,7 +48,7 @@ VENDOR_REASON = {
     "tampered": "Security-feature check failed: the date-of-birth check digit in the MRZ does not match.",
 }
 
-# Proof-of-address kinds: the hub's parse.poa_type → the console's library
+# Proof-of-address kinds: the file book's parse.poa_type → the console's library
 # (vocab.ACCEPTED_POA_TYPES); and the country an overseas POA was issued in.
 POA_KIND = {"utility_bill": "utility_bill", "bank_statement": "bank_statement", "lease": "tenancy_agreement",
             "aadhaar": "aadhaar", "residence_confirmation": "residence_confirmation", "military_orders": "military_orders"}
@@ -89,7 +87,7 @@ STARTERS = {
     "KYC-2026-3118": MARIO, "KYC-2026-3043": MARIO, "KYC-2026-3040": MARIO,
 }
 
-# The hub-shaped view of each case (build_case + synthesise), kept for the
+# The file-book view of each case (build_case + synthesise), kept for the
 # document images; rebuilt by every build().
 VIEWS = {}
 
@@ -134,15 +132,15 @@ def _docs(v, company):
 
 
 def view(case_id):
-    """The hub-shaped record the document images are drawn from, with the
-    canonical name the hub's identity agent would give the proof of address
+    """The file-book record the document images are drawn from, with the
+    canonical name the proof of address prints (names.analyse)
     (worked out on first use: names.analyse is the costly step)."""
     v = VIEWS.get(case_id)
     if v is None:
         return None
     if not v["identity"]:
         pp = v["documents"]["passport"]
-        v["identity"] = {"name": hub_names.analyse(v["country"], v["customer"]["name"], pp["viz"], pp["mrz"],
+        v["identity"] = {"name": file_names.analyse(v["country"], v["customer"]["name"], pp["viz"], pp["mrz"],
                                                    v["documents"]["secondary"]["name"], v["customer"]["corporate"],
                                                    v["customer"]["ubo"])}
     return v
@@ -151,7 +149,7 @@ def view(case_id):
 def render(case, doc):
     """The SVG for a console document of a file-backed case, or None."""
     v = view((case.get("recon") or {}).get("id", ""))
-    return hub_documents.render(v, doc["hub_file"]) if v and doc.get("hub_file") else None
+    return file_documents.render(v, doc["hub_file"]) if v and doc.get("hub_file") else None
 
 
 # ── the company (KYB) ───────────────────────────────────────────────────────
@@ -261,7 +259,7 @@ def _recorded(v):
 
 
 def case_records(v, routed_to=""):
-    """(kyc, alert, wc) for one hub-shaped view."""
+    """(kyc, alert, wc) for one file-book view."""
     key = (UPLOAD_PREFIX + re.sub(r"[^a-z0-9]+", "-", v["id"].lower()).strip("-") if v.get("uploaded")
            else KEY_PREFIX + v["id"].rsplit("-", 1)[-1])
     cust, s, pp = v["customer"], v["synth"], v["documents"]["passport"]
@@ -299,7 +297,7 @@ def case_records(v, routed_to=""):
     mrz = pp["mrz"]
     kyc["vendor_check"]["extracted"].update(name=" ".join(mrz["primary_tokens"] + mrz["secondary"]), dob=cust["dob"],
                                             id_number=pp["number"], id_type="Passport", expiry=s["passport_expiry"])
-    # drawn: when this case's ID or proof-of-address image was last redrawn (hub documents.REDRAWN,
+    # drawn: when this case's ID or proof-of-address image was last redrawn (filebook documents.REDRAWN,
     # POA_REDRAWN, AADHAAR_NAMED), "" when never
     kyc["recon"] = dict(_recorded(v), uploaded=bool(v.get("uploaded")), drawn=s.get("drawn", ""))
     alert, wc = pair_screening(kyc, key, [_match(v, key)])
@@ -310,8 +308,8 @@ def build():
     """(kyc_cases, alert_cases, wc_cases) for the whole file."""
     VIEWS.clear()
     kyc, alerts, wcs = [], [], []
-    for seq, row in enumerate(hub_loader.read_rows(), start=1):
-        v = hub_documents.synthesise(hub_loader.build_case(row, seq))
+    for seq, row in enumerate(file_loader.read_rows(), start=1):
+        v = file_documents.synthesise(file_loader.build_case(row, seq))
         v.pop("raw", None)
         VIEWS[v["id"]] = v
         k, a, w = case_records(v, STARTERS.get(v["id"], ""))
@@ -330,7 +328,7 @@ HISTORY_COLUMNS = ("discrepancy_analysis_dob_address", "case_analyst", "review_d
                    "compliance_action_regulatory_notes", "name_variance_type", "address_variance_type",
                    "pain_point_detail", "normalisation_resolution_applied", "screening_impact",
                    "match_score_after_normalisation", "analyst_handling_time_mins")
-UPLOAD_COLUMNS = tuple(k for k in hub_loader.REQUIRED if k not in HISTORY_COLUMNS)
+UPLOAD_COLUMNS = tuple(k for k in file_loader.REQUIRED if k not in HISTORY_COLUMNS)
 UPLOAD_MAX_ROWS = 500
 
 
@@ -338,17 +336,17 @@ def read_upload(text):
     """The rows of an uploaded CSV, keyed like the log's. Refuses a file
     without the columns a case needs, or with more rows than one upload takes."""
     reader = csv.DictReader(io.StringIO(text))
-    keys = {hub_loader.parse.header_key(h) for h in (reader.fieldnames or [])}
+    keys = {file_loader.parse.header_key(h) for h in (reader.fieldnames or [])}
     missing = [k for k in UPLOAD_COLUMNS if k not in keys]
     if missing:
         raise WorkflowError(f"The file lacks {len(missing)} column(s) a case needs: {', '.join(missing[:6])}"
                             + (" …" if len(missing) > 6 else "") + ". Download the sample for the layout.")
     rows = []
     for raw in reader:
-        row = {hub_loader.parse.header_key(h): (v or "").strip() for h, v in raw.items() if h is not None}
+        row = {file_loader.parse.header_key(h): (v or "").strip() for h, v in raw.items() if h is not None}
         if not any(row.values()):
             continue
-        for k in hub_loader.REQUIRED:
+        for k in file_loader.REQUIRED:
             row.setdefault(k, "")
         rows.append(row)
     if not rows:
@@ -364,7 +362,7 @@ def add_rows(rows, start_seq):
     built, failed = [], []
     for i, row in enumerate(rows):
         try:
-            v = hub_documents.synthesise(hub_loader.build_case(row, start_seq + i))
+            v = file_documents.synthesise(file_loader.build_case(row, start_seq + i))
             v.pop("raw", None)
             v["uploaded"] = True
             VIEWS[v["id"]] = v
@@ -382,14 +380,14 @@ def sample_rows(first_number, taken=()):
     from the start). Ids are numbered from `first_number`, skipping `taken`
     and any id whose drawn capture defects would spoil the first three."""
     from fincrime.engines import ai_agent                    # late: the engines import the seed
-    from fincrime.hub import addresses
-    rows = hub_loader.read_rows()
+    from fincrime.filebook import addresses
+    rows = file_loader.read_rows()
     picks = []
     for want in ("clean", "clean", "name", "exact", "company"):
         for seq, row in enumerate(rows, start=1):
             if row in picks:
                 continue
-            v = hub_loader.build_case(row, seq)
+            v = file_loader.build_case(row, seq)
             corp, exact = v["customer"]["corporate"], "Exact" in row["world_check_listed_dob"]
             dob_conflict = v["wc"]["dob"].get("kind") == "full" and not exact and "transposed" not in row["world_check_listed_dob"]
             viz = v["documents"]["passport"]["viz"]
@@ -409,7 +407,7 @@ def sample_rows(first_number, taken=()):
             n += 1
             if new_id in taken:
                 continue
-            s_ = hub_documents.synthesise(hub_loader.build_case(dict(row, kyc_case_id=new_id), 0))["synth"]
+            s_ = file_documents.synthesise(file_loader.build_case(dict(row, kyc_case_id=new_id), 0))["synth"]
             # capture defects are drawn per case id: the cases meant to reach the
             # agent's decision get an id whose documents carry none
             if want in ("exact", "company") or (s_["capture"] == "none" and not s_["tampered"] and s_["poa_age_days"] <= 183):

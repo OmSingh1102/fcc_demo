@@ -176,8 +176,9 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual(c["vendor_check"]["result"], "Approved")                   # the vendor missed it, as on real uploads
         self.assertNotIn("Vendor rejected", c["manual_review_reason"])
         self.assertEqual(c["documents"][0]["quality"], "covered")
-        hub = recon_book.hub_documents
-        self.assertEqual(c["recon"]["drawn"], hub.POA_REDRAWN if hub.poa_wraps(recon_book.view(c["recon"]["id"])) else hub.REDRAWN)
+        drawings = recon_book.file_documents
+        self.assertEqual(c["recon"]["drawn"], drawings.POA_REDRAWN if drawings.poa_wraps(recon_book.view(c["recon"]["id"]))
+                         else drawings.REDRAWN)
         rec = self.assert_human(c, "ID could not be read: something covers part of it", problems=["covered"], dob="",
                                 expiry="", mrz_visible=False)
         self.assertEqual(rec["resubmit"], ai_agent.RESUBMIT_UNCLEAR)
@@ -424,7 +425,7 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual(v("PRABHU FNU", "", "PRABHU"), (True, "PRABHU"))                                    # single name
         self.assertEqual(v("VÅ© CÃ´ng KhÃ¡nh", "VŨ", "CÔNG KHÁNH")[0], True)                                # mojibake
         self.assertFalse(v("PATRICIA WILSON", "ROBERTS", "PATRICIA MARIE")[0])                              # another surname
-        self.assertTrue(v("KEVIN NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                        # the hub knows Kevin for Khoa
+        self.assertTrue(v("KEVIN NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                        # the name rules know Kevin for Khoa
         self.assertFalse(v("BRANDON NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                     # another given name
 
     def test_a_record_that_keeps_the_fathers_name_is_not_the_holder(self):

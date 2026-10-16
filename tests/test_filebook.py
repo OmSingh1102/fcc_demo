@@ -1,7 +1,7 @@
-"""The hub's engine under the console: the book, the parsers, the
+"""The file book's engine under the console: the book, the parsers, the
 normalisation rules and the documents. No Flask here.
 
-Run:  .venv\\Scripts\\python.exe -m unittest -v tests.test_hub
+Run:  .venv\\Scripts\\python.exe -m unittest -v tests.test_filebook
 """
 import copy
 import html
@@ -14,7 +14,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from fincrime.engines.errors import WorkflowError  # noqa: E402
-from fincrime.hub import addresses, documents, loader, names, parse, similarity  # noqa: E402
+from fincrime.filebook import addresses, documents, loader, names, parse, similarity  # noqa: E402
 
 _BOOK = None
 
@@ -79,7 +79,7 @@ class LoaderTests(unittest.TestCase):
             self.assertIn(key, row)
 
     def test_missing_column_fails_loudly(self):
-        path = os.path.join(tempfile.mkdtemp(prefix="hub-test-"), "bad.csv")
+        path = os.path.join(tempfile.mkdtemp(prefix="filebook-test-"), "bad.csv")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("KYC Case ID,Customer Name\nKYC-1,X\n")
         with self.assertRaises(ValueError):

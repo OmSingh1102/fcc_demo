@@ -14,7 +14,7 @@ from datetime import timedelta
 from fincrime.documents import svg_cards
 from fincrime.documents.svg_cards import (FONT, ISO3, MONO, _check_digit, _defs, _field, _footer, _label, _mrz_lines, _pad,
                                           _silhouette, _stamp, _value, _watermark)
-from fincrime.hub import names
+from fincrime.filebook import names
 from fincrime.utils import dates
 from fincrime.utils.text import esc, mrz_field
 
@@ -59,6 +59,7 @@ def synthesise(case):
     """Decide the uploads and their defects for one case. Deterministic:
     the same case always gets the same plan."""
     cid = case["id"]
+    # the seeds keep the names they were born with: renaming one redraws every case and changes its dates
     h = _h("hub-doc", cid)
     tampered = _h("hub-tamper", cid) % 1000 < TAMPER_PER_MILLE
     capture = "none"
@@ -275,7 +276,7 @@ def _photo(W, H, body, file, defect):
             f'style="background:#2b2b2b" data-capture="photo" data-defect="{defect}">{scene}</svg>')
 
 
-def _wrap_hub(W, H, body, file):
+def _wrap_page(W, H, body, file):
     """Close the SVG with the capture look and the planted defect."""
     defects = set(file.get("defects") or [])
     for defect in PHOTO_DEFECTS:
@@ -340,7 +341,7 @@ def passport_page(case, file):
     if "expired" in (file.get("defects") or []):
         body += _stamp(W - 130, 300, "EXPIRED")
     body += _watermark(W, H) + _footer(W, H)
-    return _wrap_hub(W, H, body, file)
+    return _wrap_page(W, H, body, file)
 
 
 def passport_back(case, file):
@@ -355,7 +356,7 @@ def passport_back(case, file):
     body += _label(24, 210, "ISSUING AUTHORITY") + _value(24, 230, f"PASSPORT OFFICE - {case['documents']['passport']['mrz'].get('issuer') or ''}", 12, "600")
     body += f'<rect x="{W - 200}" y="80" width="160" height="60" fill="url(#bars)"/>' + _label(W - 200, 158, "SPECIMEN BARCODE")
     body += _watermark(W, H) + _footer(W, H)
-    return _wrap_hub(W, H, body, file)
+    return _wrap_page(W, H, body, file)
 
 
 def _adapter(case, name, address, native=""):

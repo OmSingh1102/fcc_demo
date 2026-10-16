@@ -20,8 +20,8 @@ Screening page — because a compliance team must be able to read and audit
 why a record was cleared.
 
 **The case book.** By default the console opens on the client's
-reconciliation log, the same 1,000-row file the hub reads
-(`fincrime/hub/data/kyc_wc_recon_log.csv`): every row is an open onboarding
+reconciliation log, a 1,000-row file
+(`fincrime/filebook/data/kyc_wc_recon_log.csv`): every row is an open onboarding
 case at L1 Data Confirming with its World-Check hit, carrying the file's own
 case ids, passport numbers, names as the CRM captured them (swapped,
 nicknamed or garbled: the confirming task) and World-Check records.
@@ -39,7 +39,7 @@ first request and works only the cases whose World-Check alerts the AI
 screening rules cleared. Claude (`claude-opus-4-8` through Straive's LLM
 Foundry, `LLM_FOUNDRY_KEY`) reads the passport data page and the proof of
 address from their images, rendered to PNG with resvg. Fixed checks, not the
-model, compare that read with the case: readable, name (the hub's name
+model, compare that read with the case: readable, name (the file book's name
 rules: nicknames, word order, initials, a garbled CRM encoding), date of
 birth, nationality, ID number, expiry, the vendor's result, and the proof of
 address (readable, address, age, type, country). Every check passes: the
@@ -58,7 +58,7 @@ an expired or vendor-declined ID now, whoever confirmed the data.
 uploads that needed a person looked like: a phone lying on the passport,
 a page shot at an angle with a phone over its corner, a cracked and worn
 card, a page cut off by a shot taken too close, a dark blurred shot. They
-are drawn as phone photos on a cloth (`fincrime/hub/documents.py`), and
+are drawn as phone photos on a cloth (`fincrime/filebook/documents.py`), and
 each hides at least a date or the number, so the fixed checks fail even if
 the model names nothing. The ID vendor passes the first three, as it did on
 the real uploads; only the AI Agent's look at the picture stops them. Claude
@@ -117,8 +117,7 @@ Python 3.13 has no Flask.
 
 The startup line names the console's case book. Set `CONSOLE_CASES=demo`
 (in the environment or `.env`) for the scripted scenarios instead of the
-reconciliation log; switching books clears the console's stored state and
-leaves the hub's alone.
+reconciliation log; switching books clears the console's stored state.
 
 ## Deploy — a link anyone can open
 
@@ -173,7 +172,7 @@ on an auto-verified case, Pause/Resume for the team lead),
 `tests/test_console_book.py` (the console on the reconciliation
 log: the book's shape, the rules at intake against what the file records,
 the documents, Data Confirm on cleared, held, garbled-name, old-POA and
-company cases, the paged lists, routing and search), `tests/test_hub.py`
+company cases, the paged lists, routing and search), `tests/test_filebook.py`
 (the engine under the file book: the parsers, the name and address rules
 on example rows from the log, the documents),
 plus the console's 47 end-to-end tests on the Flask test client, run on the
@@ -255,8 +254,8 @@ and L2.
 10. **Reset demo** reloads the file book.
 
 The document images are drawn from the file's data (it carries none); the
-capture defects on about 9% of cases are planted, as in the hub, and the
-case page says so. They are synthetic drawings of the kinds of failure real
+capture defects on about 9% of cases are planted, and the case page says
+so. They are synthetic drawings of the kinds of failure real
 uploads show; no real customer's document is in the repository.
 
 ## A demo script on the scripted book (`CONSOLE_CASES=demo`)

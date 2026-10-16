@@ -2,7 +2,7 @@
 and hands the case to a person whenever it cannot be sure.
 
 1. Claude reads the passport data page and the proof of address from their
-   images (one call through Straive's LLM Foundry, fincrime/hub/llm.call):
+   images (one call through Straive's LLM Foundry, fincrime/filebook/llm.call):
    what is printed, whether it can be read, and what spoils the capture.
 2. Fixed checks - code, not the model - compare that read with the case:
    readable, name, date of birth, nationality, ID number, expiry, the
@@ -33,7 +33,7 @@ from fincrime.documents.raster import svg_to_png
 from fincrime.documents.svg_cards import ISO3
 from fincrime.engines import workflow
 from fincrime.engines.errors import WorkflowError
-from fincrime.hub import addresses, llm, names, similarity
+from fincrime.filebook import addresses, llm, names, similarity
 from fincrime.utils import dates
 
 ACTOR = vocab.AI_AGENT
@@ -280,7 +280,7 @@ def _own_name_kept(given, rest, country=""):
 
 
 def name_verdict(crm, surname, given, filed="", country=""):
-    """Is the CRM name the person the ID names? The hub's own name rules
+    """Is the CRM name the person the ID names? The file book's name rules
     decide: the ID's surname is among the CRM's names (any typing, a
     compound part, a spelling variant) and the holder's own given name
     agrees (exact, nickname, short form or spelling variant; an initial
