@@ -5,8 +5,8 @@
 
    Three scopes share one vocabulary:
      :root          the Straive palette — the portal and sign-in pages
-     body.console   the case-management console: Ant-style blue accent, grey
-                    page, squarer corners, so it reads like the tool it models
+     body.console   the case-management console: navy chrome, amber accent,
+                    cool grey page
      body.wc-theme  the simulated World-Check console: dark surfaces
    Component CSS below reads tokens only, so a body class repaints the whole
    page without any template knowing which scope it is in.
@@ -65,31 +65,60 @@
     --radius:       var(--radius-xl);
 }
 
-/* The case-management console: its own deep petrol-teal accent on a soft
-   off-white page (a hue apart from the success green, so a primary button
-   never reads as a status), corners a step rounder than a plain admin tool. */
+/* The case-management console: navy chrome (top bar and sidebar) and an
+   amber accent on a cool grey page. Amber is a fill colour only: text on it
+   is navy, and accent TEXT on white uses --link (amber text would not be
+   readable). Every pair is at least 4.5:1, focus rings 3:1. */
 body.console {
-    --primary:            #0e7490;
-    --primary-strong:     #155e75;
-    --primary-soft:       #e3f3f6;
-    --primary-tint:       #f1f9fa;
-    --primary-foreground: #ffffff;
-    --background:         #f4f6f6;
-    --foreground:         #1c2526;
+    --primary:            #f59e0b;
+    --primary-strong:     #92400e;
+    --primary-hover:      #d97706;
+    --primary-soft:       #fef3c7;
+    --primary-tint:       #fffbeb;
+    --primary-foreground: #0f1e3d;
+    --link:               #1e3a8a;
+    --background:         #f5f6fa;
+    --foreground:         #0f1b33;
     --card:               #ffffff;
-    --card-foreground:    #1c2526;
-    --muted:              #f8fafa;
-    --muted-foreground:   #64707a;
-    --accent:             #ecf6f8;
-    --accent-foreground:  #155e75;
-    --border:             #e2e8ea;
-    --border-strong:      #cfd8db;
-    --input:              #d5dde0;
-    --ring:               #22a3c2;
+    --card-foreground:    #0f1b33;
+    --muted:              #f3f5fa;
+    --muted-foreground:   #5b6785;
+    --accent:             #eef1f8;
+    --accent-foreground:  #1e3a8a;
+    --border:             #e1e6f0;
+    --border-strong:      #c9d1e2;
+    --input:              #cfd6e4;
+    --ring:               #d97706;
+    --info:               #4338ca;
     --radius-sm: 4px;
     --radius-md: 6px;
     --radius-lg: 8px;
     --radius-xl: 10px;
+
+    /* The navy chrome */
+    --chrome:             #0f1e3d;
+    --chrome-2:           #14264a;
+    --chrome-fg:          #e7ecf5;
+    --chrome-text:        #c9d3e6;
+    --chrome-muted:       #9fb0cf;
+    --chrome-line:        rgba(255, 255, 255, .12);
+    --chrome-hover:       rgba(255, 255, 255, .08);
+    --chrome-amber:       #fcd34d;
+    --chrome-amber-tint:  rgba(245, 158, 11, .16);
+
+    /* The legacy aliases resolve where they are declared, so the console
+       declares them again (else the live bar keeps the :root orange). */
+    --brand:        var(--primary);
+    --brand-dark:   var(--primary-strong);
+    --brand-tint:   var(--primary-soft);
+    --page-bg:      var(--background);
+    --surface:      var(--card);
+    --ink:          var(--foreground);
+    --ink-soft:     var(--muted-foreground);
+    --line:         var(--border);
+    --line-strong:  var(--border-strong);
+    --c-241a14:     var(--chrome);
+    --c-d44e0e:     var(--primary-hover);
 }
 
 /* The simulated World-Check console. Dark, blue accent, flat. */
@@ -135,7 +164,7 @@ body {
     font-size: 13px;
     -webkit-font-smoothing: antialiased;
 }
-a { color: var(--primary); text-decoration: none; }
+a { color: var(--link, var(--primary)); text-decoration: none; }
 a:hover { text-decoration: underline; }
 button { font-family: inherit; }
 .tabular, table.tbl td, .kpi .v { font-variant-numeric: tabular-nums; }
@@ -201,7 +230,7 @@ button { font-family: inherit; }
     text-decoration: none; white-space: nowrap;
 }
 .top-tab:hover { background: var(--primary-tint); text-decoration: none; }
-.top-tab.active { background: var(--primary); color: #fff; }
+.top-tab.active { background: var(--primary); color: var(--primary-foreground); }
 .top-tab.inert { color: var(--primary); opacity: .85; cursor: default; }
 .topbar-right { display: flex; align-items: center; gap: 14px; margin-left: auto; }
 .tb-link { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--primary); white-space: nowrap; }
@@ -209,7 +238,7 @@ button { font-family: inherit; }
 .user-chip { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--foreground); }
 .user-chip .av {
     width: 26px; height: 26px; border-radius: 999px; background: var(--primary);
-    color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+    color: var(--primary-foreground); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
 }
 .user-chip .rl {
     font-size: 10.5px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase;
@@ -340,14 +369,14 @@ a.kpi:hover { text-decoration: none; border-color: var(--primary); }
 .btn:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 40%, transparent); }
 .btn:disabled, .btn[aria-disabled="true"] { pointer-events: none; opacity: .45; }
 .btn-primary { background: var(--primary); color: var(--primary-foreground); box-shadow: var(--shadow-sm); }
-.btn-primary:hover { background: var(--primary-strong); color: var(--primary-foreground); }
+.btn-primary:hover { background: var(--primary-hover, var(--primary-strong)); color: var(--primary-foreground); }
 .btn-outline { border-color: var(--input); background: var(--card); color: var(--foreground); box-shadow: var(--shadow-sm); }
-.btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+.btn-outline:hover { border-color: var(--primary); color: var(--link, var(--primary)); }
 .btn-secondary { background: var(--muted); border-color: var(--border); color: var(--foreground); }
 .btn-secondary:hover { background: var(--accent); color: var(--accent-foreground); }
 .btn-ghost { background: transparent; color: var(--foreground); }
 .btn-ghost:hover { background: var(--accent); color: var(--accent-foreground); }
-.btn-link { background: transparent; color: var(--primary); padding: 0 4px; height: auto; }
+.btn-link { background: transparent; color: var(--link, var(--primary)); padding: 0 4px; height: auto; }
 .btn-link:hover { text-decoration: underline; }
 .btn-danger { background: var(--danger); color: #fff; }
 .btn-danger:hover { background: color-mix(in oklch, var(--danger) 85%, black); }
@@ -452,6 +481,7 @@ select.input, .select { appearance: auto; padding-right: 8px; }
 .tag.blue { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
 .tag.green { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
 .tag.purple { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+.tag.amber { background: #fffbeb; color: #92400e; border-color: #fde68a; }
 .tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 /* Alert-hit marker beside "Screening Alert Hit" */
 .hit { display: inline-block; padding: 0 6px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 600; background: #fff1f2; color: #e11d48; border: 1px solid #fecdd3; }
@@ -486,17 +516,17 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 .table-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 8px 12px; font-size: 12px; color: var(--muted-foreground); border-top: 1px solid var(--border); }
 .pager { display: inline-flex; align-items: center; gap: 4px; }
 .pager a, .pager span { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 12px; color: var(--foreground); background: var(--card); }
-.pager .on { border-color: var(--primary); color: var(--primary); font-weight: 600; }
+.pager .on { border-color: var(--primary); color: var(--link, var(--primary)); font-weight: 600; }
 .pager .dis { opacity: .4; pointer-events: none; }
 .rowcount { font-size: 12px; color: var(--muted-foreground); }
 
 /* ─── Tabs (underline, Ant-style) ─── */
 .tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
 .tab { display: inline-flex; align-items: center; gap: 6px; padding: 8px 2px; margin-bottom: -1px; font-size: 13px; font-weight: 500; color: var(--muted-foreground); border-bottom: 2px solid transparent; cursor: pointer; text-decoration: none; background: none; border-top: 0; border-left: 0; border-right: 0; }
-.tab:hover { color: var(--primary); text-decoration: none; }
-.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab:hover { color: var(--link, var(--primary)); text-decoration: none; }
+.tab.active { color: var(--link, var(--primary)); border-bottom-color: var(--primary); }
 .tab .n { font-size: 11px; color: var(--muted-foreground); }
-.tab.active .n { color: var(--primary); }
+.tab.active .n { color: var(--link, var(--primary)); }
 .tab.chip { padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 0; font-size: 12px; }
 .tab.chip.active { background: var(--primary-tint); border-color: var(--primary); }
 .tabs.chips { gap: 6px; border: 0; margin-bottom: 8px; }
@@ -509,7 +539,7 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
     background: var(--card); color: var(--foreground); font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
 }
 .segmented .seg .n { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--muted); color: var(--muted-foreground); }
-.segmented .seg.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+.segmented .seg.on { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
 .segmented .seg.on .n { background: rgba(255, 255, 255, .25); color: inherit; }
 
 /* ─── Empty state ─── */
@@ -538,9 +568,9 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 .step:last-child::after { display: none; }
 .step-dot { width: 22px; height: 22px; border-radius: 999px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 600; border: 1px solid var(--border-strong); color: var(--muted-foreground); background: var(--card); position: relative; z-index: 1; }
 .step-dot .nav-ic { width: 12px; height: 12px; }
-.step.done .step-dot { border-color: var(--primary); color: var(--primary); }
+.step.done .step-dot { border-color: var(--primary); color: var(--link, var(--primary)); }
 .step.done::after { background: var(--primary); }
-.step.current .step-dot { background: var(--primary); border-color: var(--primary); color: #fff; }
+.step.current .step-dot { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
 .step-txt { min-width: 0; }
 .step-lbl { font-size: 12.5px; font-weight: 500; color: var(--foreground); white-space: nowrap; }
 .step.todo .step-lbl { color: var(--muted-foreground); }
@@ -644,7 +674,7 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 
 /* ─── Drop zone (decorative — the demo never stores bytes) ─── */
 .dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 96px; padding: 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); background: var(--muted); color: var(--muted-foreground); font-size: 12px; cursor: pointer; text-align: center; }
-.dropzone:hover { border-color: var(--primary); color: var(--primary); }
+.dropzone:hover { border-color: var(--primary); color: var(--link, var(--primary)); }
 .dropzone .plus { font-size: 20px; line-height: 1; }
 .dropzone input { display: none; }
 .dropzone .fname { color: var(--foreground); font-weight: 500; }
@@ -879,3 +909,52 @@ body.wc-theme a { color: #7cb3ff; }
 /* Skill chips, feedback card */
 .skill-chip { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 10.5px; font-weight: 600; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; margin-right: 3px; white-space: nowrap; }
 .feedback-card { border-left: 3px solid var(--warning); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONSOLE THEME — navy chrome, amber accent (the tokens are in body.console)
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* Top bar: navy, with a thin amber line along its foot (a shadow, so the
+   bar keeps its 50px and nothing sticky below it moves) */
+body.console .topbar { background: var(--chrome); border-bottom-color: var(--chrome); box-shadow: inset 0 -2px 0 var(--primary), 0 1px 3px rgba(15, 30, 61, .25); }
+body.console .brand .brand-name { color: #fff; }
+body.console .brand .brand-sep { background: var(--chrome-line); }
+body.console .top-tab { color: var(--chrome-text); }
+body.console .top-tab:hover { background: var(--chrome-hover); color: #fff; }
+body.console .top-tab.active { background: var(--primary); color: var(--primary-foreground); }
+body.console .top-tab.inert { color: var(--chrome-text); }
+body.console .tb-link { color: var(--chrome-text); }
+body.console .user-chip { color: var(--chrome-fg); }
+body.console .user-chip .rl { background: var(--chrome-amber-tint); color: var(--chrome-amber); }
+body.console .topbar .input { background: var(--chrome-hover); border-color: var(--chrome-line); color: var(--chrome-fg); }
+body.console .topbar .input:focus { border-color: var(--primary); }
+body.console .topbar select option { background: #fff; color: var(--foreground); }
+body.console .topbar .btn-ghost { color: var(--chrome-text); }
+body.console .topbar .btn-ghost:hover { background: var(--chrome-hover); color: #fff; }
+
+/* Sidebar: a step lighter navy; the open page in amber with a marker */
+body.console .app-side { background: var(--chrome-2); border-right-color: var(--chrome-2); }
+body.console .side-link, body.console .side-group { color: var(--chrome-text); }
+body.console .side-link:hover, body.console .side-group:hover { background: var(--chrome-hover); color: #fff; }
+body.console .side-link.active { background: var(--chrome-amber-tint); color: var(--chrome-amber); box-shadow: inset 3px 0 0 var(--primary); }
+body.console .side-link.disabled, body.console .side-link.disabled:hover { color: #7d8bab; background: transparent; }
+body.console .side-link .count { background: var(--chrome-amber-tint); color: var(--chrome-amber); }
+body.console .side-group .caret { color: var(--chrome-muted); }
+body.console .side-group.has-active { color: var(--chrome-amber); }
+body.console .side-children { border-left-color: var(--chrome-line); }
+body.console .side-sep { background: var(--chrome-line); }
+@media (max-width: 900px) { body.console .app-side { border-bottom-color: var(--chrome); } }
+
+/* Tables: a navy-tinted head and soft zebra rows */
+body.console table.tbl th { background: #e9edf6; color: #2b3a5c; border-bottom-color: var(--border-strong); }
+body.console table.tbl tbody tr:nth-child(even) { background: #fafbfd; }
+body.console table.tbl tbody tr:hover { background: #f1f4fa; }
+body.console table.tbl tbody tr.selected { background: var(--primary-tint); }
+
+/* The "blue" family reads indigo in this console */
+body.console .badge.blue, body.console .tag.blue, body.console .skill-chip { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+body.console .note.info, body.console .reco { background: #eef2ff; border-color: #c7d2fe; color: #312e81; }
+body.console .reco .nav-ic { color: #4338ca; }
+body.console .thumb .lab { background: rgba(15, 30, 61, .9); }
+
+/* The live-update bar: navy (via --c-241a14), its button amber with navy text */
+body.console .live-bar button:not(.ghost) { color: var(--primary-foreground); }

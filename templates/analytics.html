@@ -22,9 +22,9 @@
 </div>
 
 <div class="row mt-12" style="align-items:stretch;gap:12px">
-    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Screening alert outcomes</div><div class="card-sub">{{ vm.total_alerts }} alerts</div></div><div class="card-body">{{ hbars(vm.outcome_counts, '#1d4ed8') }}</div></div>
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Screening alert outcomes</div><div class="card-sub">{{ vm.total_alerts }} alerts</div></div><div class="card-body">{{ hbars(vm.outcome_counts, '#1e3a8a') }}</div></div>
     <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Auto-resolved vs manual</div><div class="card-sub">how much the screening rules clear before an analyst looks</div></div><div class="card-body">{{ hbars(vm.auto_vs_manual, '#6d28d9') }}</div></div>
-    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Top rationales</div></div><div class="card-body">{{ hbars(vm.rationales, '#0f766e') }}</div></div>
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Top rationales</div></div><div class="card-body">{{ hbars(vm.rationales, '#1e3a8a') }}</div></div>
 </div>
 
 <div class="row mt-12" style="align-items:stretch;gap:12px">
@@ -47,7 +47,7 @@
 </div>
 
 <div class="row mt-12" style="align-items:stretch;gap:12px">
-    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Tier pipeline</div><div class="card-sub">open cases per tier (SOP 5.2.3)</div></div><div class="card-body">{{ tier_bars(vm.pipeline, '#1d4ed8') }}</div></div>
+    <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Tier pipeline</div><div class="card-sub">open cases per tier (SOP 5.2.3)</div></div><div class="card-body">{{ tier_bars(vm.pipeline, '#1e3a8a') }}</div></div>
     <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Backlog ageing</div><div class="card-sub">open cases by time since submission</div></div><div class="card-body">{{ hbars(vm.ageing, '#b45309') }}</div></div>
     <div class="card grow" style="min-width:320px"><div class="card-head"><div class="card-title">Hand-off lag</div><div class="card-sub">from one tier handing off to the next tier holding the case</div></div><div class="card-body">
         <div class="kpi-strip" style="margin:0;grid-template-columns:1fr 1fr;gap:8px">
