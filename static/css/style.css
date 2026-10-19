@@ -4,9 +4,9 @@
    (Chrome 111+, Safari 15.4+, Firefox 113+).
 
    Three scopes share one vocabulary:
-     :root          the Straive palette — the portal and sign-in pages
-     body.console   the case-management console: navy chrome, amber accent,
-                    cool grey page
+     :root          the Straive palette (ChargeShield's) — sign-in and console
+     body.console   the case-management console: ChargeShield's look, the
+                    :root palette with its light warm shell
      body.wc-theme  the simulated World-Check console: dark surfaces
    Component CSS below reads tokens only, so a body class repaints the whole
    page without any template knowing which scope it is in.
@@ -65,60 +65,16 @@
     --radius:       var(--radius-xl);
 }
 
-/* The case-management console: navy chrome (top bar and sidebar) and an
-   amber accent on a cool grey page. Amber is a fill colour only: text on it
-   is navy, and accent TEXT on white uses --link (amber text would not be
-   readable). Every pair is at least 4.5:1, focus rings 3:1. */
+/* The case-management console wears ChargeShield's theme: the :root palette
+   above (Straive orange on a warm off-white page, 12px cards) and the shell
+   rules under "CONSOLE THEME" at the end of this file (warm light sidebar
+   and header, orange-tinted active row, soft card shadows). */
 body.console {
-    --primary:            #f59e0b;
-    --primary-strong:     #92400e;
-    --primary-hover:      #d97706;
-    --primary-soft:       #fef3c7;
-    --primary-tint:       #fffbeb;
-    --primary-foreground: #0f1e3d;
-    --link:               #1e3a8a;
-    --background:         #f5f6fa;
-    --foreground:         #0f1b33;
-    --card:               #ffffff;
-    --card-foreground:    #0f1b33;
-    --muted:              #f3f5fa;
-    --muted-foreground:   #5b6785;
-    --accent:             #eef1f8;
-    --accent-foreground:  #1e3a8a;
-    --border:             #e1e6f0;
-    --border-strong:      #c9d1e2;
-    --input:              #cfd6e4;
-    --ring:               #d97706;
-    --info:               #4338ca;
-    --radius-sm: 4px;
-    --radius-md: 6px;
-    --radius-lg: 8px;
-    --radius-xl: 10px;
-
-    /* The navy chrome */
-    --chrome:             #0f1e3d;
-    --chrome-2:           #14264a;
-    --chrome-fg:          #e7ecf5;
-    --chrome-text:        #c9d3e6;
-    --chrome-muted:       #9fb0cf;
-    --chrome-line:        rgba(255, 255, 255, .12);
-    --chrome-hover:       rgba(255, 255, 255, .08);
-    --chrome-amber:       #fcd34d;
-    --chrome-amber-tint:  rgba(245, 158, 11, .16);
-
-    /* The legacy aliases resolve where they are declared, so the console
-       declares them again (else the live bar keeps the :root orange). */
-    --brand:        var(--primary);
-    --brand-dark:   var(--primary-strong);
-    --brand-tint:   var(--primary-soft);
-    --page-bg:      var(--background);
-    --surface:      var(--card);
-    --ink:          var(--foreground);
-    --ink-soft:     var(--muted-foreground);
-    --line:         var(--border);
-    --line-strong:  var(--border-strong);
-    --c-241a14:     var(--chrome);
-    --c-d44e0e:     var(--primary-hover);
+    --primary-hover: color-mix(in oklch, var(--primary) 90%, black);
+    /* Small orange text (links, the active tab) takes the deeper orange that
+       ChargeShield uses for its active row and case IDs: 5.0:1 on white,
+       where the button orange is 3.7:1. */
+    --link: var(--primary-strong);
 }
 
 /* The simulated World-Check console. Dark, blue accent, flat. */
@@ -911,50 +867,42 @@ body.wc-theme a { color: #7cb3ff; }
 .feedback-card { border-left: 3px solid var(--warning); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   CONSOLE THEME — navy chrome, amber accent (the tokens are in body.console)
+   CONSOLE THEME — ChargeShield's shell (templates/agent_base.html there):
+   a warm light sidebar and header, the open page as an orange-tinted row,
+   soft card shadows, a barely-tinted table head and case IDs in orange.
+   Colours and surfaces only; every size stays the console's own.
    ═══════════════════════════════════════════════════════════════════════════ */
-/* Top bar: navy, with a thin amber line along its foot (a shadow, so the
-   bar keeps its 50px and nothing sticky below it moves) */
-body.console .topbar { background: var(--chrome); border-bottom-color: var(--chrome); box-shadow: inset 0 -2px 0 var(--primary), 0 1px 3px rgba(15, 30, 61, .25); }
-body.console .brand .brand-name { color: #fff; }
-body.console .brand .brand-sep { background: var(--chrome-line); }
-body.console .top-tab { color: var(--chrome-text); }
-body.console .top-tab:hover { background: var(--chrome-hover); color: #fff; }
-body.console .top-tab.active { background: var(--primary); color: var(--primary-foreground); }
-body.console .top-tab.inert { color: var(--chrome-text); }
-body.console .tb-link { color: var(--chrome-text); }
-body.console .user-chip { color: var(--chrome-fg); }
-body.console .user-chip .rl { background: var(--chrome-amber-tint); color: var(--chrome-amber); }
-body.console .topbar .input { background: var(--chrome-hover); border-color: var(--chrome-line); color: var(--chrome-fg); }
-body.console .topbar .input:focus { border-color: var(--primary); }
-body.console .topbar select option { background: #fff; color: var(--foreground); }
-body.console .topbar .btn-ghost { color: var(--chrome-text); }
-body.console .topbar .btn-ghost:hover { background: var(--chrome-hover); color: #fff; }
+/* Header: the page colour at 95% with a blur, a hairline underneath */
+body.console .topbar { background: color-mix(in oklch, var(--background) 95%, transparent); backdrop-filter: blur(8px); box-shadow: none; }
+body.console .brand .brand-name { color: var(--foreground); }
+body.console .top-tab { color: var(--muted-foreground); }
+body.console .top-tab:hover { background: var(--accent); color: var(--accent-foreground); }
+body.console .top-tab.active { background: var(--card); color: var(--primary-strong); box-shadow: inset 0 0 0 1px var(--primary); }
+body.console .top-tab.inert { color: var(--muted-foreground); }
+body.console .tb-link { color: var(--muted-foreground); }
+body.console .user-chip .av { background: linear-gradient(135deg, #ff7a3d, var(--primary)); color: #fff; }
 
-/* Sidebar: a step lighter navy; the open page in amber with a marker */
-body.console .app-side { background: var(--chrome-2); border-right-color: var(--chrome-2); }
-body.console .side-link, body.console .side-group { color: var(--chrome-text); }
-body.console .side-link:hover, body.console .side-group:hover { background: var(--chrome-hover); color: #fff; }
-body.console .side-link.active { background: var(--chrome-amber-tint); color: var(--chrome-amber); box-shadow: inset 3px 0 0 var(--primary); }
-body.console .side-link.disabled, body.console .side-link.disabled:hover { color: #7d8bab; background: transparent; }
-body.console .side-link .count { background: var(--chrome-amber-tint); color: var(--chrome-amber); }
-body.console .side-group .caret { color: var(--chrome-muted); }
-body.console .side-group.has-active { color: var(--chrome-amber); }
-body.console .side-children { border-left-color: var(--chrome-line); }
-body.console .side-sep { background: var(--chrome-line); }
-@media (max-width: 900px) { body.console .app-side { border-bottom-color: var(--chrome); } }
+/* Sidebar: muted-on-background, the open page a 10% orange row */
+body.console .app-side { background: color-mix(in oklch, var(--muted) 30%, var(--background)); }
+body.console .side-link.active { background: color-mix(in oklch, var(--primary) 10%, transparent); color: var(--primary-strong); }
+body.console .side-link .count { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary-strong); }
+body.console .side-link.active .count { background: color-mix(in oklch, var(--primary) 20%, transparent); }
+body.console .side-group.has-active { color: var(--primary-strong); }
 
-/* Tables: a navy-tinted head and soft zebra rows */
-body.console table.tbl th { background: #e9edf6; color: #2b3a5c; border-bottom-color: var(--border-strong); }
-body.console table.tbl tbody tr:nth-child(even) { background: #fafbfd; }
-body.console table.tbl tbody tr:hover { background: #f1f4fa; }
-body.console table.tbl tbody tr.selected { background: var(--primary-tint); }
+/* Cards and tiles lift a little more; inputs carry the hairline shadow */
+body.console .card, body.console .case-rail, body.console .case-tabs { box-shadow: var(--shadow); }
+body.console .input { box-shadow: var(--shadow-sm); }
+body.console .input:focus { box-shadow: 0 0 0 1px var(--ring); }
+body.console .btn-outline { background: var(--background); }
+body.console .btn-outline:hover { border-color: var(--input); background: var(--accent); color: var(--accent-foreground); }
 
-/* The "blue" family reads indigo in this console */
-body.console .badge.blue, body.console .tag.blue, body.console .skill-chip { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
-body.console .note.info, body.console .reco { background: #eef2ff; border-color: #c7d2fe; color: #312e81; }
-body.console .reco .nav-ic { color: #4338ca; }
-body.console .thumb .lab { background: rgba(15, 30, 61, .9); }
+/* Tables: the head is the card with 40% muted in it, the case ID orange */
+body.console table.tbl th { background: color-mix(in oklch, var(--muted) 40%, var(--card)); font-weight: 500; }
+body.console table.tbl tbody tr:hover { background: color-mix(in oklch, var(--muted) 50%, transparent); }
+body.console table.tbl span.cell-id { color: var(--primary-strong); font-weight: 600; }
 
-/* The live-update bar: navy (via --c-241a14), its button amber with navy text */
-body.console .live-bar button:not(.ghost) { color: var(--primary-foreground); }
+/* Bars run light to full orange, as ChargeShield's productivity bars do;
+   a chart that passes its own colour keeps it (inline style wins) */
+body.console .hbar .bar > i, body.console .cap-bar > i { background: linear-gradient(90deg, #ff8a4c, var(--primary)); }
+body.console .cap-bar.over > i { background: var(--danger); }
+body.console .thumb .lab { background: color-mix(in oklch, var(--primary) 90%, transparent); }
