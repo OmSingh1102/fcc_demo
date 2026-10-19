@@ -25,6 +25,17 @@
     <a class="btn btn-ghost btn-sm btn-icon" title="Export (not part of this demo)">{{ icon('download') }}</a>
 </div>
 
+{# The AI Agent read the customer's documents: what they say beside the open records. #}
+{% set kw = ((kyc.ai_agent or {}).watchlist if kyc else None) %}
+{% if kw %}
+<div class="note {{ {'likely_match': 'bad', 'possible_match': 'warn'}.get(kw.finding, 'info') }} small mb-12" id="ns-ai-watch">
+    <b>AI Agent, from the customer's documents: {{ watch_labels[kw.finding] }}.</b>
+    {% for m in kw.matches %}{{ m.detail }} {% endfor %}
+    <a href="{{ url_for('kyc_detail', case_id=kyc.id) }}#agent">See the AI Agent's read</a>
+    <span class="muted">— the outcome is the analyst's.</span>
+</div>
+{% endif %}
+
 <details class="section" open>
     <summary>Basic Information <span class="caret">{{ icon('chevron-down') }}</span></summary>
     <div class="section-body">

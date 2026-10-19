@@ -438,6 +438,7 @@ select.input, .select { appearance: auto; padding-right: 8px; }
 .tag.green { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
 .tag.purple { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
 .tag.amber { background: #fffbeb; color: #92400e; border-color: #fde68a; }
+.tag.rose { background: #fff1f2; color: #be123c; border-color: #fecdd3; }
 .tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 /* Alert-hit marker beside "Screening Alert Hit" */
 .hit { display: inline-block; padding: 0 6px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 600; background: #fff1f2; color: #e11d48; border: 1px solid #fecdd3; }

@@ -19,7 +19,7 @@
 <div class="card mt-12 pad-0" id="ai-agent-card">
     <div class="card-head" style="padding-bottom:10px">
         <div><div class="card-title">AI Agent — auto-verified cases verify themselves</div>
-            <div class="card-sub">Runs by itself on every case the rules cleared (auto-verified): {{ ai.model }} reads the ID and the proof of address, fixed checks compare the read with the CRM, and when all pass the case is Verified with no analyst. Anything unreadable, expired, missing or different goes to an analyst with the reason. Cases with an alert left, and companies, are the analysts' from the start.</div></div>
+            <div class="card-sub">Runs by itself on every individual's case in Data Confirming: {{ ai.model }} reads every document (the passport's two pages, the secondary ID and the proof of address) and fixed checks compare the read with the CRM. When all pass, a case the rules cleared is Verified with no analyst; a case with an alert left goes to Data Screening with the agent's watchlist finding (likely true match, possible match, or likely a different person), and an analyst clears the alert. Anything unreadable, expired, missing or different goes to an analyst with the reason. Companies, and cases a person already holds, are the analysts'.</div></div>
         <div class="row" style="gap:8px">
             {% if ai.running %}<span class="badge blue" id="ai-agent-state">Running · {{ ai.busy }} reading now</span>
             {% else %}<span class="badge slate" id="ai-agent-state">Paused{% if ai.stopped %} · {{ ai.stopped }}{% endif %}</span>{% endif %}

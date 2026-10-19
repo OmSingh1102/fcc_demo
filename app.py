@@ -326,7 +326,8 @@ def _load_seed():
     redrawn = _redrawn_cases()
     if redrawn:
         app.logger.info("%d stored record(s) were read from an older drawing of their documents, without the proof of "
-                        "address's name, or confirmed on a name the checks now refuse; they start again.", len(redrawn))
+                        "address's name, before the agent read every document, or confirmed on a name the checks now "
+                        "refuse; they start again.", len(redrawn))
     restored = (StateStore.restore("kyc", KYC_BY_ID, skip=redrawn) + StateStore.restore("alert", ALERT_BY_ID, skip=redrawn)
                 + StateStore.restore("wc", WC_BY_ID, skip=redrawn) + StateStore.restore("analyst", ANALYST_BY_KEY)
                 + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS}))
@@ -391,15 +392,17 @@ def _redrawn_cases():
     of-address image has been redrawn since they were stored: what was read or decided on them
     was about another picture, so they keep their seeded state and the AI
     Agent reads them again. So do the cases whose stored read lacks the
-    proof of address's name (ai_agent.needs_reread), and those confirmed on
-    a name the checks now refuse (ai_agent.confirmed_on_older_names)."""
+    proof of address's name (ai_agent.needs_reread), those confirmed on a
+    name the checks now refuse (ai_agent.confirmed_on_older_names), and
+    those decided before the agent read every document
+    (ai_agent.read_before_all_documents)."""
     out = set()
     for stored in StateStore.records("kyc"):
         case = KYC_BY_ID.get(stored.get("id", ""))
         if case is None or "recon" not in case:
             continue
         if ((stored.get("recon") or {}).get("drawn", "") != case["recon"].get("drawn", "") or ai_agent.needs_reread(stored)
-                or ai_agent.confirmed_on_older_names(stored, case)):
+                or ai_agent.confirmed_on_older_names(stored, case) or ai_agent.read_before_all_documents(stored)):
             out.add(case["id"])
             alert, wc = _linked(case)
             out.update(r["id"] for r in (alert, wc) if r)
@@ -934,6 +937,7 @@ def ns_case(alert_case_id):
     wc = WC_BY_ID.get(alert["id"])
     types = sorted({a["type"] for a in alert["alerts"] if a["type"]})
     return render_template("ns_case.html", alert=alert, wc=wc, actor=_actor(), types=types,
+                           kyc=KYC_BY_ID.get(alert.get("kyc_case_id", "")), watch_labels=ai_agent.WATCH_LABELS,
                            counts=screening.tab_counts(alert["alerts"]), strategies=[r["label"] for r in ai_screening.RULES],
                            recommendation=recommendation.recommend_case_outcome(alert, wc),
                            ai_ready=ai_review.ready(), ai_why=ai_review.why_not(), ai_model=ai_review.MODEL,
@@ -1232,9 +1236,12 @@ def ai_screening_rules():
 
 # ─── AI Agent (engines/ai_agent): Claude reads the documents, checks decide ─
 # It starts by itself on the first request the serving process handles and
-# works only the cases the AI screening rules cleared (auto-verified): those
-# whose ID and proof of address pass every check verify themselves; the rest
-# go to an analyst with the reasons. A team lead can pause it on the AI
+# reads every document of an individual's case in Data Confirming: one the
+# AI screening rules cleared (auto-verified) verifies itself when every check
+# passes; one with an alert left that no person holds is confirmed and goes
+# to Data Screening with the agent's watchlist finding, for an analyst to
+# clear the alert; anything that fails goes to an analyst with the reasons.
+# A team lead can pause it on the AI
 # Screening page. Workers read outside the lock (the slow model call) and
 # decide under it, re-checking the case is still theirs to take. A read is
 # stored on the case, so a restart does not read a case twice.
@@ -1249,7 +1256,8 @@ AGENT_LABELS = {"verified": "Handled by AI", "screening": "Confirmed by AI · al
 def _agent_view(case, actor, levels):
     """What the case page shows: the agent's read and checks, once it has
     worked the case, and Claude's own verdict beside them."""
-    return {"show": bool(case.get("ai_agent")), "labels": AGENT_LABELS, "verdict_labels": ai_agent.VERDICT_LABELS}
+    return {"show": bool(case.get("ai_agent")), "labels": AGENT_LABELS, "verdict_labels": ai_agent.VERDICT_LABELS,
+            "watch_labels": ai_agent.WATCH_LABELS, "verdict_watch": ai_agent.VERDICT_WATCHLIST}
 
 
 def _agent_finish(case, perceived):
@@ -1292,7 +1300,7 @@ def _agent_address(case):
 def _agent_verdict(case):
     """A case read before verdicts existed: Claude's verdict from the stored
     read (one text call, no images), stored beside the decision."""
-    verdict = ai_agent.opinion(case, case["ai_agent"]["read"])
+    verdict = ai_agent.opinion(case, case["ai_agent"]["read"], wc=_linked(case)[1])
     with AI_AGENT_LOCK:
         if ai_agent.needs_verdict(case):
             ai_agent.attach_verdict(case["ai_agent"], verdict)
@@ -1334,7 +1342,7 @@ def _agent_worker():
                 AI_AGENT["busy"].discard(case["id"])
             continue
         try:
-            perceived = ai_agent.perceive(case, _render_document)
+            perceived = ai_agent.perceive(case, _render_document, wc=_linked(case)[1])
             with AI_AGENT_LOCK:
                 if ai_agent.eligible(case) and not case.get("ai_agent"):
                     _agent_finish(case, perceived)

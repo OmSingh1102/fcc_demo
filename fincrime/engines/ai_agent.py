@@ -1,27 +1,37 @@
 """The AI Agent: it works an L1 Data Confirming case the way an analyst does,
 and hands the case to a person whenever it cannot be sure.
 
-1. Claude reads the passport data page and the proof of address from their
-   images (one call through Straive's LLM Foundry, fincrime/filebook/llm.call):
-   what is printed, whether it can be read, and what spoils the capture.
+1. Claude reads every document on the case from its image, in one call
+   through Straive's LLM Foundry (fincrime/filebook/llm.call): the passport's
+   data page and back page, the secondary ID and the proof of address - what
+   is printed, whether it can be read, and what spoils the capture.
 2. Fixed checks - code, not the model - compare that read with the case:
    readable, name, date of birth, nationality, ID number, expiry, the
-   vendor's result, the proof of address and its address.
+   vendor's result, the passport's endorsements, the secondary ID (its name
+   and date of birth), the proof of address and its address.
 3. Every check passes: the agent confirms the data through the analysts'
-   own path (workflow.confirm_data), the AI screening rules re-run, and a
-   case they leave nothing on verifies itself. Any check fails, or Claude
-   cannot be reached: the case stays in Data Confirming, labelled
-   human-in-the-loop, with the reasons and what the agent read.
-4. Claude's own verdict, a second opinion beside the rules: a text-only call
-   gets the read, the customer's record and the bank's document policy, and
-   answers verify / send to a person with a confidence. It is shown and
-   counted (does it agree with the rules?) but never acts on the case. It is
-   a separate call so the record cannot leak into the read: a hidden date of
-   birth must stay unread, not be filled in from the CRM.
+   own path (workflow.confirm_data) and the AI screening rules re-run. A
+   case they leave nothing on verifies itself; one with a watchlist alert
+   left goes to Data Screening, where an analyst clears the alert. Any check
+   fails, or Claude cannot be reached: the case stays in Data Confirming,
+   labelled human-in-the-loop, with the reasons and what the agent read.
+4. On a case with a watchlist alert left, the agent also sets what the
+   documents say beside each open World-Check record (watchlist_findings):
+   a likely true match, a possible one, or likely a different person. It
+   informs the analyst; the rules and the analyst decide the alert.
+5. Claude's own verdict, a second opinion beside the rules: a text-only call
+   gets the read, the customer's record, the bank's document policy and any
+   open watchlist record, and answers verify / send to a person with a
+   confidence, and whether the documents show the customer is the listed
+   person. It is shown and counted (does it agree with the rules?) but never
+   acts on the case. It is a separate call so the record cannot leak into
+   the read: a hidden date of birth must stay unread, not be filled in from
+   the CRM.
 
-It only takes individuals whose screening the rules already
-cleared (the auto-verified workflow); a company (KYB) and every case with an
-alert left stay with people. The result sits on the case as case["ai_agent"].
+It takes individuals in Data Confirming: those the rules cleared (the
+auto-verified workflow), and those with an alert left that no person holds
+or has worked. A company (KYB) stays with people. The result sits on the
+case as case["ai_agent"].
 """
 import base64
 import json
@@ -31,7 +41,7 @@ import time
 from fincrime.data import vocab
 from fincrime.documents.raster import svg_to_png
 from fincrime.documents.svg_cards import ISO3
-from fincrime.engines import workflow
+from fincrime.engines import ai_screening, workflow
 from fincrime.engines.errors import WorkflowError
 from fincrime.filebook import addresses, llm, names, similarity
 from fincrime.utils import dates
@@ -80,21 +90,51 @@ _ID = dict(_DOC, properties=dict(_DOC["properties"],
     mrz_visible={"type": "boolean", "description": "Both machine-readable (MRZ) lines at the bottom of a passport page are fully "
                                                    "visible and legible, with nothing over them"}),
            required=_DOC["required"] + ["edges_visible", "mrz_visible"])
-SCHEMA = {"type": "object", "additionalProperties": False, "properties": {"id": _ID, "poa": _DOC},
-          "required": ["id", "poa"]}
+# The passport's back page carries no personal data, only what an officer
+# wrote into it; an endorsement is for a person to read.
+_BACK = {"type": "object", "additionalProperties": False, "properties": {
+    "readable": {"type": "boolean"},
+    "endorsements": {"type": "string", "description": "The endorsements / observations as printed (e.g. NONE), else empty"},
+    "issuing_authority": {"type": "string", "description": "The issuing authority as printed, else empty"},
+    "note": {"type": "string", "description": "One short sentence on anything wrong with the page, else empty"}},
+    "required": ["readable", "endorsements", "issuing_authority", "note"]}
+# The secondary ID (a national ID card, PAN, Aadhaar, a driving licence, a
+# naturalisation certificate): its name in one, as the card writes it.
+_SECONDARY = {"type": "object", "additionalProperties": False, "properties": {
+    "readable": {"type": "boolean"},
+    "problems": _DOC["properties"]["problems"],
+    "document_type": {"type": "string", "description": "What the document is, as printed (e.g. DRIVER LICENSE, PAN, CCCD)"},
+    "name": {"type": "string", "description": "The holder's full name exactly as printed, in the printed order"},
+    "dob": {"type": "string"},
+    "document_number": {"type": "string"},
+    "expiry": {"type": "string"},
+    "address": {"type": "string", "description": "The address printed on the document, else empty"},
+    "note": {"type": "string", "description": "One short sentence on anything wrong with the document, else empty"}},
+    "required": ["readable", "problems", "document_type", "name", "dob", "document_number", "expiry", "address", "note"]}
+SCHEMA = {"type": "object", "additionalProperties": False,
+          "properties": {"id": _ID, "back": _BACK, "secondary": _SECONDARY, "poa": _DOC},
+          "required": ["id", "back", "secondary", "poa"]}
 
 # Claude's own verdict: advisory, beside the rules' decision.
 VERDICT_SYSTEM = ("You are a senior KYC analyst at a bank giving a second opinion. You get a customer's record, the "
                   "bank's document policy, the ID-verification vendor's result, and what an earlier reading step read "
-                  "from the customer's ID and proof of address. Decide whether you would verify this customer's identity "
-                  "and address from these documents (verify) or send the case to a person (send_to_person). Judge only "
-                  "what is given; a field that was not read was not legible. Give your confidence (0-100) that your "
-                  "decision is right and one short sentence why.")
+                  "from the customer's documents: the passport (data page and back page), the secondary ID and the proof "
+                  "of address. Decide whether you would verify this customer's identity and address from these documents "
+                  "(verify) or send the case to a person (send_to_person). Judge only what is given; a field that was not "
+                  "read was not legible. Give your confidence (0-100) that your decision is right and one short sentence "
+                  "why. When you are also given watchlist records the name screening left open, say separately whether "
+                  "the documents show the customer is the listed person (same_person), is not (different_person) or "
+                  "cannot tell (cannot_tell), with one short sentence why; with no watchlist record, answer no_alert. "
+                  "The watchlist answer does not change your verify / send_to_person decision, which is about the "
+                  "documents only.")
+VERDICT_WATCHLIST = {"same_person": "Same person", "different_person": "A different person", "cannot_tell": "Cannot tell"}
 VERDICT_SCHEMA = {"type": "object", "additionalProperties": False, "properties": {
     "decision": {"type": "string", "enum": ["verify", "send_to_person"]},
     "confidence": {"type": "integer", "description": "0-100: how sure you are that your decision is right"},
-    "reason": {"type": "string", "description": "One short sentence"}},
-    "required": ["decision", "confidence", "reason"]}
+    "reason": {"type": "string", "description": "One short sentence"},
+    "watchlist": {"type": "string", "enum": [*VERDICT_WATCHLIST, "no_alert"]},
+    "watchlist_reason": {"type": "string", "description": "One short sentence, else empty"}},
+    "required": ["decision", "confidence", "reason", "watchlist", "watchlist_reason"]}
 def _vn_mergers():
     """Vietnam's 2025 mergers (the address rules' list) in words."""
     joined, seen = {}, set()
@@ -109,12 +149,16 @@ POLICY = ("The ID must be fully legible (all four edges and the MRZ in shot, not
           "damaged), not expired, and its name, date of birth, nationality and number must match the record (a "
           "spelling variant, a nickname, another word order or an added middle name is acceptable). The proof of "
           "address must be legible, issued within the last 6 months (except an Aadhaar card: it is a permanent "
-          "card, so its date of issue does not matter), and show the customer's registered address. "
+          "card, so its date of issue does not matter), and show the customer's registered address. The secondary ID "
+          "must be legible and name the same person, born on the same day, as the passport or the record (it may write "
+          "the name another way: an initial, surname particles run together, a married name the record keeps); its "
+          "address is not the address evidence. An endorsement on the passport's back page is for a person to read. "
           "On 1 July 2025 Vietnam merged provinces and abolished district-level units, so an address may name a "
           "former province or district where the other names the province it joined; that is the same place. "
           f"Former → current: {_vn_mergers()}.")
 # Bumped when POLICY changes: verdicts given under an older one are redone.
-POLICY_VERSION = 3
+# 4: every document, and the open watchlist records.
+POLICY_VERSION = 4
 # A verdict call that failed (a busy gateway) is asked again on later agent
 # runs, one try per run, this many tries in all.
 VERDICT_TRIES = 3
@@ -123,9 +167,15 @@ VERDICT_TRIES = 3
 # on the proof of address. 5: the holder's own given name (_own_name_kept),
 # and the verified address written to the record (address_update). 6: an old
 # proof of address reported once when its read and recorded dates agree.
-RULES_VERSION = 6
+# 7: the passport's back page and the secondary ID.
+RULES_VERSION = 7
 POA_NAME_RULES = 4    # the first checks to want the proof of address's name: reads before them may lack it (needs_reread)
 OWN_NAME_RULES = 5    # the first to want the holder's own given name: a case confirmed before may name the father
+# What a read covers. 1: the passport's data page and the proof of address.
+# 2: every document on the case. A case read under 1 that no person has
+# touched starts again and is read again (read_before_all_documents).
+READ_VERSION = 2
+NO_ENDORSEMENT = {"", "NONE", "NIL", "NO", "N/A", "NA", "-", "NOT RECORDED"}
 VERDICT_LABELS = {"verify": "Verify", "send_to_person": "Send to a person"}
 
 # What an analyst asks the customer for when the ID itself is the problem
@@ -141,15 +191,36 @@ RESUBMIT_EXPIRED = "The document you have submitted is expired"
 # ── which case, which images ─────────────────────────────────────────────────
 
 def eligible(case):
-    """An individual (not a business) in Data Confirming whose screening the rules
-    cleared (auto-verified): the agent confirms it so it verifies itself.
-    Everything else is an analyst's from the start."""
-    return (case["tenant"] == "ttlive" and case["status"] == "DataConfirming" and not case.get("agency")
-            and case["screening"].get("workflow") == "auto-verified")
+    """An individual (not a business) in Data Confirming the agent can work:
+    one the screening rules cleared (auto-verified), which verifies itself
+    when every check passes, or one with an alert left that no person holds
+    or has worked, which the agent confirms for an analyst to clear the
+    alert. Businesses are the analysts' from the start."""
+    if case["tenant"] != "ttlive" or case["status"] != "DataConfirming" or case.get("agency"):
+        return False
+    if case["screening"].get("workflow") == "auto-verified":
+        return True
+    return bool(case["screening"].get("hit")) and not case.get("current_reviewer") and not _worked_by_a_person(case)
+
+
+def _worked_by_a_person(case):
+    """Has an analyst acted on the case? Their audit entries carry their
+    e-mail; the system, the vendor, the screening and the agent do not."""
+    return any("@" in (e.get("actor") or "") for e in case.get("audit", []))
 
 
 def _id_doc(case):
     return next((d for d in case["documents"] if d.get("category") == "Passport"), None) or case["documents"][0]
+
+
+def _back_doc(case):
+    return next((d for d in case["documents"] if d.get("category") == "Passport" and d.get("side") == "back"), None)
+
+
+def _secondary_doc(case):
+    """The customer's second identity document: anything that is neither the
+    passport nor the proof of address."""
+    return next((d for d in case["documents"] if d.get("category") not in ("Passport", "ProofOfAddress")), None)
 
 
 def _image(png):
@@ -157,19 +228,29 @@ def _image(png):
 
 
 def read(case, render, call=None, sleep=time.sleep):
-    """Claude's read of the ID and the proof of address: (read, usage, seconds)."""
+    """Claude's read of every document on the case: (read, usage, seconds)."""
     call = call or llm.call
-    content = [{"type": "text", "text": "Image 1 is the customer's ID (passport data page). Read it into `id`."},
-               _image(svg_to_png(render(case, _id_doc(case))))]
+    content, n = [], 0
+
+    def add(doc, key, intro, missing):
+        nonlocal n
+        if doc is None:
+            content.append({"type": "text", "text": missing + f" Return `{key}` unreadable with empty fields."})
+            return
+        n += 1
+        content.extend([{"type": "text", "text": f"Image {n} is {intro}"}, _image(svg_to_png(render(case, doc)))])
+
+    add(_id_doc(case), "id", "the customer's ID (passport data page). Read it into `id`.", "There is no ID.")
+    add(_back_doc(case), "back", "the passport's back page. Read it into `back`.", "There is no passport back page.")
+    sec = _secondary_doc(case)
+    add(sec, "secondary", f"the customer's secondary ID ({sec['name'] if sec else ''}). Read it into `secondary`, with the "
+                          "holder's full name exactly as printed, in the printed order, in `name`. A US driver's licence "
+                          "prints its dates month first (MM/DD/YYYY).", "There is no secondary ID.")
     poa = workflow.poa_docs(case)
-    if poa:
-        content += [{"type": "text", "text": "Image 2 is the customer's proof of address. Read it into `poa`, with the "
-                                             "holder's (account holder's, cardholder's) full name as printed in `surname`. "
-                                             "An S/O, D/O, W/O or C/O line in an address names a relative, not the holder."},
-                    _image(svg_to_png(render(case, poa[0])))]
-    else:
-        content.append({"type": "text", "text": "There is no proof of address: return `poa` unreadable with empty fields."})
-    return _ask(call, SYSTEM, content, SCHEMA, 3000, sleep)
+    add(poa[0] if poa else None, "poa", "the customer's proof of address. Read it into `poa`, with the holder's (account "
+                                        "holder's, cardholder's) full name as printed in `surname`. An S/O, D/O, W/O or C/O "
+                                        "line in an address names a relative, not the holder.", "There is no proof of address.")
+    return _ask(call, SYSTEM, content, SCHEMA, 4000, sleep)
 
 
 def _ask(call, system, content, schema, max_tokens, sleep):
@@ -186,9 +267,24 @@ def _ask(call, system, content, schema, max_tokens, sleep):
 
 # ── Claude's own verdict (advisory) ──────────────────────────────────────────
 
-def verdict_input(case, got, now=None):
+def open_matches(wc):
+    """The watchlist records the screening left for a person (unresolved)."""
+    return [m for m in (wc or {}).get("matches", []) if (m.get("resolution") or {}).get("status", "Unresolved") == "Unresolved"]
+
+
+def _listed(m):
+    """A watchlist record as the verdict call is told it."""
+    kd = m.get("key_data") or {}
+    places = [", ".join(x for x in (p.get("city"), p.get("region"), p.get("country")) if x) for p in kd.get("locations") or []]
+    return {"name": m.get("name", ""), "aliases": m.get("aliases") or [], "dates_of_birth": m.get("dobs") or [],
+            "gender": m.get("gender", ""), "citizenship": m.get("citizenship", ""), "locations": [p for p in places if p],
+            "category": " / ".join(x for x in (kd.get("category"), kd.get("sub_category")) if x), "types": m.get("types") or []}
+
+
+def verdict_input(case, got, now=None, wc=None):
     """What the verdict call is told: today, the policy, the record, the
-    vendor's result and the read. Never the rules' checks or decision."""
+    vendor's result, the read and any open watchlist record. Never the
+    rules' checks or decision."""
     now = now or dates.now()
     client, vc = case["client"], case.get("vendor_check") or {}
     poa = workflow.poa_docs(case)
@@ -197,24 +293,29 @@ def verdict_input(case, got, now=None):
               "registered_address": client.get("address", ""), "proof_of_address_required": bool(case.get("poa_required")),
               "proof_of_address_document": poa[0]["name"] if poa else ""}
     vendor = vc.get("result", "") + (f" ({vc['vendor_reason']})" if vc.get("vendor_reason") else "")
+    listed = [_listed(m) for m in open_matches(wc)]
     return (f"Today is {now:%Y-%m-%d}.\nPolicy: {POLICY}\nCustomer record: {json.dumps(record, ensure_ascii=False)}\n"
             f"ID-verification vendor: {vendor or 'no result'}\n"
-            f"Read from the documents: {json.dumps(got, ensure_ascii=False)}")
+            f"Read from the documents: {json.dumps(got, ensure_ascii=False)}\n"
+            + (f"Watchlist records the name screening left open: {json.dumps(listed, ensure_ascii=False)}" if listed
+               else "Watchlist records the name screening left open: none."))
 
 
-def opinion(case, got, call=None, sleep=time.sleep):
+def opinion(case, got, call=None, sleep=time.sleep, wc=None):
     """Claude's verdict on a read: {decision, confidence, reason, ...} or
     {error}. Touches nothing."""
     started = time.monotonic()
     out = {"at": dates.now_str(), "model": MODEL, "policy": POLICY_VERSION}
     try:
-        ans, usage, seconds = _ask(call or llm.call, VERDICT_SYSTEM, [{"type": "text", "text": verdict_input(case, got)}],
+        ans, usage, seconds = _ask(call or llm.call, VERDICT_SYSTEM, [{"type": "text", "text": verdict_input(case, got, wc=wc)}],
                                    VERDICT_SCHEMA, 2000, sleep)
         decision = ans.get("decision") if isinstance(ans, dict) else None
         if decision not in VERDICT_LABELS:
             raise WorkflowError("The model's verdict was not verify or send_to_person.")
         out.update(decision=decision, confidence=max(0, min(100, int(ans.get("confidence") or 0))),
                    reason=str(ans.get("reason") or "")[:300], usage=usage, seconds=seconds)
+        if ans.get("watchlist") in VERDICT_WATCHLIST and open_matches(wc):
+            out.update(watchlist=ans["watchlist"], watchlist_reason=str(ans.get("watchlist_reason") or "")[:300])
     except (WorkflowError, TypeError, ValueError) as exc:
         out["error"] = str(exc)
     out.setdefault("seconds", round(time.monotonic() - started, 1))
@@ -354,6 +455,160 @@ def poa_name_verdict(crm, poa, filed="", country=""):
     return any(name_verdict(crm, t, " ".join(printed[:i] + printed[i + 1:]), filed, country)[0] for i, t in enumerate(printed))
 
 
+def _run_on(name):
+    """A name with its surname particles run on to the word after them:
+    DE LA CRUZ → DELACRUZ, MC DONALD → MCDONALD."""
+    out, carry = [], ""
+    for t in similarity.tokens(name):
+        if t in names.PREFIXES:
+            carry += similarity.squash(t)
+            continue
+        out.append(carry + t)
+        carry = ""
+    return " ".join(out + ([carry] if carry else []))
+
+
+def holder_named(printed, surname, given, country=""):
+    """Does a name printed in one line (a secondary ID's, any order) name the
+    holder another document gives as a surname and given names (the
+    passport, a watchlist record's SURNAME, Given)? The ID's name rules
+    (name_verdict), held to that surname, and the ways a second document
+    writes a name: surname particles run together (DINAPOLI for DI NAPOLI,
+    DE LUCA for DELUCA) and a single name with an initial after it (PRABHU K
+    for the passport's PRABHU)."""
+    if not similarity.tokens(printed) or not similarity.tokens(f"{surname} {given}"):
+        return False
+    return any(name_verdict(p, s, given, country=country)[0]
+               for p, s in ((printed, surname), _spaced_alike(printed, surname)))
+
+
+def _spaced_alike(printed, surname):
+    """(printed, surname) with the surname written in one word on both, when
+    the two differ only in its spacing: LE BLANC for LEBLANC, DINAPOLI for DI
+    NAPOLI. The pair unchanged when the printed name has no such run."""
+    whole = similarity.squash("".join(similarity.tokens(surname)))
+    toks = similarity.tokens(printed)
+    for i in range(len(toks)):
+        for j in range(i + 1, min(len(toks), i + 3) + 1):
+            if whole and similarity.squash("".join(toks[i:j])) == whole:
+                return " ".join(toks[:i] + [whole] + toks[j:]), whole
+    return printed, surname
+
+
+def same_holder(printed, reference, filed="", country=""):
+    """Does a name one document prints in one line name the holder another
+    names in one line (or the record)? Neither says which word is the
+    surname, so each is tried (poa_name_verdict), with the same ways of
+    writing a name as holder_named."""
+    if not similarity.tokens(printed) or not similarity.tokens(reference):
+        return False
+    if any(poa_name_verdict(b, {"surname": a}, filed, country)
+           for a, b in ((printed, reference), (_run_on(printed), _run_on(reference)))):
+        return True
+    words = [t for t in similarity.tokens(printed) if not names.is_initial(t)]
+    single = [t for t in similarity.tokens(reference) if not names.is_initial(t) and t not in FILLERS]
+    return len(set(single)) == 1 and set(words) == set(single)
+
+
+def _listed_name(listed):
+    """(surname, given) of a watchlist name: SURNAME, Given; an alias with no
+    comma is (None, the alias)."""
+    surname, comma, given = (listed or "").partition(",")
+    return (surname.strip(), given.strip()) if comma else (None, listed or "")
+
+
+# ── the watchlist, beside the documents ─────────────────────────────────────
+
+WATCH_LABELS = vocab.AI_WATCH_FILTER
+_WATCH_RANK = ["likely_match", "possible_match", "unread", "likely_different"]
+
+
+def _dob_relation(dob, listed):
+    """How a document's date of birth stands to the dates a record lists:
+    same, swapped (day and month exchanged), same_year (a bare year that is
+    the customer's), in_range, differs, not_listed or unread."""
+    born = dates.parse(dob or "")
+    if born is None:
+        return "unread"
+    if not listed:
+        return "not_listed"
+    found = set()
+    for raw in listed:
+        span = re.fullmatch(r"\s*(\d{4})\s*[–-]\s*(\d{4})\s*", raw or "")
+        if span:
+            found.add("in_range" if int(span[1]) <= born.year <= int(span[2]) else "differs")
+            continue
+        parts = ai_screening._listed_dob(raw)
+        if parts is None:
+            continue
+        year, full = parts
+        if full is None:
+            found.add("same_year" if year == born.year else "differs")
+        elif full == born.date():
+            found.add("same")
+        else:
+            found.add("swapped" if ai_screening._swapped(full, born.date()) else "differs")
+    for rel in ("same", "swapped", "same_year", "in_range", "differs"):
+        if rel in found:
+            return rel
+    return "not_listed"
+
+
+DOB_WORDS = {"same": "is the listed date", "swapped": "is the listed date with day and month swapped",
+             "same_year": "is in the one year the record lists", "in_range": "is in the range of years the record lists",
+             "differs": "differs from every date the record lists", "not_listed": "cannot be compared: the record lists none",
+             "unread": "could not be read from the documents"}
+
+
+def watchlist_findings(case, wc, got):
+    """What the documents say beside each watchlist record the screening left
+    open: the name the passport prints against the listed name and aliases,
+    its date of birth against the listed dates, its nationality against the
+    citizenship. {finding, matches}, or None with nothing open. It informs the
+    analyst who clears the alert; it decides nothing."""
+    open_ = open_matches(wc)
+    if not open_:
+        return None
+    idr, sec = got.get("id") or {}, got.get("secondary") or {}
+    name = " ".join(x for x in (idr.get("surname", ""), idr.get("given_names", "")) if x) or sec.get("name", "")
+    dob = idr.get("dob") or sec.get("dob", "")
+    code = (idr.get("nationality_code") or "").upper()
+    country = vocab.COUNTRY_NAMES.get(ALPHA2.get(code, code[:2] if len(code) == 2 else ""), "")
+    out = []
+    for m in open_:
+        listed = [m.get("name", "")] + list(m.get("aliases") or [])
+        if not name:
+            name_rel = "unread"
+        elif any(holder_named(name, *_listed_name(n)) if _listed_name(n)[0] is not None else same_holder(name, n)
+                 for n in listed if n):
+            name_rel = "same"
+        elif set(t for t in similarity.tokens(name) if len(t) > 2) & set(t for n in listed for t in similarity.tokens(n) if len(t) > 2):
+            name_rel = "partly"
+        else:
+            name_rel = "different"
+        dob_rel = _dob_relation(dob, m.get("dobs") or [])
+        cit = m.get("citizenship", "")
+        nat_rel = None if not (country and cit) else similarity.fold(country) in similarity.fold(cit)
+        if name_rel == "unread" or (dob_rel == "unread" and name_rel != "different"):
+            finding = "unread"
+        elif dob_rel == "differs" or name_rel == "different":
+            finding = "likely_different"
+        elif name_rel == "same" and dob_rel in ("same", "swapped"):
+            finding = "likely_match"
+        else:
+            finding = "possible_match"
+        name_words = {"same": "is the listed name", "partly": "shares only part of the listed name",
+                      "different": "is not the listed name", "unread": "could not be read"}[name_rel]
+        detail = f"The documents' name {name or '—'} {name_words} ({m.get('name', '')}); date of birth {dob or '—'} {DOB_WORDS[dob_rel]}"
+        if nat_rel is not None:
+            detail += f"; nationality {country} {'is' if nat_rel else 'is not'} the listed citizenship ({cit})"
+        out.append({"wc_id": m.get("wc_id", ""), "name": m.get("name", ""), "dobs": m.get("dobs") or [], "citizenship": cit,
+                    "category": _listed(m)["category"], "document_name": name, "document_dob": dob,
+                    "name_relation": name_rel, "dob_relation": dob_rel, "nationality_relation": nat_rel,
+                    "finding": finding, "detail": detail + "."})
+    return {"finding": min((x["finding"] for x in out), key=_WATCH_RANK.index), "matches": out}
+
+
 def _filed_name(case):
     """The record's name as the reconciliation log wrote it, for a case
     built from the file; '' for any other case."""
@@ -441,8 +696,55 @@ def resubmit_reason(got, record_checks):
     return ""
 
 
-def _check(out, check, crm, document, ok, note=""):
-    out.append({"check": check, "crm": crm or "", "document": document or "", "ok": bool(ok), "note": note})
+def _check(out, check, crm, document, ok, note="", info=False):
+    """One row of the checks. An `info` row is shown for the analyst and
+    never fails: it is not evidence the case turns on."""
+    row = {"check": check, "crm": crm or "", "document": document or "", "ok": bool(ok), "note": note}
+    if info:
+        row["info"] = True
+    out.append(row)
+
+
+def _other_documents(case, got, out, printed):
+    """The checks on the passport's back page and the secondary ID. Only a
+    read of every document has them (READ_VERSION 2): an older read is
+    checked as it was."""
+    client = case["client"]
+    if "back" in got and _back_doc(case) is not None:
+        back = got.get("back") or {}
+        endorsed = similarity.fold(back.get("endorsements", "")) not in NO_ENDORSEMENT
+        shown = " · ".join(x for x in (f"Endorsements: {back.get('endorsements') or '—'}", back.get("issuing_authority", "")) if x)
+        _check(out, "Passport back page", "", shown if back.get("readable") else "not readable", not endorsed,
+               f"An endorsement on the passport's back page: {back.get('endorsements')}" if endorsed else "")
+    sec_doc = _secondary_doc(case)
+    if "secondary" not in got or sec_doc is None:
+        return
+    sec = got.get("secondary") or {}
+    named = [p for p in sec.get("problems", []) if p in SPOILERS and p not in SOFT]
+    ok = bool(sec.get("readable")) and not named
+    _check(out, "Secondary ID readable", "", sec_doc["name"] + ("" if ok else ": not readable"), ok,
+           "" if ok else f"Secondary ID could not be read: {', '.join(SPOILERS[p] for p in named) or sec.get('note') or 'unclear'}")
+    if not ok:
+        return
+    name, filed, country = sec.get("name", ""), _filed_name(case), client["nationality"]
+    idr = got.get("id") or {}
+    on_passport = bool(printed) and holder_named(name, idr.get("surname", ""), idr.get("given_names", ""), country)
+    on_record = same_holder(name, client["legal_name"], filed=filed, country=country)
+    shown = name or "not read"
+    if name and on_record and not on_passport and printed:
+        shown += f" (the record's name; the passport reads {printed})"
+    _check(out, "Name on secondary ID", client["legal_name"], shown, on_passport or on_record,
+           "" if on_passport or on_record else ("No name could be read on the secondary ID" if not name
+                                                else "Name on the secondary ID matches neither the passport nor the CRM"))
+    dob = sec.get("dob", "")
+    ok = not dob or dob == client["dob"]
+    _check(out, "Date of birth on secondary ID", client["dob"], dob or "not printed", ok,
+           "" if ok else f"Date of birth on the secondary ID {dob}, CRM {client['dob']}")
+    if sec.get("address"):
+        same = addresses.compare(addresses.normalise(client.get("address", ""), country), addresses.normalise(sec["address"], country))
+        _check(out, "Address on secondary ID", client.get("address", ""), sec["address"], True,
+               "Same as the CRM" if same == "same" else "Differs from the CRM; the proof of address is the address evidence",
+               info=True)
 
 
 def checks(case, got, now=None):
@@ -494,6 +796,7 @@ def checks(case, got, now=None):
     ok = vc.get("result") != "Declined"
     _check(out, "Vendor check", "", vc.get("result", ""), ok,
            "" if ok else "ID declined by the vendor" + (f": {vc['vendor_reason']}" if vc.get("vendor_reason") else ""))
+    _other_documents(case, got, out, printed)
 
     if case.get("poa_required"):
         _check(out, "Proof of address readable", "", "readable" if poa.get("readable") else "not readable",
@@ -527,11 +830,12 @@ def checks(case, got, now=None):
 
 # ── one case ─────────────────────────────────────────────────────────────────
 
-def perceive(case, render, call=None, sleep=time.sleep):
+def perceive(case, render, call=None, sleep=time.sleep, wc=None):
     """The slow half, safe to run outside any lock: Claude's read of the
     documents, or the error that stopped it. Touches nothing."""
     started = time.monotonic()
-    out = {"at": dates.now_str(), "model": MODEL, "read": {}, "usage": {}, "seconds": 0.0, "error": ""}
+    out = {"at": dates.now_str(), "model": MODEL, "read": {}, "usage": {}, "seconds": 0.0, "error": "",
+           "read_version": READ_VERSION}
     try:
         got, usage, seconds = read(case, render, call=call, sleep=sleep)
         out.update(read=got, usage=usage, seconds=seconds)
@@ -539,8 +843,11 @@ def perceive(case, render, call=None, sleep=time.sleep):
         out["error"] = str(exc)
     out["seconds"] = out["seconds"] or round(time.monotonic() - started, 1)
     if not out["error"]:
-        out["verdict"] = opinion(case, out["read"], call=call, sleep=sleep)
+        out["verdict"] = opinion(case, out["read"], call=call, sleep=sleep, wc=wc)
     return out
+
+
+DOCUMENTS_READ = "the passport (both pages), the secondary ID and the proof of address"
 
 
 def decide(case, alert_case, wc, perceived):
@@ -554,10 +861,15 @@ def decide(case, alert_case, wc, perceived):
     else:
         record["checks"], values = checks(case, record["read"])
         record["reasons"] = [c["note"] for c in record["checks"] if not c["ok"]]
+        watch = watchlist_findings(case, wc, record["read"])
+        if watch:
+            record["watchlist"] = watch
+            workflow._audit(case, ACTOR, "Watchlist finding", f"{WATCH_LABELS[watch['finding']]}: "
+                            + " ".join(m["detail"] for m in watch["matches"]) + " The analyst clears the alert.")
     if not record["reasons"]:
-        workflow._audit(case, ACTOR, "Documents read", f"{MODEL} read the ID and the proof of address; every check passed.")
+        workflow._audit(case, ACTOR, "Documents read", f"{MODEL} read {DOCUMENTS_READ}; every check passed.")
         try:
-            workflow.confirm_data(case, ACTOR, values, "Confirmed by the AI Agent against the ID and the proof of address.",
+            workflow.confirm_data(case, ACTOR, values, f"Confirmed by the AI Agent against {DOCUMENTS_READ}.",
                                   alert_case=alert_case, wc=wc)
         except WorkflowError as exc:
             record["reasons"] = [str(exc)]
@@ -620,6 +932,14 @@ def confirmed_on_older_names(stored, seed):
     return any(not c["ok"] for c in found if c["check"] in ("Name", "Name on proof of address"))
 
 
+def read_before_all_documents(stored):
+    """A case the agent decided on a read of the passport's data page and the
+    proof of address only (READ_VERSION 1), that no person has touched since:
+    it starts again and is read again from every document (app._load_seed)."""
+    rec = stored.get("ai_agent") or {}
+    return bool(rec) and rec.get("read_version", 1) < READ_VERSION and _untouched(stored)
+
+
 def needs_address_update(case):
     """A case the agent confirmed before it wrote the verified address back,
     whose record keeps an address its proof of address corrects, and no
@@ -652,9 +972,9 @@ def recheck(case, alert_case, wc):
     workflow._audit(case, ACTOR, "Checked again", "The agent's checks changed; the stored read now passes every one.")
     case["screening"]["workflow"] = "auto-verified"
     return decide(case, alert_case, wc, {k: v for k, v in old.items()
-                                         if k in ("at", "model", "read", "usage", "seconds", "error", "verdict")})
+                                         if k in ("at", "model", "read", "usage", "seconds", "error", "verdict", "read_version")})
 
 
 def run_case(case, alert_case, wc, render, call=None, sleep=time.sleep):
     """Read, check, decide - one case, start to finish."""
-    return decide(case, alert_case, wc, perceive(case, render, call=call, sleep=sleep))
+    return decide(case, alert_case, wc, perceive(case, render, call=call, sleep=sleep, wc=wc))

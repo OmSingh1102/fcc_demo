@@ -33,26 +33,37 @@ Each case page ends with what the file's analyst recorded, for comparison.
 `CONSOLE_CASES=demo` brings back the nineteen scripted scenarios (the
 walkthrough further down, and what the test suite runs on).
 
-**The AI Agent** (`fincrime/engines/ai_agent.py`) makes the auto-verified
-cases verify themselves. It starts on its own when the server takes its
-first request and works only the cases whose World-Check alerts the AI
-screening rules cleared. Claude (`claude-opus-4-8` through Straive's LLM
-Foundry, `LLM_FOUNDRY_KEY`) reads the passport data page and the proof of
-address from their images, rendered to PNG with resvg. Fixed checks, not the
-model, compare that read with the case: readable, name (the file book's name
-rules: nicknames, word order, initials, a garbled CRM encoding), date of
-birth, nationality, ID number, expiry, the vendor's result, and the proof of
-address (readable, address, age, type, country). Every check passes: the
-agent confirms the data through the analysts' own path and the case is
-Verified with nobody touching it. Anything blurred, cut off, expired,
-missing or different, a declined ID, or a model call that fails: the case
-stays with an analyst, labelled human-in-the-loop, and its page shows the
-reasons and what the agent read. Cases with an alert left, and companies,
-are the analysts' from the start. Two cases at a time (the gateway refuses
-more concurrent calls), about 590 calls and 40 minutes for the file; each
-read is stored, so a restart does not read a case twice. A team lead can
-pause and resume it on the AI Screening page. Auto-verification also refuses
-an expired or vendor-declined ID now, whoever confirmed the data.
+**The AI Agent** (`fincrime/engines/ai_agent.py`) does Data Confirming on
+every individual's case. It starts on its own when the server takes its
+first request. Claude (`claude-opus-4-8` through Straive's LLM Foundry,
+`LLM_FOUNDRY_KEY`) reads every document on the case from its image, rendered
+to PNG with resvg: the passport's data page and back page, the secondary ID
+and the proof of address. Fixed checks, not the model, compare that read
+with the case: readable, name (the file book's name rules: nicknames, word
+order, initials, a garbled CRM encoding), date of birth, nationality, ID
+number, expiry, the vendor's result, an endorsement on the passport's back
+page, the secondary ID (readable, the same person as the passport or the
+record, the same date of birth; its address is shown, not checked), and the
+proof of address (readable, holder's name, address, age, type, country).
+Every check passes: the agent confirms the data through the analysts' own
+path. A case whose World-Check alerts the AI screening rules cleared is then
+Verified with nobody touching it; a case with an alert left goes to Data
+Screening, where an analyst clears the alert, with the agent's **watchlist
+finding** beside each open record (*likely true match*: the passport's name
+is the listed name and its date of birth the listed one, or the same with
+day and month swapped; *possible match*; *likely a different person*). The
+finding shows on the case, the screening case and the case list's filter;
+it decides nothing. Anything blurred, cut off, expired, missing or
+different, a declined ID, or a model call that fails: the case stays with an
+analyst, labelled human-in-the-loop, and its page shows the reasons and what
+the agent read. Companies, and cases a person already holds or has worked,
+are the analysts'. Two cases at a time (the gateway refuses more concurrent
+calls), about 940 cases and three to four hours for the file; each read is
+stored, so a restart does not read a case twice (a case read before the
+agent read every document, that nobody has touched, starts again and is read
+again). A team lead can pause and resume it on the AI Screening page.
+Auto-verification also refuses an expired or vendor-declined ID now,
+whoever confirmed the data.
 
 **Bad photos of the ID.** The planted capture defects copy what real
 uploads that needed a person looked like: a phone lying on the passport,

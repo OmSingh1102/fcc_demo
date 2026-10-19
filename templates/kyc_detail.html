@@ -13,7 +13,7 @@
         <button type="button" class="tab active" role="tab" data-tab="overview" aria-selected="true">{{ icon('user') }} Overview</button>
         <button type="button" class="tab" role="tab" data-tab="documents" aria-selected="false">{{ icon('image') }} Documents <span class="n">{{ case.documents|length }}</span></button>
         <button type="button" class="tab" role="tab" data-tab="screening" aria-selected="false">{{ icon('shield') }} Screening{% if case.screening.hit %} <span class="tab-dot rose" title="Screening alert hit"></span>{% endif %}</button>
-        {% if agent.show %}<button type="button" class="tab" role="tab" data-tab="agent" aria-selected="false">{{ icon('activity') }} AI Agent{% if case.ai_agent.decision == 'human' %} <span class="tab-dot amber" title="Sent to a person"></span>{% endif %}</button>{% endif %}
+        {% if agent.show %}<button type="button" class="tab" role="tab" data-tab="agent" aria-selected="false">{{ icon('activity') }} AI Agent{% if (case.ai_agent.watchlist or {}).finding == 'likely_match' %} <span class="tab-dot rose" title="Likely true match on the watchlist"></span>{% elif case.ai_agent.decision == 'human' %} <span class="tab-dot amber" title="Sent to a person"></span>{% endif %}</button>{% endif %}
         <button type="button" class="tab" role="tab" data-tab="decisions" aria-selected="false">{{ icon('clipboard') }} Decisions</button>
     </div>
 
@@ -181,7 +181,7 @@
         {% elif ag.decision == 'verified' %}
         <div class="note ok small mb-8">Every check passed. The AI Agent confirmed the data, the screening rules had cleared every alert, and the case verified with no analyst step.</div>
         {% else %}
-        <div class="note info small mb-8">Every check passed and the AI Agent confirmed the data; a World-Check alert is left, so the case went to Data Screening for an analyst.</div>
+        <div class="note info small mb-8">Every check passed and the AI Agent confirmed the data; a World-Check alert is left, so the case went to Data Screening for an analyst{% if ag.watchlist %}, with the agent's watchlist finding below{% endif %}.</div>
         {% endif %}
         {% if ag.address_updated %}<div class="small mb-8" id="ai-agent-address"><b>Address updated</b> to the proof of address's: {{ ag.address_updated.to }} <span class="muted">(was {{ ag.address_updated.from }})</span></div>{% endif %}
         {% set v = ag.verdict %}{% if v %}
@@ -194,6 +194,7 @@
                 {% else %}<span class="badge rose">{{ icon('alert-triangle') }} Disagrees with the rules</span>{% endif %}
             </div>
             <div class="small" style="margin-top:4px">{{ v.reason }}</div>
+            {% if v.watchlist %}<div class="small" style="margin-top:4px" id="ai-verdict-watchlist"><b>Watchlist:</b> <span class="badge {{ {'same_person': 'rose', 'different_person': 'emerald', 'cannot_tell': 'amber'}[v.watchlist] }}">{{ agent.verdict_watch[v.watchlist] }}</span> {{ v.watchlist_reason }}</div>{% endif %}
             <div class="tiny muted" style="margin-top:4px">A second opinion, for comparison: the checks below decided the case, not this verdict.</div>
             {% else %}
             <div class="small muted">Claude's own verdict could not be read: {{ v.error }}</div>
@@ -201,17 +202,37 @@
         </div>
         {% endif %}
     </div>
+    {% if ag.watchlist %}{% set w = ag.watchlist %}
+    <div id="ai-agent-watchlist" style="padding:0 16px 12px">
+        <div class="row" style="gap:8px;margin-bottom:6px">
+            <b class="small">Watchlist: what the documents say</b>
+            <span class="badge {{ {'likely_match': 'rose', 'possible_match': 'amber', 'likely_different': 'emerald', 'unread': 'slate'}[w.finding] }}" id="ai-agent-watch-finding">{{ agent.watch_labels[w.finding] }}</span>
+            <span class="tiny muted">For the analyst who clears the alert; the agent decides nothing on it.</span>
+        </div>
+        <table class="tbl dense">
+            <thead><tr><th>World-Check record</th><th>Listed</th><th>From the documents</th><th>Finding</th></tr></thead>
+            <tbody>
+            {% for m in w.matches %}
+            <tr><td><b>{{ m.name }}</b><div class="tiny muted">{{ m.wc_id }}{% if m.category %} · {{ m.category }}{% endif %}</div></td>
+                <td class="small">DOB {{ m.dobs|join(', ') or '—' }}<div class="tiny muted">{{ m.citizenship or '—' }}</div></td>
+                <td class="small">{{ m.document_name or '—' }}<div class="tiny muted">DOB {{ m.document_dob or '—' }}</div></td>
+                <td class="small"><span class="badge {{ {'likely_match': 'rose', 'possible_match': 'amber', 'likely_different': 'emerald', 'unread': 'slate'}[m.finding] }}">{{ agent.watch_labels[m.finding] }}</span><div class="tiny" style="margin-top:3px;white-space:normal">{{ m.detail }}</div></td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
     {% if ag.checks %}
     <table class="tbl dense">
         <thead><tr><th>Check</th><th>CRM</th><th>Read from the document</th><th>Result</th></tr></thead>
         <tbody>
         {% for c in ag.checks %}
         <tr><td class="strong nowrap">{{ c.check }}</td><td>{{ c.crm or '—' }}</td><td>{{ c.document or '—' }}</td>
-            <td>{% if c.ok %}<span class="badge emerald">{{ icon('check') }} Pass</span>{% else %}<span class="badge amber">{{ icon('x') }} {{ c.note }}</span>{% endif %}</td></tr>
+            <td>{% if c.info %}<span class="badge slate" title="Shown for the analyst; not evidence the case turns on">{{ icon('info') }} {{ c.note or 'Info' }}</span>{% elif c.ok %}<span class="badge emerald">{{ icon('check') }} Pass</span>{% else %}<span class="badge amber">{{ icon('x') }} {{ c.note }}</span>{% endif %}</td></tr>
         {% endfor %}
         </tbody>
     </table>
-    {% for key, label in (('id', 'ID'), ('poa', 'Proof of address')) %}{% set r = ag.read.get(key) or {} %}
+    {% for key, label in (('id', 'ID'), ('back', 'Passport back page'), ('secondary', 'Secondary ID'), ('poa', 'Proof of address')) %}{% set r = ag.read.get(key) or {} %}
     {% if r.problems or r.note %}<div class="small muted" style="padding:6px 16px">{{ label }}: {{ (r.problems|join(', ')).replace('_', ' ') }}{% if r.problems and r.note %} — {% endif %}{{ r.note }}</div>{% endif %}
     {% endfor %}
     {% endif %}

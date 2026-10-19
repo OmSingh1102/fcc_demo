@@ -60,7 +60,7 @@
             {% for r in rows %}
             <tr data-case-id="{{ r.id }}" data-status="{{ r.status }}" data-workflow="{{ r.workflow }}">
                 <td><input type="checkbox" class="row-check" value="{{ r.id }}" aria-label="Select {{ r.id }}"></td>
-                <td class="nowrap"><span class="cell-id">{{ r.id }}</span> {% for t in r.tags %}{{ tag_chip(t) }}{% endfor %}</td>
+                <td class="nowrap"><span class="cell-id">{{ r.id }}</span> {% for t in r.tags %}{{ tag_chip(t) }}{% endfor %}{% if r.watch == 'likely_match' %} <span class="tag rose" title="The AI Agent: the documents match an open World-Check record">Likely match</span>{% endif %}</td>
                 <td class="cell-id">{{ r.client_id }}</td>
                 <td class="nowrap strong">{{ r.name }}</td>
                 <td class="nowrap">{{ r.dob or '-' }}</td>

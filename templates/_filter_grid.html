@@ -75,4 +75,6 @@
         <select class="input" id="f-agent" name="agent"><option value="">Select</option>{% for k, label in vocab.AI_AGENT_FILTER.items() %}{{ opt(k, q.agent, label) }}{% endfor %}</select></div>
     <div class="f"><label for="f-verdict">Claude's verdict</label>
         <select class="input" id="f-verdict" name="verdict"><option value="">Select</option>{% for k, label in vocab.AI_VERDICT_FILTER.items() %}{{ opt(k, q.verdict, label) }}{% endfor %}</select></div>
+    <div class="f"><label for="f-watch">AI watchlist finding</label>
+        <select class="input" id="f-watch" name="watch"><option value="">Select</option>{% for k, label in vocab.AI_WATCH_FILTER.items() %}{{ opt(k, q.watch, label) }}{% endfor %}</select></div>
 </div>

@@ -40,7 +40,12 @@ def perfect_read(case, **id_overrides):
     poa = {"readable": True, "problems": [], "surname": holder, "given_names": "", "dob": "", "nationality_code": "",
            "document_number": "", "expiry": "", "address": v["documents"]["poa"]["address"], "issued_on": s["poa_issued_on"],
            "note": ""}
-    return {"id": idr, "poa": poa}
+    back = {"readable": True, "endorsements": "NONE", "issuing_authority": "PASSPORT OFFICE", "note": ""}
+    sec = v["documents"]["secondary"]
+    secondary = {"readable": True, "problems": [], "document_type": sec["type"], "name": sec["name"] or holder,
+                 "dob": v["customer"]["dob"], "document_number": s["id_number"], "expiry": "",
+                 "address": sec["address"]["text"] if sec["address"]["printed"] else "", "note": ""}
+    return {"id": idr, "back": back, "secondary": secondary, "poa": poa}
 
 
 VERIFY = {"decision": "verify", "confidence": 93, "reason": "Clear passport; every detail matches the record."}
@@ -99,8 +104,16 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual((c["status"], c["closed_by"], c["previous_reviewer"]), ("Verified", "System User", "AI Agent"))
         self.assertEqual(c["confirmations"]["dob"]["confirmed_by"], "AI Agent")
         self.assertIn("Data confirmed by AI Agent", c["audit"][-1]["detail"])
-        self.assertEqual([b["type"] for b in stub.sent[0]], ["text", "image", "text", "image"])
+        # every document: the passport's two pages, the secondary ID, the proof of address
+        self.assertEqual([b["type"] for b in stub.sent[0]], ["text", "image"] * 4)
         self.assertEqual(stub.sent[0][1]["source"]["media_type"], "image/png")
+        said = " ".join(b.get("text", "") for b in stub.sent[0])
+        for needle in ("passport data page", "passport's back page", "secondary ID", "proof of address"):
+            self.assertIn(needle, said)
+        self.assertEqual(rec["read_version"], ai_agent.READ_VERSION)
+        made = [x["check"] for x in rec["checks"]]
+        for check in ("Passport back page", "Secondary ID readable", "Name on secondary ID", "Date of birth on secondary ID"):
+            self.assertIn(check, made)
 
     def test_a_case_the_rules_held_goes_to_screening(self):
         c = self.K["KYC-2026-3012"]
@@ -379,7 +392,8 @@ class AiAgentTestCase(unittest.TestCase):
         card = self.clean(self.poa_kind("aadhaar"))
         order = [c["check"] for c in ai_agent.checks(card, perfect_read(card))[0]]
         self.assertEqual(order[order.index("Proof of address readable") + 1], "Name on proof of address")
-        self.assertIn("An S/O, D/O, W/O or C/O line in an address names a relative", self.run_agent(card)[1].sent[0][2]["text"])
+        poa_prompt = next(b["text"] for b in self.run_agent(card)[1].sent[0] if "proof of address" in b.get("text", ""))
+        self.assertIn("An S/O, D/O, W/O or C/O line in an address names a relative", poa_prompt)
         self.assertEqual(card["ai_agent"]["decision"], "verified", card["ai_agent"]["reasons"])
         # the relative an Aadhaar's address names is not the holder
         other = self.clean(lambda c: self.poa_kind("aadhaar")(c) and c["id"] != card["id"])
@@ -520,11 +534,144 @@ class AiAgentTestCase(unittest.TestCase):
         name = next(x for x in ai_agent.checks(c, perfect_read(c))[0] if x["check"] == "Name")
         self.assertTrue(name["ok"], name)
 
-    def test_only_auto_verified_individuals_are_taken(self):
+    def test_which_cases_the_agent_takes(self):
         self.assertTrue(ai_agent.eligible(self.K["KYC-2026-3011"]))      # auto-verified, even though Amara holds it
-        self.assertFalse(ai_agent.eligible(self.K["KYC-2026-3012"]))     # an alert left: the analysts' from the start
+        self.assertFalse(ai_agent.eligible(self.K["KYC-2026-3012"]))     # an alert left, and a person holds it
         self.assertFalse(ai_agent.eligible(self.K["KYC-2026-3029"]))     # a company
+        meg = self.K["KYC-2026-3276"]                                    # an alert left that nobody holds or has worked
+        self.assertEqual((meg["screening"]["workflow"], meg["current_reviewer"]), ("human-in-the-loop", ""))
+        self.assertTrue(ai_agent.eligible(meg))
+        ai_agent.workflow._audit(meg, "nisha.rao@straive.com", "Status changed")      # once an analyst has acted on it
+        self.assertFalse(ai_agent.eligible(meg))
         self.assertTrue(svg_to_png('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>').startswith(b"\x89PNG"))
+
+    # ── every document: the passport's back page and the secondary ID ─────
+    def test_the_secondary_id_must_name_the_same_person(self):
+        c = self.clean()
+        read = perfect_read(c)
+        read["secondary"]["name"] = "OKONKWO CHIDI"
+        rec, _ = self.run_agent(c, answer=read)
+        self.assertEqual(rec["decision"], "human")
+        self.assertIn("Name on the secondary ID matches neither the passport nor the CRM", rec["reasons"])
+        other = self.clean()
+        read = perfect_read(other)
+        read["secondary"]["dob"] = "1999-01-02"
+        rec, _ = self.run_agent(other, answer=read)
+        self.assertIn(f"Date of birth on the secondary ID 1999-01-02, CRM {other['client']['dob']}", rec["reasons"])
+        blurred = self.clean()
+        read = perfect_read(blurred)
+        read["secondary"].update(readable=False, problems=["blurred"])
+        rec, _ = self.run_agent(blurred, answer=read)
+        self.assertIn("Secondary ID could not be read: blurred", rec["reasons"])
+
+    def test_a_second_document_may_write_the_name_another_way(self):
+        named = ai_agent.holder_named                       # a one-line name against the passport's surname and given names
+        self.assertTrue(named("GREGORY E DINAPOLI", "DI NAPOLI", "GREGORY EDWARD"))     # particles run together
+        self.assertTrue(named("SUSAN K DE LUCA", "DELUCA", "SUSAN KAY"))
+        self.assertTrue(named("CHRISTOPHER R DELACRUZ", "DE LA CRUZ", "CHRISTOPHER RAY"))
+        self.assertTrue(named("Prabhu K", "", "PRABHU"))                                # a single name and an initial
+        self.assertTrue(named("FARHEEN QUREISHI", "QURESHI", "FARHEEN", country="IN"))  # the name rules' spellings
+        self.assertFalse(named("PATRICIA MARIE WILSON", "ROBERTS", "PATRICIA MARIE"))   # another surname
+        self.assertFalse(named("PATRICIA MARIE JONES", "ROBERTS", "PATRICIA MARIE"))
+        self.assertFalse(ai_agent.same_holder("OKONKWO CHIDI", "PRABHU"))
+        # a licence in the married name the record keeps passes, and says so
+        c = self.K["KYC-2026-3069"]
+        found = {x["check"]: x for x in ai_agent.checks(c, perfect_read(c))[0]}
+        self.assertFalse(found["Name"]["ok"])                                         # the passport keeps ROBERTS
+        self.assertTrue(found["Name on secondary ID"]["ok"])
+        self.assertIn("the record's name; the passport reads ROBERTS PATRICIA MARIE", found["Name on secondary ID"]["document"])
+
+    def test_the_secondary_ids_address_informs_and_never_fails(self):
+        c = self.clean(lambda c: perfect_read(c)["secondary"]["address"])
+        read = perfect_read(c)
+        read["secondary"]["address"] = "1 Nowhere Lane, Springfield"
+        rec, _ = self.run_agent(c, answer=read)
+        self.assertNotEqual(rec["decision"], "human", rec["reasons"])
+        row = next(x for x in rec["checks"] if x["check"] == "Address on secondary ID")
+        self.assertEqual((row["ok"], row["info"]), (True, True))
+        self.assertIn("the proof of address is the address evidence", row["note"])
+
+    def test_an_endorsement_on_the_passports_back_page_goes_to_a_person(self):
+        c = self.clean()
+        read = perfect_read(c)
+        read["back"]["endorsements"] = "THE HOLDER IS ALSO KNOWN AS JOHN SMITH"
+        rec, _ = self.run_agent(c, answer=read)
+        self.assertIn("An endorsement on the passport's back page: THE HOLDER IS ALSO KNOWN AS JOHN SMITH", rec["reasons"])
+        self.assertEqual(c["status"], "DataConfirming")
+
+    def test_an_older_read_is_checked_as_it_was(self):
+        c = self.clean()
+        read = perfect_read(c)
+        del read["back"], read["secondary"]                                  # a read of two documents
+        made = [x["check"] for x in ai_agent.checks(c, read)[0]]
+        self.assertNotIn("Secondary ID readable", made)
+        self.assertNotIn("Passport back page", made)
+
+    # ── an alert left: the agent confirms, the analyst clears the alert ────
+    def test_an_open_alert_case_is_confirmed_with_the_watchlist_finding(self):
+        c = self.K["KYC-2026-3276"]                          # Meg Wallace; OFAC lists WALLACE, Margaret Marie, 1965-08-09
+        rec, stub = self.run_agent(c, verdict=dict(VERIFY, watchlist="same_person", watchlist_reason="Same name; DOB transposed."))
+        w = rec["watchlist"]
+        self.assertEqual(w["finding"], "likely_match")
+        m = w["matches"][0]
+        self.assertEqual((m["name_relation"], m["dob_relation"], m["nationality_relation"]), ("same", "swapped", True))
+        self.assertIn("is the listed date with day and month swapped", m["detail"])
+        self.assertIn("Watchlist finding", [e["action"] for e in c["audit"]])
+        # the verdict call was told the open record; the alert itself is untouched
+        self.assertIn("WALLACE, Margaret Marie", stub.sent[1][0]["text"])
+        self.assertEqual(rec["verdict"]["watchlist"], "same_person")
+        alert, wc = fcc._linked(c)
+        self.assertEqual(wc["matches"][0]["resolution"]["status"], "Unresolved")
+        self.assertNotEqual(c["status"], "Verified")
+        if rec["decision"] == "screening":                    # the documents passed: the analyst has only the alert left
+            self.assertEqual((c["status"], c["screening"]["workflow"]), ("DataScreening", "human-in-the-loop"))
+        # the analyst sees it on the case, the list and the screening case
+        self.login("amara.iyer")
+        page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
+        self.assertIn('id="ai-agent-watchlist"', page)
+        self.assertIn("Likely true match", page)
+        self.assertIn('id="ai-verdict-watchlist"', page)
+        listing = self.c.get("/kyc/list?watch=likely_match").data.decode("utf-8")
+        self.assertIn(f'data-case-id="{c["id"]}"', listing)
+        self.assertIn(">Likely match</span>", listing)
+        screening_case = self.c.get(f"/name_screening/case/{alert['id']}").data.decode("utf-8")
+        self.assertIn('id="ns-ai-watch"', screening_case)
+        self.assertIn("Likely true match", screening_case)
+
+    def test_the_documents_beside_a_watchlist_record(self):
+        c = self.K["KYC-2026-3276"]
+        read = perfect_read(c)
+        wc = {"matches": [{"name": "WALLACE, Margaret Marie", "dobs": ["1965-09-08"], "citizenship": "United States",
+                           "resolution": {"status": "Unresolved"}},
+                          {"name": "WALLACE, Margaret Marie", "dobs": ["1965"], "resolution": {"status": "Unresolved"}},
+                          {"name": "WALLACE, Margaret Marie", "dobs": ["1964–1966"], "resolution": {"status": "Unresolved"}},
+                          {"name": "WALLACE, Margaret Marie", "dobs": ["1971-02-03"], "resolution": {"status": "Unresolved"}},
+                          {"name": "OKONKWO, Chidi", "dobs": [], "resolution": {"status": "Unresolved"}},
+                          {"name": "WALLACE, Margaret Marie", "dobs": ["1965-09-08"], "resolution": {"status": "False positive"}}]}
+        found = ai_agent.watchlist_findings(c, wc, read)
+        self.assertEqual([(m["dob_relation"], m["finding"]) for m in found["matches"]],
+                         [("same", "likely_match"), ("same_year", "possible_match"), ("in_range", "possible_match"),
+                          ("differs", "likely_different"), ("not_listed", "likely_different")])   # the resolved one is left out
+        self.assertEqual(found["finding"], "likely_match")
+        self.assertIsNone(ai_agent.watchlist_findings(c, {"matches": []}, read))
+
+    def test_a_case_decided_on_two_documents_starts_again(self):
+        decided = []
+        for _ in range(2):
+            c = self.clean(lambda c: not c["current_reviewer"])              # a verified case is no longer eligible: the next one
+            self.run_agent(c)
+            c["ai_agent"].pop("read_version")                                # as read before every document was
+            StateStore.save("kyc", c)
+            decided.append(c)
+        old, touched = decided
+        self.assertTrue(ai_agent.read_before_all_documents(old))
+        ai_agent.workflow._audit(touched, "amara.iyer@straive.com", "Reopened")   # a person has worked on it since
+        StateStore.save("kyc", touched)
+        self.assertFalse(ai_agent.read_before_all_documents(touched))
+        fcc._load_seed()
+        self.assertNotIn("ai_agent", fcc.KYC_BY_ID[old["id"]])               # back to its seeded state, read again
+        self.assertEqual(fcc.KYC_BY_ID[old["id"]]["status"], "DataConfirming")
+        self.assertIn("ai_agent", fcc.KYC_BY_ID[touched["id"]])              # a person's case keeps its read
 
 
     # ── in the console ──────────────────────────────────────────────────────

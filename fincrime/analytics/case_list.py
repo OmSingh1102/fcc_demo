@@ -9,7 +9,7 @@ on every change. The filters keep the semantics the old client-side ones
 had: text boxes match a substring (any case), selects match exactly, dates
 are inclusive ranges, and a row with no date only survives an empty range."""
 from fincrime.data import vocab
-from fincrime.engines import sla
+from fincrime.engines import ai_agent, sla
 from fincrime.utils.text import display_name
 
 PER_PAGE = 100
@@ -21,7 +21,7 @@ EXACT_FILTERS = (("reviewer", "current_reviewer"), ("prev", "previous_reviewer")
                  ("vendor", "vendor"), ("gifter", "gifter"), ("nat", "nationality"), ("issuing", "issuing"),
                  ("poa", "poa"), ("level", "level"), ("pending", "pending_reason"), ("edd", "edd_rfi"),
                  ("qcrev", "qc_reviewer"), ("qcresult", "qc_result"), ("workflow", "workflow"), ("agent", "agent"),
-                 ("verdict", "verdict"))
+                 ("verdict", "verdict"), ("watch", "watch"))
 DATE_FILTERS = (("dob", "dob"), ("created", "created_at"), ("sub", "submitted_at"))
 INERT = ("regional", "change")          # on the grid, as on the real tool, but not part of this demo
 
@@ -49,6 +49,7 @@ def _row(c, analyst_email):
         "workflow": c["screening"].get("workflow", ""),
         "agent": _agent(c),
         "verdict": _verdict(c),
+        "watch": ((c.get("ai_agent") or {}).get("watchlist") or {}).get("finding", ""),
     }
 
 
@@ -57,10 +58,7 @@ def _agent(c):
     take, else empty."""
     if c.get("ai_agent"):
         return c["ai_agent"]["decision"]
-    if (c["tenant"] == "ttlive" and not c.get("agency") and c["status"] == "DataConfirming"
-            and c["screening"].get("workflow") == "auto-verified"):
-        return "not_run"
-    return ""
+    return "not_run" if ai_agent.eligible(c) else ""
 
 
 def _verdict(c):
