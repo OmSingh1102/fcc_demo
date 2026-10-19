@@ -277,6 +277,23 @@ def passport_svg(case, doc):
     return _wrap(W, H, body, doc)
 
 
+# A US surname's particles belong to the surname a licence prints in field 1:
+# ANDREW R DE LUCA is DE LUCA, ANDREW R (not LUCA, ANDREW R DE).
+US_SURNAME_PARTICLES = {"DE", "DEL", "DELA", "DA", "DI", "DU", "LA", "LE", "VAN", "VON", "DER", "DEN", "MC", "MAC", "ST"}
+
+
+def us_split_name(full):
+    """(surname, given names) as a US licence prints them: the last word and
+    the particles before it."""
+    parts = (full or "").split()
+    i = len(parts) - 1
+    while i > 1 and parts[i - 1].upper() in US_SURNAME_PARTICLES:
+        i -= 1
+    if len(parts) < 3 or i == len(parts) - 1:
+        return split_name(full)
+    return " ".join(parts[i:]), " ".join(parts[:i])
+
+
 def driving_licence_svg(case, doc):
     c = case["client"]
     W, H = 640, 400
@@ -288,7 +305,7 @@ def driving_licence_svg(case, doc):
     number = c["id_number"]
     expiry = _expiry(case, 5)
     issue = _issue_date(case)
-    surname, given = split_name(c["legal_name"].title())
+    surname, given = us_split_name(c["legal_name"].title())
     body = _defs()
     body += f'<rect width="{W}" height="{H}" rx="18" fill="#eef3f8"/><rect width="{W}" height="{H}" rx="18" fill="url(#guilloche)"/>'
     body += f'<rect x="0" y="0" width="{W}" height="58" rx="18" fill="#1d4f91"/><rect x="0" y="40" width="{W}" height="18" fill="#1d4f91"/>'

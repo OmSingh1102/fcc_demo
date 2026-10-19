@@ -421,6 +421,11 @@ class DocumentTests(unittest.TestCase):
         pan = text("KYC-2026-3012")                                           # a PAN card prints no address
         self.assertNotIn("Address", pan)
         self.assertIn("Name | ASHISH UPADHYAY", pan)
+        # a US licence prints a surname's particles with it: DE LUCA, ANDREW R (not LUCA, ANDREW R DE)
+        de_luca = text("KYC-2026-3119")
+        self.assertIn("1 | DE LUCA | 2 | ANDREW R", de_luca)
+        self.assertIn("1 | MAC KENZIE | 2 | THOMAS D", text("KYC-2026-3189"))
+        self.assertIn("1 | WALLACE | 2 | MARGARET M", text("KYC-2026-3276"))       # no particle: the last word
 
     def test_the_drawn_sex_follows_what_the_file_says(self):
         # a relationship on the address, an honorific, a married-name change, then the names
