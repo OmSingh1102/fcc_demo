@@ -18,7 +18,7 @@
 {% set ai = vm.agent %}
 <div class="card mt-12 pad-0" id="ai-agent-card">
     <div class="card-head" style="padding-bottom:10px">
-        <div><div class="card-title">AI Agent — auto-verified cases verify themselves</div>
+        <div><div class="card-title">AI Agent — reads every document, confirms the data</div>
             <div class="card-sub">Runs by itself on every individual's case in Data Confirming: {{ ai.model }} reads every document (the passport's two pages, the secondary ID and the proof of address) and fixed checks compare the read with the CRM. When all pass, a case the rules cleared is Verified with no analyst; a case with an alert left goes to Data Screening with the agent's watchlist finding (likely true match, possible match, or likely a different person), and an analyst clears the alert. Anything unreadable, expired, missing or different goes to an analyst with the reason. Companies, and cases a person already holds, are the analysts'.</div></div>
         <div class="row" style="gap:8px">
             {% if ai.running %}<span class="badge blue" id="ai-agent-state">Running · {{ ai.busy }} reading now</span>
@@ -32,7 +32,7 @@
         </div>
     </div>
     <div class="kpi-strip" style="padding:0 16px 12px">
-        <div class="kpi"><div class="l">Waiting for the agent</div><div class="v">{{ ai.queue }}</div><div class="hint">auto-verified, not read yet</div></div>
+        <div class="kpi"><div class="l">Waiting for the agent</div><div class="v">{{ ai.queue }}</div><div class="hint">in Data Confirming, not read yet</div></div>
         <div class="kpi tone-success"><div class="l">Handled by AI</div><div class="v">{{ ai.verified }}</div><div class="hint">verified with no analyst</div></div>
         <div class="kpi tone-info"><div class="l">Confirmed, alert left</div><div class="v">{{ ai.screening }}</div><div class="hint">in Data Screening for an analyst</div></div>
         <div class="kpi {% if ai.human %}tone-warning{% endif %}"><div class="l">Sent to a person</div><div class="v">{{ ai.human }}</div><div class="hint">a check failed</div></div>
