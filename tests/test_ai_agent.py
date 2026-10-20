@@ -23,7 +23,7 @@ import app as fcc  # noqa: E402
 from fincrime.data import recon_book  # noqa: E402
 from fincrime.documents.raster import svg_to_png  # noqa: E402
 from fincrime.documents.svg_cards import ISO3  # noqa: E402
-from fincrime.engines import ai_agent  # noqa: E402
+from fincrime.engines import ai_agent, routing, sla  # noqa: E402
 from fincrime.engines.errors import WorkflowError  # noqa: E402
 
 
@@ -203,6 +203,78 @@ class AiAgentTestCase(unittest.TestCase):
         c = self.K["KYC-2026-3276"]
         rec = self.assert_human(c, "Issued within the last 6 months", answer=self.old_read(c))
         self.assertTrue(rec["watchlist"])
+
+    # ── the record's own slips ──────────────────────────────────────────────
+    def free(self, case_id):
+        c = self.K[case_id]
+        c["current_reviewer"] = ""
+        return c
+
+    def assert_corrected(self, c, field, before, after, why):
+        rec, _ = self.run_agent(c)
+        self.assertEqual((rec["decision"], c["status"]), ("verified", "Verified"), rec["reasons"])
+        self.assertEqual(c["client"][field], after)
+        fixed = rec["name_corrected" if field == "legal_name" else "address_updated"]
+        self.assertEqual((fixed["from"], fixed["to"]), (before, after))
+        self.assertIn(why, " ".join(e["detail"] for e in c["audit"] if e["actor"] == "AI Agent"))
+        self.assertIn(("AI Agent", "name" if field == "legal_name" else "address", before, after),
+                      [(e["by"], e["field"], e["from"], e["to"]) for e in c["change_log"]])
+        self.assertNotIn("verdict", rec)                   # Claude is asked again, on the corrected record
+        return rec
+
+    def test_a_record_that_named_the_father_is_corrected(self):
+        c = self.free("KYC-2026-3052")                     # passport MORE, MANASI PRAKASH; the record PRAKASH MORE
+        rec = self.assert_corrected(c, "legal_name", "PRAKASH MORE", "MANASI PRAKASH MORE", "father's name PRAKASH")
+        self.assertIn("dropped the holder's own name MANASI", rec["name_corrected"]["why"])
+        self.assertIn(("AI Agent", "Name corrected"), [(e["actor"], e["action"]) for e in c["audit"]])
+        self.assertEqual(c["screening"]["rows"][-1]["user_name"], "MANASI PRAKASH MORE")    # screened on her own name
+        self.assertTrue(ai_agent.needs_verdict(c))
+        self.login("amara.iyer")
+        page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
+        self.assertIn('id="ai-agent-name"', page)
+        self.assertIn("MANASI PRAKASH MORE", page)
+
+    def test_a_married_surname_on_the_form_and_a_po_box_are_corrected(self):
+        self.assert_corrected(self.free("KYC-2026-3033"), "legal_name", "NHUNG VU", "PHAN BICH NHUNG",
+                              "the surname VU, which none of the documents prints")
+        self.assert_corrected(self.free("KYC-2026-3189"), "address", "PO Box 2021, Chicago, IL 60614",
+                              "8391 West Devon Avenue, Apartment 5A, Chicago, IL 60614", "only a PO Box")
+
+    def assert_rfi(self, c, needle):
+        rec, _ = self.run_agent(c)
+        self.assertEqual((rec["decision"], c["status"], c["pending_reason"]), ("rfi", "DataConfirming", "RFI Sent"),
+                         rec["reasons"])
+        self.assertIn(needle, rec["requested"])
+        self.assertEqual((c["rfi"][-1]["by"], c["rfi"][-1]["message"]), ("AI Agent", rec["requested"]))
+        self.assertEqual(c["screening"]["workflow"], "auto-verified")
+        # it waits on the user: out of the analysts' queue, with the intake clock shown as waiting
+        self.assertEqual(routing.level_for(c), "")
+        self.assertEqual(sla.chip(c)["text"], "Waiting on user")
+        return rec
+
+    def test_the_document_that_links_two_names_is_asked_for(self):
+        rec = self.assert_rfi(self.free("KYC-2026-3069"), "your marriage certificate")      # licence WILSON, passport ROBERTS
+        self.assertIn("(PATRICIA MARIE ROBERTS) to the name on your account (PATRICIA WILSON)", rec["requested"])
+        self.assert_rfi(self.free("KYC-2026-3259"), "your naturalisation certificate")       # MIKE NGUYEN for NGUYEN MINH MINH
+        c = self.free("KYC-2026-3074")                                                       # a second home in Scottsdale
+        self.assert_rfi(c, "Please confirm your main home address.")
+        self.login("amara.iyer")
+        page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
+        self.assertIn('id="ai-agent-requested"', page)
+        self.assertIn("Asked the customer (RFI)", page)
+        self.assertIn(f'data-case-id="{c["id"]}"', self.c.get("/kyc/list?agent=rfi").data.decode("utf-8"))
+        # an analyst who takes it holds it in the queue again
+        self.c.post(f"/kyc/{c['id']}/reserve")
+        self.assertEqual(routing.level_for(c), "L1")
+
+    def test_what_the_record_cannot_settle_stays_with_a_person(self):
+        # a spelling the documents themselves disagree on (MOHANTI, MAHANTY, MOHANTY)
+        self.assert_human(self.free("KYC-2026-3255"), "Name on the ID differs from the CRM")
+        # a married surname too close to a name the documents print to call (HOANG beside HAN)
+        self.assert_human(self.free("KYC-2026-3141"), "Name on the ID differs from the CRM")
+        # the same slip beside any other failure
+        self.assert_human(self.free("KYC-2026-3033"), "Date of birth missing on the ID", dob="")
+        self.assertEqual(self.K["KYC-2026-3033"]["client"]["legal_name"], "NHUNG VU")
 
     def test_gateway_error_goes_to_a_person(self):
         c = self.clean()
@@ -508,10 +580,13 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertTrue(v("PHUONG NGUYEN", "NGUYỄN", "NGỌC PHƯƠNG", country="VN")[0])
         self.assertTrue(v("DURGA BANDARU", "BANDARU", "VENKATA LAKSHMI DURGA", country="IN")[0])
         self.assertTrue(v("SALMAN PATHAN", "PATHAN", "MOHAMMED SALMAN", country="IN")[0])
-        # the agent sends the book's case to a person, on the ID and on the proof of address alike
+        # held by an analyst, the book's case is theirs, on the ID and on the proof of address alike
+        # (nobody holding it, the agent corrects the record: test_a_record_that_named_the_father_is_corrected)
         c = self.K["KYC-2026-3052"]
+        c["current_reviewer"] = "amara.iyer@straive.com"
         rec = self.assert_human(c, "Name on the ID differs from the CRM")
         self.assertIn("Name on the proof of address differs from the CRM", rec["reasons"])
+        self.assertEqual(c["client"]["legal_name"], "PRAKASH MORE")
 
     def test_a_case_confirmed_on_the_fathers_name_starts_again(self):
         father, kept = self.K["KYC-2026-3052"], self.clean()

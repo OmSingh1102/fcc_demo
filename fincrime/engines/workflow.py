@@ -456,6 +456,13 @@ def escalate(case, actor, reason, comment, fraud_typology="", alert_case=None):
 def rfi(case, actor, message):
     _require_open(case)
     _require_reserved(case, actor)
+    send_rfi(case, actor, message)
+
+
+def send_rfi(case, actor, message):
+    """The part of RFI an analyst and the AI Agent share. An RFI nobody holds
+    (the agent's) waits on the user: out of the queue (routing.level_for)."""
+    _require_open(case)
     message = _require_text(message, "The RFI message")
     case["pending_reason"] = "RFI Sent"
     case.setdefault("rfi", []).append({"at": dates.now_str(), "by": actor, "message": message, "status": "Sent"})

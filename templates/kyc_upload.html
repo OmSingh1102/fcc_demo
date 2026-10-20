@@ -17,7 +17,7 @@
             <a class="btn btn-outline btn-sm" href="{{ url_for('kyc_upload_sample') }}">{{ icon('download') }} Download a sample (5 new cases)</a>
             <a class="btn btn-ghost btn-sm" href="{{ url_for('kyc_list') }}">Back to the case list</a>
         </form>
-        <p class="small muted mt-12">Up to {{ max_rows }} cases per file, saved as CSV UTF-8. A case id that already exists is skipped. The sample holds two cases the AI Agent should verify by itself, one whose CRM name carries another surname (it goes to an analyst), an exact date-of-birth hit and a company (both the analysts' from the start). The document images are drawn from each row's data; capture defects are drawn per case, as for the file.</p>
+        <p class="small muted mt-12">Up to {{ max_rows }} cases per file, saved as CSV UTF-8. A case id that already exists is skipped. The sample holds two cases the AI Agent should verify by itself, one whose CRM spells the surname another way than the documents (it goes to an analyst), an exact date-of-birth hit and a company (both the analysts' from the start). The document images are drawn from each row's data; capture defects are drawn per case, as for the file.</p>
     </div>
 </div>
 

@@ -43,6 +43,8 @@ def level_for(case):
     """The tier that should hold the case right now, or "" when it is not in
     any queue (intake, waiting on the user, closed)."""
     status, pending = case["status"], case.get("pending_reason", "")
+    if sla.waiting_on_user(case):
+        return ""
     if status in ("DataConfirming", "DataScreening"):
         return "L2" if pending == "Pending Checker 2" else "L1"
     if status == "DataEscalatingL2":

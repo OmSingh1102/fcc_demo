@@ -53,19 +53,32 @@ finding** beside each open record (*likely true match*: the passport's name
 is the listed name and its date of birth the listed one, or the same with
 day and month swapped; *possible match*; *likely a different person*). The
 finding shows on the case, the screening case and the case list's filter;
-it decides nothing. One failure the agent answers itself: a proof of
-address older than six months, when every other check passed, no alert is
-left and nobody holds the case, is asked for again through the analysts'
-own Resubmit POA (*The proof of address is older than 6 months*); the case
-waits in ResubmitPOA and the list's *AI Agent* filter shows it as *Asked
-the customer*. A request approves nothing. Anything blurred, cut off,
+it decides nothing. Some failures the agent settles itself, when every
+other check passed, no alert is left and nobody holds the case:
+
+- *The record's own slip, where the documents agree with one another*: the
+  agent corrects the record, writes the change to the change log and the
+  audit, confirms, and the screening re-runs on the corrected record.
+  Claude's verdict is asked again on it. This covers a record that kept the
+  father's name and dropped the holder's own (PRAKASH MORE for the
+  passport's MORE, MANASI PRAKASH), a surname no document prints beside the
+  holder's given name (a married name written on the form), and a PO Box
+  where the proof of address and the secondary ID give the same home.
+- *What only the customer can give*: the agent asks for it through the
+  analysts' own steps. Resubmit POA covers a proof of address older than
+  six months. An RFI covers the marriage or naturalisation certificate that
+  links the passport's name to the record's, or which of two homes is the
+  main one. A case waiting on the agent's RFI leaves the queue until
+  someone takes it. The list's *AI Agent* filter shows these as *Asked the
+  customer*, and a request approves nothing.
+
+Anything blurred, cut off,
 expired, missing or different, a declined ID, or a model call that fails:
 the case stays with an analyst, labelled human-in-the-loop, and its page
 shows the reasons and what the agent read. An unreadable or covered ID stays
 with a person rather than being asked for again (what it hides may be the
-point), and so does an address that differs from the record (both documents
-may show the new address and the record the old one). Companies, and cases
-a person already holds or has worked,
+point), and so does a spelling the documents themselves disagree on.
+Companies, and cases a person already holds or has worked,
 are the analysts'. Two cases at a time (the gateway refuses more concurrent
 calls), about 940 cases and three to four hours for the file; each read is
 stored, so a restart does not read a case twice (a case read before the
@@ -98,7 +111,7 @@ that record what an analyst decided may be left out. Each row goes through
 intake like the file's: the rules screen it, an auto-verified one is read by
 the AI Agent at once, the rest go to analysts. Existing case ids are
 skipped, up to 500 rows a file. *Download a sample* gives five new cases
-(two the agent should verify, a CRM name with another surname, an exact
+(two the agent should verify, a CRM surname spelt another way, an exact
 date-of-birth hit, a company). Uploads are stored and rebuilt on restart
 until Reset demo.
 
@@ -181,12 +194,13 @@ The case data is fictional, so nothing sensitive leaves the demo.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-149 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+153 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
-what is never asked for, the bad ID photos and the suggested resubmit
+what is never asked for, the record's slips corrected (the father's name, a
+married surname on the form, a PO Box) and the RFIs, the bad ID photos and the suggested resubmit
 reason, the filled-in Resubmit dialog, a redrawn case read again, a gateway
 error, a rate-limit or dropped-connection retry, the name rules, the worker
 on an auto-verified case, Pause/Resume for the team lead),

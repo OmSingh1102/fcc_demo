@@ -38,12 +38,21 @@ def _human(hours):
     return ("-" if negative else "") + text
 
 
+def waiting_on_user(case):
+    """An RFI sent that nobody holds (the AI Agent's): the case waits for the
+    user's reply, not for an analyst (routing.level_for)."""
+    return case.get("pending_reason") == "RFI Sent" and not case.get("current_reviewer") \
+        and case["status"] in ("DataConfirming", "DataScreening")
+
+
 def chip(case, now=None):
     """{text, tone, title} for the list and the case header."""
     if case["status"] in vocab.CLOSED_STATUSES:
         return {"text": "Closed", "tone": "done", "title": f"Closed {case.get('closed_at', '')}"}
     if case["status"].startswith("Resubmit"):
         return {"text": "Waiting on user", "tone": "done", "title": "Resubmission requested; the intake clock keeps running"}
+    if waiting_on_user(case):
+        return {"text": "Waiting on user", "tone": "done", "title": "Information requested from the user; the intake clock keeps running"}
     due, label = active_due(case)
     hours = dates.hours_until(due, now)
     tone = "late" if hours < 0 else ("warn" if hours <= 12 else "ok")

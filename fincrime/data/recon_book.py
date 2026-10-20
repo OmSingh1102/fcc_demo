@@ -375,8 +375,9 @@ def add_rows(rows, start_seq):
 def sample_rows(first_number, taken=()):
     """A sample upload: rows of the log under new ids with the history
     columns blanked, chosen to show each path: two the AI Agent should verify
-    by itself, one whose CRM name carries another surname (it goes to an
-    analyst), an exact date-of-birth hit and a company (both the analysts'
+    by itself, one whose CRM spells the surname another way than the
+    documents, which disagree among themselves too (it goes to an analyst:
+    no slip the agent settles), an exact date-of-birth hit and a company (both the analysts'
     from the start). Ids are numbered from `first_number`, skipping `taken`
     and any id whose drawn capture defects would spoil the first three."""
     from fincrime.engines import ai_agent                    # late: the engines import the seed
@@ -395,7 +396,8 @@ def sample_rows(first_number, taken=()):
             home = addresses.compare(addresses.normalise(v["customer"]["address"], v["country"]),
                                      addresses.normalise(v["documents"]["poa"]["address"], v["country"])) == "same"
             ok = {"clean": not corp and dob_conflict and same_name and home,
-                  "name": not corp and dob_conflict and not same_name and viz["surname"],
+                  "name": not corp and dob_conflict and not same_name and viz["surname"]
+                          and row.get("name_variance_type", "").startswith("Transliteration"),
                   "exact": not corp and exact, "company": corp}[want]
             if ok:
                 picks.append(row)

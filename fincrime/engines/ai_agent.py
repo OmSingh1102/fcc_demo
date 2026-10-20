@@ -15,10 +15,15 @@ and hands the case to a person whenever it cannot be sure.
    left goes to Data Screening, where an analyst clears the alert. Any check
    fails, or Claude cannot be reached: the case stays in Data Confirming,
    labelled human-in-the-loop, with the reasons and what the agent read.
-   One failure the agent answers itself (customer_request): a proof of
-   address older than six months, with everything else passed and nothing
-   left for an analyst, is asked for again through the analysts' own
-   Resubmit POA. A request approves nothing; what comes back is read again.
+   What the agent settles itself, when nothing else is wrong and nothing is
+   left for an analyst: the record's own slips, where the documents agree
+   with one another (the father's name kept for the holder's, a married
+   surname on the form, a PO Box for a home), it corrects and confirms
+   (record_fixes); a proof of address older than six months, the document
+   that links two names, or which home is the main one, it asks the
+   customer for through the analysts' own Resubmit POA or RFI
+   (customer_request). A request approves nothing; what comes back is
+   checked again.
 4. On a case with a watchlist alert left, the agent also sets what the
    documents say beside each open World-Check record (watchlist_findings):
    a likely true match, a possible one, or likely a different person. It
@@ -172,8 +177,10 @@ VERDICT_TRIES = 3
 # and the verified address written to the record (address_update). 6: an old
 # proof of address reported once when its read and recorded dates agree.
 # 7: the passport's back page and the secondary ID. 8: an old proof of
-# address, the only thing wrong, asked for again (customer_request).
-RULES_VERSION = 8
+# address, the only thing wrong, asked for again (customer_request). 9: the
+# record's own slips corrected (name_slip, address_slip) and RFIs for the
+# document that links two names or for the main home.
+RULES_VERSION = 9
 POA_NAME_RULES = 4    # the first checks to want the proof of address's name: reads before them may lack it (needs_reread)
 OWN_NAME_RULES = 5    # the first to want the holder's own given name: a case confirmed before may name the father
 # What a read covers. 1: the passport's data page and the proof of address.
@@ -663,20 +670,27 @@ def address_update(case, got):
         # only the code was keyed wrong: correct it in the record's own words (the state the bill leaves out stays)
         text = re.sub(rf"\b{reg['postal5']}(-\d{{4}})?\b", poa["postal5"], now, count=1)
     else:
-        # the document's address, as the record keeps one: no relative's line (S/O: Krishnan, ...), no country after its own
-        text = addresses.RELATION.sub("", read).strip()
-        head, _, tail = text.rpartition(",")
-        if head and addresses.COUNTRY_WORDS.get(similarity.fold(tail).strip()) == country:
-            text = head.strip()
+        text = _as_the_record_keeps(read, country)
     return "" if similarity.fold(text) == similarity.fold(now) else text
 
 
-def write_address(case, record, address):
+def _as_the_record_keeps(read, country):
+    """A document's address as the record keeps one: no relative's line (S/O:
+    Krishnan, ...), no country after its own."""
+    text = addresses.RELATION.sub("", read).strip()
+    head, _, tail = text.rpartition(",")
+    if head and addresses.COUNTRY_WORDS.get(similarity.fold(tail).strip()) == country:
+        text = head.strip()
+    return text
+
+
+def write_address(case, record, address, why=""):
     """Correct the record's registered address to the proof of address's."""
     before = case["client"].get("address", "")
     case["client"]["address"] = address
     workflow._change(case, ACTOR, "address", before, address)
-    workflow._audit(case, ACTOR, "Address updated", f"Registered address corrected to the proof of address's: {address} (was {before}).")
+    workflow._audit(case, ACTOR, "Address updated", f"Registered address corrected to the proof of address's: {address} (was {before})."
+                    + (f" {why[0].upper()}{why[1:]}." if why else ""))
     record["address_updated"] = {"from": before, "to": address}
 
 
@@ -871,12 +885,16 @@ def decide(case, alert_case, wc, perceived):
         record["reasons"] = [f"AI Agent could not read the documents: {record['error']}"]
     else:
         record["checks"], values = checks(case, record["read"])
-        record["reasons"] = [c["note"] for c in record["checks"] if not c["ok"]]
         watch = watchlist_findings(case, wc, record["read"])
         if watch:
             record["watchlist"] = watch
             workflow._audit(case, ACTOR, "Watchlist finding", f"{WATCH_LABELS[watch['finding']]}: "
                             + " ".join(m["detail"] for m in watch["matches"]) + " The analyst clears the alert.")
+        fixes = record_fixes(case, alert_case, record)
+        if fixes:
+            correct_record(case, record, fixes)
+            record["checks"], values = checks(case, record["read"])         # against the corrected record
+        record["reasons"] = [c["note"] for c in record["checks"] if not c["ok"]]
     if not record["reasons"]:
         workflow._audit(case, ACTOR, "Documents read", f"{MODEL} read {DOCUMENTS_READ}; every check passed.")
         try:
@@ -889,9 +907,9 @@ def decide(case, alert_case, wc, perceived):
             if address:
                 write_address(case, record, address)
     if record["reasons"]:
-        reason = customer_request(case, alert_case, record)
-        if reason:
-            ask_customer(case, record, reason)
+        ask = customer_request(case, alert_case, record)
+        if ask:
+            ask_customer(case, record, ask)
         else:
             record["decision"] = "human"
             record["resubmit"] = resubmit_reason(record["read"], record["checks"])
@@ -905,30 +923,219 @@ def decide(case, alert_case, wc, perceived):
     return record
 
 
+# ── what the agent settles by itself ─────────────────────────────────────────
+# The documents agree with one another and only the record differs, in a way
+# a known slip explains: the agent corrects the record and confirms, or asks
+# the customer for the one document that settles it. Never on a case with a
+# watchlist alert left, one a person holds, or one with anything else wrong.
+# An unreadable or covered ID stays with a person (what it hides may be the
+# point), and so does any spelling the documents themselves disagree on.
+
+NAME_CHECKS = {"Name", "Name on proof of address", "Name on secondary ID"}
+
+
+def _may_act_alone(case, alert_case, record):
+    """Every document read, no watchlist alert left, nobody holding the case,
+    and the screening left nothing for an analyst."""
+    return not (record.get("error") or record.get("read_version", 1) < READ_VERSION or record.get("watchlist")
+                or case.get("current_reviewer") or case["status"] != "DataConfirming"
+                or ai_screening.classify(case, alert_case) != "auto-verified")
+
+
+def _failed(found):
+    return {c["check"] for c in found if not c["ok"]}
+
+
+def _foreign(word, pool):
+    """A word on no document, nor a spelling of one that is."""
+    return max((similarity.token_score(word, w) for w in pool), default=0.0) < 0.7
+
+
+def _names_on(case, got):
+    """The names the documents print beside the record's, as folded words,
+    and whether the secondary ID and the proof of address name the passport's
+    holder."""
+    idr, sec, poa = got.get("id") or {}, got.get("secondary") or {}, got.get("poa") or {}
+    country = case["client"]["nationality"]
+    s, g = similarity.tokens(idr.get("surname", "")), similarity.tokens(idr.get("given_names", ""))
+    poa_name = " ".join(x for x in (poa.get("surname", ""), poa.get("given_names", "")) if x)
+    return {"surname": s, "given": g, "record": similarity.tokens(case["client"]["legal_name"]),
+            "secondary": similarity.tokens(sec.get("name", "")), "poa": similarity.tokens(poa_name),
+            "words": set(s + g) | set(similarity.tokens(sec.get("name", ""))) | set(similarity.tokens(poa_name)),
+            "printed": " ".join(x for x in (idr.get("given_names", ""), idr.get("surname", "")) if x),
+            "sec_holder": holder_named(sec.get("name", ""), idr.get("surname", ""), idr.get("given_names", ""), country),
+            "poa_holder": bool(poa_name_verdict(" ".join(g + s), poa, country=country))}
+
+
+def _only_names_failed(found):
+    failed = _failed(found)
+    return "Name" in failed and failed <= NAME_CHECKS
+
+
+def name_slip(case, got, found):
+    """(the documents' name, why) when the record's name is a known slip for
+    the documents' holder, else None. Only the name checks failed, so the
+    record's date of birth and ID number are the passport's, and the
+    secondary ID and the proof of address name the passport's holder too:
+    - the father's name: the record kept the passport's later given name and
+      the surname and dropped the holder's own (PRAKASH MORE for MORE,
+      MANASI PRAKASH: the record named her father);
+    - a surname no document prints, beside the holder's given name (NHUNG VU
+      for PHAN, BICH NHUNG: a married name written on the form).
+    The name is written in the order the proof of address or the secondary
+    ID prints it."""
+    if not _only_names_failed(found):
+        return None
+    n = _names_on(case, got)
+    s, g, rec = n["surname"], n["given"], n["record"]
+    if not (s and g and rec and n["sec_holder"] and n["poa_holder"]):
+        return None
+    kept = [t for t in rec if any(names.given_match(t, b) >= 0.9 for b in g)]
+    other = [t for t in rec if _foreign(t, n["words"])]
+    if len(g) >= 2 and set(s) <= set(rec) <= set(s + g) and g[0] not in rec and set(rec) - set(s):
+        father = " ".join(t for t in rec if t not in s)
+        why = f"the record kept the father's name {father} and the surname, and dropped the holder's own name {g[0]}"
+    elif not set(s) & set(rec) and kept and other and set(kept) | set(other) == set(rec):
+        why = f"the record carried the surname {' '.join(other)}, which none of the documents prints (a married name on the form)"
+    else:
+        return None
+    order = next((t for t in (n["poa"], n["secondary"]) if sorted(t) == sorted(s + g)), g + s)
+    return " ".join(order), why
+
+
+def name_link_request(case, got, found):
+    """The RFI that asks for the document linking two names, when only a
+    legal document can, else "": the passport and the proof of address in
+    one surname and the secondary ID in the record's (a married name: the
+    marriage certificate), or the record's surname with given names none of
+    the documents prints (an anglicised name: the naturalisation
+    certificate)."""
+    if not _only_names_failed(found) or name_slip(case, got, found):
+        return ""
+    n = _names_on(case, got)
+    s, g, rec = n["surname"], n["given"], n["record"]
+    if not (s and g and rec):
+        return ""
+    kept = {t for t in rec if any(names.given_match(t, b) >= 0.9 for b in g)}
+    rest = set(rec) - kept
+    if not set(s) & set(rec) and kept and rest and rest <= set(n["secondary"]) and n["poa_holder"] and not n["sec_holder"]:
+        document = "your marriage certificate"
+    elif (set(s) <= set(rec) and set(rec) - set(s) and all(_foreign(t, n["words"]) for t in set(rec) - set(s))
+          and n["sec_holder"] and n["poa_holder"]):
+        document = "your naturalisation certificate"
+    else:
+        return ""
+    return (f"Please send {document}, or another legal change-of-name document, that links the name on your passport "
+            f"({n['printed']}) to the name on your account ({case['client']['legal_name']}).")
+
+
+def _addresses_on(case, got):
+    """(the record's, the proof of address's, the secondary ID's) addresses,
+    normalised; the last is None when the secondary ID prints none."""
+    country = case["client"]["nationality"]
+    sec = ((got.get("secondary") or {}).get("address") or "").strip()
+    return (addresses.normalise(case["client"].get("address", ""), country),
+            addresses.normalise(_poa_address((got.get("poa") or {}).get("address", ""), country), country),
+            addresses.normalise(sec, country) if sec else None)
+
+
+def address_slip(case, got, found):
+    """The documents' address, to correct the record to, when the record
+    holds only a PO Box (not a home address) and the proof of address and
+    the secondary ID give the same home in the same place, else ""."""
+    if _failed(found) != {"Address"}:
+        return ""
+    reg, poa, sec = _addresses_on(case, got)
+    if not reg["po_box"] or sec is None or addresses.compare(sec, poa) != "same" \
+            or addresses.compare(reg, poa) != "same_locality":
+        return ""
+    return _as_the_record_keeps(_poa_address(got["poa"]["address"], case["client"]["nationality"]), case["client"]["nationality"])
+
+
+def address_request(case, got, found):
+    """The RFI that asks which home is the customer's, when the proof of
+    address and the secondary ID give one address and the record another
+    (a second home: only the customer can say which is the main one), else ""."""
+    if _failed(found) != {"Address"}:
+        return ""
+    reg, poa, sec = _addresses_on(case, got)
+    if reg["po_box"] or sec is None or addresses.compare(sec, poa) != "same" or addresses.compare(reg, poa) != "different":
+        return ""
+    country, held = case["client"]["nationality"], case["client"].get("address", "")
+    shown = _as_the_record_keeps(_poa_address(got["poa"]["address"], country), country)
+    second = (_secondary_doc(case) or {}).get("name", "secondary ID")
+    return (f"Please confirm your main home address. Your proof of address and your {second} show {shown}; your account "
+            f"holds {held}. If you have moved, reply to confirm the new address; if {held} is still your main home, "
+            f"please send a proof of address for it dated within the last 6 months.")
+
+
+def record_fixes(case, alert_case, record):
+    """What the agent corrects on the record by itself, {field: (value,
+    why)}: a name slip (name_slip) or a PO Box (address_slip), and only when
+    every check passes once it is corrected; {} otherwise."""
+    if not _may_act_alone(case, alert_case, record):
+        return {}
+    got, found = record["read"], record["checks"]
+    slip = name_slip(case, got, found)
+    address = "" if slip else address_slip(case, got, found)
+    fixes = ({"legal_name": slip} if slip else
+             {"address": (address, "the record held only a PO Box, which is not a home address; the proof of address and "
+                                   "the secondary ID give the same home in the same place")} if address else {})
+    if not fixes:
+        return {}
+    trial = dict(case, client=dict(case["client"], **{k: v for k, (v, _) in fixes.items()}))
+    return fixes if all(c["ok"] for c in checks(trial, got)[0]) else {}
+
+
+def write_name(case, record, name, why):
+    """Correct the record's name to the documents'."""
+    before = case["client"]["legal_name"]
+    case["client"]["legal_name"] = name
+    workflow._change(case, ACTOR, "name", before, name)
+    workflow._audit(case, ACTOR, "Name corrected", f"Record name corrected to the documents' {name} (was {before}): {why}.")
+    record["name_corrected"] = {"from": before, "to": name, "why": why}
+
+
+def correct_record(case, record, fixes):
+    """Write the corrections. Claude's verdict was on the record before them:
+    it is dropped, and asked again on the corrected record from the stored
+    read (needs_verdict)."""
+    for field, (value, why) in fixes.items():
+        if field == "legal_name":
+            write_name(case, record, value, why)
+        else:
+            write_address(case, record, value, why)
+    record.pop("verdict", None)
+
+
 def customer_request(case, alert_case, record):
-    """The Resubmit POA reason the agent sends the customer by itself, or "".
-    Only for a proof of address older than six months when that is the only
-    thing wrong: every document read and every other check passed, the
-    screening left nothing for an analyst, and no one holds the case. All
-    else stays with a person: an unreadable or covered ID (what it hides may
-    be the point), an address that differs (the documents may be right and
-    the record old), any watchlist alert."""
-    failed = [c for c in record["checks"] if not c["ok"]]
-    if (record.get("error") or record.get("read_version", 1) < READ_VERSION or record.get("watchlist")
-            or case.get("current_reviewer") or case["status"] != "DataConfirming"
-            or ai_screening.classify(case, alert_case) != "auto-verified"):
-        return ""
-    if len(failed) != 1 or failed[0]["check"] != "Proof of address checks":
-        return ""
-    return RESUBMIT_POA_OLD if set(failed[0].get("failures") or ()) == {POA_TOO_OLD} else ""
+    """What the agent asks the customer for by itself, {"kind", "text"}, or
+    None: Resubmit POA when the proof of address is older than six months
+    and that is the only thing wrong, or an RFI for the document that links
+    two names (name_link_request) or for which home is the main one
+    (address_request). A request approves nothing; what comes back is
+    checked again."""
+    if not _may_act_alone(case, alert_case, record):
+        return None
+    got, found = record["read"], record["checks"]
+    failed = [c for c in found if not c["ok"]]
+    if len(failed) == 1 and failed[0]["check"] == "Proof of address checks" \
+            and set(failed[0].get("failures") or ()) == {POA_TOO_OLD}:
+        return {"kind": "resubmit", "text": RESUBMIT_POA_OLD}
+    text = name_link_request(case, got, found) or address_request(case, got, found)
+    return {"kind": "rfi", "text": text} if text else None
 
 
-def ask_customer(case, record, reason):
-    """Resubmit POA through the analysts' own path: the case waits for the
-    customer's new document, and nothing is left for an analyst."""
-    workflow.request_resubmission(case, ACTOR, ["Resubmit POA"], "", reason,
-                                  "Requested by the AI Agent: " + "; ".join(record["reasons"]))
-    record.update(decision="resubmit", requested=reason, resubmit="")
+def ask_customer(case, record, ask):
+    """Send the request through the analysts' own path (Resubmit POA, or an
+    RFI): the case waits for the customer, and nothing is left for an
+    analyst."""
+    if ask["kind"] == "resubmit":
+        workflow.request_resubmission(case, ACTOR, ["Resubmit POA"], "", ask["text"],
+                                      "Requested by the AI Agent: " + "; ".join(record["reasons"]))
+    else:
+        workflow.send_rfi(case, ACTOR, ask["text"])
+    record.update(decision=ask["kind"], requested=ask["text"], resubmit="")
     case["screening"]["workflow"] = "auto-verified"
 
 
@@ -1007,14 +1214,16 @@ def recheck(case, alert_case, wc):
     that still fails stays with a person, its reasons brought up to date."""
     old = case["ai_agent"]
     found, _ = checks(case, old["read"])
-    if any(not c["ok"] for c in found):
+    failing = any(not c["ok"] for c in found)
+    if failing and not record_fixes(case, alert_case, dict(old, checks=found)):
         old.update(checks=found, reasons=[c["note"] for c in found if not c["ok"]], rules=RULES_VERSION,
                    resubmit=resubmit_reason(old["read"], found))
-        reason = customer_request(case, alert_case, old)
-        if reason:
-            ask_customer(case, old, reason)
+        ask = customer_request(case, alert_case, old)
+        if ask:
+            ask_customer(case, old, ask)
         return old
-    workflow._audit(case, ACTOR, "Checked again", "The agent's checks changed; the stored read now passes every one.")
+    workflow._audit(case, ACTOR, "Checked again", "The agent's checks changed; the stored read now passes every one"
+                    + (" once the record's slip is corrected." if failing else "."))
     case["screening"]["workflow"] = "auto-verified"
     return decide(case, alert_case, wc, {k: v for k, v in old.items()
                                          if k in ("at", "model", "read", "usage", "seconds", "error", "verdict", "read_version")})
