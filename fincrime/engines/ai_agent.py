@@ -15,6 +15,10 @@ and hands the case to a person whenever it cannot be sure.
    left goes to Data Screening, where an analyst clears the alert. Any check
    fails, or Claude cannot be reached: the case stays in Data Confirming,
    labelled human-in-the-loop, with the reasons and what the agent read.
+   One failure the agent answers itself (customer_request): a proof of
+   address older than six months, with everything else passed and nothing
+   left for an analyst, is asked for again through the analysts' own
+   Resubmit POA. A request approves nothing; what comes back is read again.
 4. On a case with a watchlist alert left, the agent also sets what the
    documents say beside each open World-Check record (watchlist_findings):
    a likely true match, a possible one, or likely a different person. It
@@ -167,8 +171,9 @@ VERDICT_TRIES = 3
 # on the proof of address. 5: the holder's own given name (_own_name_kept),
 # and the verified address written to the record (address_update). 6: an old
 # proof of address reported once when its read and recorded dates agree.
-# 7: the passport's back page and the secondary ID.
-RULES_VERSION = 7
+# 7: the passport's back page and the secondary ID. 8: an old proof of
+# address, the only thing wrong, asked for again (customer_request).
+RULES_VERSION = 8
 POA_NAME_RULES = 4    # the first checks to want the proof of address's name: reads before them may lack it (needs_reread)
 OWN_NAME_RULES = 5    # the first to want the holder's own given name: a case confirmed before may name the father
 # What a read covers. 1: the passport's data page and the proof of address.
@@ -186,6 +191,10 @@ RESUBMIT_ILLEGIBLE = "The document you have provided is illegible"
 RESUBMIT_UNCLEAR = ("Please resubmit a clear, good quality valid proof of identity and ensure all information on the "
                     "document is visible")
 RESUBMIT_EXPIRED = "The document you have submitted is expired"
+# What the agent asks for by itself (vocab.RESUBMIT_POA_REASONS), and the
+# proof-of-address check that alone lets it.
+RESUBMIT_POA_OLD = "The proof of address is older than 6 months"
+POA_TOO_OLD = "Issued within the last 6 months"
 
 
 # ── which case, which images ─────────────────────────────────────────────────
@@ -824,6 +833,8 @@ def checks(case, got, now=None):
             failures.append({"label": "Issue date readable", "detail": "the date on the document could not be read"})
         _check(out, "Proof of address checks", "", "; ".join(f["detail"] for f in failures) or "passed", not failures,
                "; ".join(f"{f['label']}: {f['detail']}" for f in failures))
+        if failures:
+            out[-1]["failures"] = [f["label"] for f in failures]
     values = {"name": name_value, "dob": client["dob"], "nationality": client["nationality"]}
     return out, values
 
@@ -878,16 +889,47 @@ def decide(case, alert_case, wc, perceived):
             if address:
                 write_address(case, record, address)
     if record["reasons"]:
-        record["decision"] = "human"
-        record["resubmit"] = resubmit_reason(record["read"], record["checks"])
-        case["screening"]["workflow"] = "human-in-the-loop"
-        workflow._audit(case, ACTOR, "Sent to a person", "; ".join(record["reasons"]))
+        reason = customer_request(case, alert_case, record)
+        if reason:
+            ask_customer(case, record, reason)
+        else:
+            record["decision"] = "human"
+            record["resubmit"] = resubmit_reason(record["read"], record["checks"])
+            case["screening"]["workflow"] = "human-in-the-loop"
+            workflow._audit(case, ACTOR, "Sent to a person", "; ".join(record["reasons"]))
     else:
         record["decision"] = "verified" if case["status"] == "Verified" else "screening"
     if record.get("verdict"):
         attach_verdict(record, record["verdict"])            # shown and counted; the rules above decided
     case["ai_agent"] = record
     return record
+
+
+def customer_request(case, alert_case, record):
+    """The Resubmit POA reason the agent sends the customer by itself, or "".
+    Only for a proof of address older than six months when that is the only
+    thing wrong: every document read and every other check passed, the
+    screening left nothing for an analyst, and no one holds the case. All
+    else stays with a person: an unreadable or covered ID (what it hides may
+    be the point), an address that differs (the documents may be right and
+    the record old), any watchlist alert."""
+    failed = [c for c in record["checks"] if not c["ok"]]
+    if (record.get("error") or record.get("read_version", 1) < READ_VERSION or record.get("watchlist")
+            or case.get("current_reviewer") or case["status"] != "DataConfirming"
+            or ai_screening.classify(case, alert_case) != "auto-verified"):
+        return ""
+    if len(failed) != 1 or failed[0]["check"] != "Proof of address checks":
+        return ""
+    return RESUBMIT_POA_OLD if set(failed[0].get("failures") or ()) == {POA_TOO_OLD} else ""
+
+
+def ask_customer(case, record, reason):
+    """Resubmit POA through the analysts' own path: the case waits for the
+    customer's new document, and nothing is left for an analyst."""
+    workflow.request_resubmission(case, ACTOR, ["Resubmit POA"], "", reason,
+                                  "Requested by the AI Agent: " + "; ".join(record["reasons"]))
+    record.update(decision="resubmit", requested=reason, resubmit="")
+    case["screening"]["workflow"] = "auto-verified"
 
 
 def needs_recheck(case):
@@ -968,6 +1010,9 @@ def recheck(case, alert_case, wc):
     if any(not c["ok"] for c in found):
         old.update(checks=found, reasons=[c["note"] for c in found if not c["ok"]], rules=RULES_VERSION,
                    resubmit=resubmit_reason(old["read"], found))
+        reason = customer_request(case, alert_case, old)
+        if reason:
+            ask_customer(case, old, reason)
         return old
     workflow._audit(case, ACTOR, "Checked again", "The agent's checks changed; the stored read now passes every one.")
     case["screening"]["workflow"] = "auto-verified"

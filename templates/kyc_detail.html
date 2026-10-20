@@ -170,12 +170,14 @@
     <div class="card-head" style="padding-bottom:10px">
         <div class="card-title">AI Agent</div>
         <div class="row" style="gap:8px">
-            <span class="badge {{ {'verified': 'emerald', 'screening': 'blue', 'human': 'amber'}[ag.decision] }}" id="ai-agent-decision">{{ agent.labels[ag.decision] }}</span>
+            <span class="badge {{ {'verified': 'emerald', 'screening': 'blue', 'human': 'amber', 'resubmit': 'slate'}[ag.decision] }}" id="ai-agent-decision">{{ agent.labels[ag.decision] }}</span>
             <span class="small muted">{{ ag.model }} · {{ ag.seconds }} s · {{ ag.at }}</span>
         </div>
     </div>
     <div class="card-body" style="padding-top:0">
-        {% if ag.reasons %}
+        {% if ag.decision == 'resubmit' %}
+        <div class="note info small mb-8" id="ai-agent-requested"><b>Asked the customer:</b> Resubmit POA — “{{ ag.requested }}”. {{ ag.reasons|join('; ') }}. Every other check passed and nothing was left for an analyst; the new proof of address is read and checked again when it arrives.</div>
+        {% elif ag.reasons %}
         <div class="note warn small mb-8"><b>Sent to a person:</b> {{ ag.reasons|join('; ') }}</div>
         {% if ag.resubmit and case.status == 'DataConfirming' %}<div class="small mb-8" id="ai-agent-resubmit"><b>Suggested:</b> Resubmit ID — “{{ ag.resubmit }}”. The Resubmit dialog opens with it filled in; the decision is the analyst's.</div>{% endif %}
         {% elif ag.decision == 'verified' %}

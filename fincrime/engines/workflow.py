@@ -386,6 +386,16 @@ def resubmit(case, actor, decisions, id_reason, poa_reason, note):
     SLA clock keeps running."""
     _require(case["status"] == "DataConfirming", "Resubmission can only be requested during Data Confirming.")
     _require_reserved(case, actor)
+    request_resubmission(case, actor, decisions, id_reason, poa_reason, note)
+    _touch_level(case, "L1", actor)
+    _hand_back(case, actor, "Resubmission requested")
+
+
+def request_resubmission(case, actor, decisions, id_reason, poa_reason, note):
+    """The part of Resubmit an analyst and the AI Agent share: record what
+    the user must upload again and why, and move the case to Resubmit ID or
+    Resubmit POA."""
+    _require(case["status"] == "DataConfirming", "Resubmission can only be requested during Data Confirming.")
     decisions = [d for d in (decisions or []) if d in ("Resubmit ID", "Resubmit POA")]
     _require(decisions, "Choose what the user must resubmit.")
     if "Resubmit ID" in decisions:
@@ -401,8 +411,6 @@ def resubmit(case, actor, decisions, id_reason, poa_reason, note):
     case["pending_reason"] = "Pending Resubmission"
     _decision(case, "Data Confirming", decision="Resubmit", operated_at=now, by=actor,
               fail_reason=case["resubmit"]["id_reason"], poa_fail_reason=case["resubmit"]["poa_reason"])
-    _touch_level(case, "L1", actor)
-    _hand_back(case, actor, "Resubmission requested")
     reasons = "; ".join(r for r in (case["resubmit"]["id_reason"], case["resubmit"]["poa_reason"]) if r)
     _audit(case, actor, "Resubmission requested",
            f"{', '.join(decisions)} (#{prior + 1}). {reasons}" + (f" Note: {note.strip()}" if (note or '').strip() else ""))

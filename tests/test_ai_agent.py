@@ -124,8 +124,8 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual(fcc.ALERT_BY_ID[c["screening"]["alert_case_id"]]["alerts"][0]["outcome"], "Pending")
 
     # ── what sends a case to a person ───────────────────────────────────────
-    def assert_human(self, case, needle, **id_overrides):
-        rec, _ = self.run_agent(case, **id_overrides)
+    def assert_human(self, case, needle, answer=None, **id_overrides):
+        rec, _ = self.run_agent(case, answer, **id_overrides)
         self.assertEqual(rec["decision"], "human")
         self.assertEqual((case["status"], case["screening"]["workflow"]), ("DataConfirming", "human-in-the-loop"))
         self.assertTrue(any(needle in r for r in rec["reasons"]), rec["reasons"])
@@ -154,7 +154,55 @@ class AiAgentTestCase(unittest.TestCase):
         declined = self.pick(lambda c: c["vendor_check"]["result"] == "Declined")
         self.assert_human(declined, "ID declined by the vendor")
         old = self.pick(lambda c: ai_agent.workflow.poa_failures(c))
+        old["current_reviewer"] = "amara.iyer@straive.com"           # held by an analyst: theirs to ask, not the agent's
         self.assert_human(old, "Issued within the last 6 months")
+
+    # ── what the agent asks the customer for by itself ──────────────────────
+    def only_old_poa(self, c):
+        """An auto-verified case nobody holds whose only failure on a perfect
+        read is its proof of address's age."""
+        found = ai_agent.checks(c, perfect_read(c))[0]
+        return (c["screening"]["workflow"] == "auto-verified" and not c["current_reviewer"]
+                and [x["check"] for x in found if not x["ok"]] == ["Proof of address checks"]
+                and [f["label"] for f in ai_agent.workflow.poa_failures(c)] == [ai_agent.POA_TOO_OLD])
+
+    def test_an_old_proof_of_address_alone_is_asked_for_again(self):
+        c = self.pick(self.only_old_poa)
+        rec, _ = self.run_agent(c)
+        self.assertEqual((rec["decision"], rec["requested"]), ("resubmit", ai_agent.RESUBMIT_POA_OLD), rec["reasons"])
+        self.assertIn(ai_agent.RESUBMIT_POA_OLD, ai_agent.vocab.RESUBMIT_POA_REASONS)       # the analysts' own reason
+        self.assertTrue(any(ai_agent.POA_TOO_OLD in r for r in rec["reasons"]), rec["reasons"])
+        self.assertEqual((c["status"], c["pending_reason"], c["screening"]["workflow"], c["current_reviewer"]),
+                         ("ResubmitPOA", "Pending Resubmission", "auto-verified", ""))
+        self.assertEqual((c["resubmit"]["decisions"], c["resubmit"]["poa_reason"], c["resubmit"]["by"]),
+                         (["Resubmit POA"], ai_agent.RESUBMIT_POA_OLD, "AI Agent"))
+        self.assertEqual((c["audit"][-1]["actor"], c["audit"][-1]["action"]), ("AI Agent", "Resubmission requested"))
+        self.assertNotIn("Sent to a person", [e["action"] for e in c["audit"]])
+        self.assertFalse(ai_agent.eligible(c))                           # it waits for the customer's new document
+        self.login("amara.iyer")
+        page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
+        self.assertIn('id="ai-agent-requested"', page)
+        self.assertIn("Asked the customer", page)
+        self.assertIn(f'data-case-id="{c["id"]}"', self.c.get("/kyc/list?agent=resubmit").data.decode("utf-8"))
+        self.assertIn('id="ai-agent-resubmit-kpi"', self.c.get("/ai-screening").data.decode("utf-8"))
+
+    def test_what_the_agent_never_asks_the_customer_for(self):
+        # the same old proof of address beside any other failure: a person
+        c = self.pick(self.only_old_poa)
+        self.assert_human(c, "Date of birth missing on the ID", dob="")
+        # an unreadable or covered ID: a person sees what it hides
+        c = self.pick(self.only_old_poa)
+        self.assert_human(c, "ID could not be read", problems=["covered"])
+        # an address that differs: the documents may be right and the record old
+        c = self.clean(lambda c: c["screening"]["workflow"] == "auto-verified" and not c["current_reviewer"])
+        read = perfect_read(c)
+        read["poa"]["address"] = "PO Box 4500, Atlanta, GA 30309"
+        rec = self.assert_human(c, "Address on the proof of address does not match", answer=read)
+        self.assertEqual(rec["resubmit"], "")
+        # an old proof of address on a case with a watchlist alert left: a person
+        c = self.K["KYC-2026-3276"]
+        rec = self.assert_human(c, "Issued within the last 6 months", answer=self.old_read(c))
+        self.assertTrue(rec["watchlist"])
 
     def test_gateway_error_goes_to_a_person(self):
         c = self.clean()
@@ -344,10 +392,11 @@ class AiAgentTestCase(unittest.TestCase):
         other = self.clean(self.poa_kind("aadhaar"))
         ai_agent.workflow.poa_docs(other)[0]["issued_on"] = "2025-01-02"
         self.assertEqual(ai_agent.workflow.poa_failures(other), [])
-        # a bill read as two years old still goes to a person
-        bill = self.clean(self.poa_kind("utility_bill"))
+        # a bill read as two years old is not verified: the customer is asked for a newer one
+        bill = self.clean(lambda c: self.poa_kind("utility_bill")(c) and c["screening"]["workflow"] == "auto-verified"
+                          and not c["current_reviewer"])
         rec, _ = self.run_agent(bill, answer=self.old_read(bill))
-        self.assertEqual(rec["decision"], "human")
+        self.assertEqual((rec["decision"], bill["status"]), ("resubmit", "ResubmitPOA"))
         self.assertTrue(any("Issued within the last 6 months" in r for r in rec["reasons"]), rec["reasons"])
 
     def test_an_unreadable_proof_of_address_date_goes_to_a_person(self):
@@ -368,8 +417,10 @@ class AiAgentTestCase(unittest.TestCase):
     def test_a_case_sent_to_a_person_under_older_checks_is_checked_again(self):
         card = self.clean(self.poa_kind("aadhaar"))
         touched = self.clean(lambda c: self.poa_kind("aadhaar")(c) and c["id"] != card["id"])
-        bill = self.clean(self.poa_kind("utility_bill"))
-        with mock.patch.object(ai_agent.vocab, "POA_NO_AGE_LIMIT", ()):           # the checks before the fix
+        bill = self.clean(lambda c: self.poa_kind("utility_bill")(c) and c["screening"]["workflow"] == "auto-verified"
+                          and not c["current_reviewer"])
+        with mock.patch.object(ai_agent.vocab, "POA_NO_AGE_LIMIT", ()), \
+                mock.patch.object(ai_agent, "customer_request", lambda *a: ""):  # the checks before the fix
             for c in (card, touched, bill):
                 self.assertEqual(self.run_agent(c, answer=self.old_read(c))[0]["decision"], "human")
                 del c["ai_agent"]["rules"]                                    # decided under the first rules
@@ -384,8 +435,10 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual((card["status"], card["ai_agent"]["decision"]), ("Verified", "verified"))
         self.assertIn(("AI Agent", "Checked again"), [(e["actor"], e["action"]) for e in card["audit"]])
         self.assertEqual((touched["status"], touched["ai_agent"]["decision"]), ("DataConfirming", "human"))
+        # still not verified, checked once: its old proof of address, the only thing wrong, is asked for again
         self.assertEqual((bill["status"], bill["ai_agent"]["decision"], bill["ai_agent"]["rules"]),
-                         ("DataConfirming", "human", ai_agent.RULES_VERSION))   # still a person's, checked once
+                         ("ResubmitPOA", "resubmit", ai_agent.RULES_VERSION))
+        self.assertEqual((bill["audit"][-1]["actor"], bill["audit"][-1]["action"]), ("AI Agent", "Resubmission requested"))
         self.assertFalse(ai_agent.needs_recheck(bill))
 
     def test_the_proof_of_address_is_in_the_customers_name(self):

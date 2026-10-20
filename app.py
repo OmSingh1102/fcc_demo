@@ -1250,7 +1250,7 @@ AI_AGENT_LOCK = threading.Lock()
 AI_AGENT = {"running": False, "busy": set(), "tried": set(), "threads": [], "done": 0, "errors": 0, "verdicts": 0, "rechecked": 0, "started_by": "",
             "started_at": "", "stopped": "", "autostarted": False}
 AGENT_LABELS = {"verified": "Handled by AI", "screening": "Confirmed by AI · alert left for an analyst",
-                "human": "Sent to a person"}
+                "human": "Sent to a person", "resubmit": "Asked the customer · new proof of address"}
 
 
 def _agent_view(case, actor, levels):

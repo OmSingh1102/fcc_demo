@@ -53,10 +53,19 @@ finding** beside each open record (*likely true match*: the passport's name
 is the listed name and its date of birth the listed one, or the same with
 day and month swapped; *possible match*; *likely a different person*). The
 finding shows on the case, the screening case and the case list's filter;
-it decides nothing. Anything blurred, cut off, expired, missing or
-different, a declined ID, or a model call that fails: the case stays with an
-analyst, labelled human-in-the-loop, and its page shows the reasons and what
-the agent read. Companies, and cases a person already holds or has worked,
+it decides nothing. One failure the agent answers itself: a proof of
+address older than six months, when every other check passed, no alert is
+left and nobody holds the case, is asked for again through the analysts'
+own Resubmit POA (*The proof of address is older than 6 months*); the case
+waits in ResubmitPOA and the list's *AI Agent* filter shows it as *Asked
+the customer*. A request approves nothing. Anything blurred, cut off,
+expired, missing or different, a declined ID, or a model call that fails:
+the case stays with an analyst, labelled human-in-the-loop, and its page
+shows the reasons and what the agent read. An unreadable or covered ID stays
+with a person rather than being asked for again (what it hides may be the
+point), and so does an address that differs from the record (both documents
+may show the new address and the record the old one). Companies, and cases
+a person already holds or has worked,
 are the analysts'. Two cases at a time (the gateway refuses more concurrent
 calls), about 940 cases and three to four hours for the file; each read is
 stored, so a restart does not read a case twice (a case read before the
@@ -176,7 +185,8 @@ The case data is fictional, so nothing sensitive leaves the demo.
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
-reason a case goes to a person, the bad ID photos and the suggested resubmit
+reason a case goes to a person, an old proof of address asked for again and
+what is never asked for, the bad ID photos and the suggested resubmit
 reason, the filled-in Resubmit dialog, a redrawn case read again, a gateway
 error, a rate-limit or dropped-connection retry, the name rules, the worker
 on an auto-verified case, Pause/Resume for the team lead),
