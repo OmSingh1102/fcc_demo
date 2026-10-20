@@ -13,6 +13,7 @@ Text inside an SVG that is loaded through <img> cannot use the page's web
 font, so the cards name Arial, which is on every Windows and macOS box and
 renders Cyrillic. Everything interpolated is XML-escaped.
 """
+import re
 import unicodedata
 
 from fincrime.data import vocab
@@ -33,7 +34,34 @@ ISO3 = {"US": "USA", "GB": "GBR", "DE": "DEU", "FR": "FRA", "SG": "SGP", "MX": "
         "BR": "BRA", "AE": "ARE", "JO": "JOR", "CH": "CHE", "ES": "ESP", "IT": "ITA", "JP": "JPN", "IN": "IND", "CO": "COL",
         "NG": "NGA", "IE": "IRL", "LB": "LBN", "AU": "AUS", "KR": "KOR", "CZ": "CZE", "EG": "EGY", "DK": "DNK", "PT": "PRT",
         "KZ": "KAZ", "MA": "MAR", "SE": "SWE", "MY": "MYS", "CA": "CAN"}
-US_STATES = {"OH": "OHIO", "WA": "WASHINGTON", "NY": "NEW YORK", "CA": "CALIFORNIA", "TX": "TEXAS", "IL": "ILLINOIS"}
+# The states a US licence can be issued by, for its header (us_state).
+US_STATES = {"AL": "ALABAMA", "AK": "ALASKA", "AZ": "ARIZONA", "AR": "ARKANSAS", "CA": "CALIFORNIA", "CO": "COLORADO",
+             "CT": "CONNECTICUT", "DE": "DELAWARE", "DC": "DISTRICT OF COLUMBIA", "FL": "FLORIDA", "GA": "GEORGIA",
+             "HI": "HAWAII", "ID": "IDAHO", "IL": "ILLINOIS", "IN": "INDIANA", "IA": "IOWA", "KS": "KANSAS",
+             "KY": "KENTUCKY", "LA": "LOUISIANA", "ME": "MAINE", "MD": "MARYLAND", "MA": "MASSACHUSETTS",
+             "MI": "MICHIGAN", "MN": "MINNESOTA", "MS": "MISSISSIPPI", "MO": "MISSOURI", "MT": "MONTANA",
+             "NE": "NEBRASKA", "NV": "NEVADA", "NH": "NEW HAMPSHIRE", "NJ": "NEW JERSEY", "NM": "NEW MEXICO",
+             "NY": "NEW YORK", "NC": "NORTH CAROLINA", "ND": "NORTH DAKOTA", "OH": "OHIO", "OK": "OKLAHOMA",
+             "OR": "OREGON", "PA": "PENNSYLVANIA", "RI": "RHODE ISLAND", "SC": "SOUTH CAROLINA", "SD": "SOUTH DAKOTA",
+             "TN": "TENNESSEE", "TX": "TEXAS", "UT": "UTAH", "VT": "VERMONT", "VA": "VIRGINIA", "WA": "WASHINGTON",
+             "WV": "WEST VIRGINIA", "WI": "WISCONSIN", "WY": "WYOMING"}
+# An address with no ZIP code (the scripted book's) is matched on these, as it always was.
+_FIRST_STATES = ("OH", "WA", "NY", "CA", "TX", "IL")
+_STATE_ZIP = re.compile(r",\s*([A-Z]{2})\s+\d{5}(?:-\d{4})?\b")
+
+
+def us_state(address):
+    """The state a US address names before its ZIP code (..., Portland, OR
+    97266), for a licence's header; an address with no ZIP is matched on the
+    first six states as before; OHIO when none is found."""
+    text = (address or "").upper()
+    found = [m.group(1) for m in _STATE_ZIP.finditer(text) if m.group(1) in US_STATES]
+    if found:
+        return US_STATES[found[-1]]
+    for code in _FIRST_STATES:
+        if f", {code} " in text or text.endswith(f" {code}"):
+            return US_STATES[code]
+    return "OHIO"
 
 FONT = "Arial, 'Segoe UI', Helvetica, sans-serif"
 MONO = "'Courier New', Consolas, monospace"
@@ -298,10 +326,7 @@ def driving_licence_svg(case, doc):
     c = case["client"]
     W, H = 640, 400
     addr = c.get("address") or ""
-    state = "OHIO"
-    for code, name in US_STATES.items():
-        if f", {code} " in addr or addr.endswith(f" {code}"):
-            state = name
+    state = us_state(addr)
     number = c["id_number"]
     expiry = _expiry(case, 5)
     issue = _issue_date(case)

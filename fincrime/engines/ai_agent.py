@@ -179,10 +179,14 @@ VERDICT_TRIES = 3
 # 7: the passport's back page and the secondary ID. 8: an old proof of
 # address, the only thing wrong, asked for again (customer_request). 9: the
 # record's own slips corrected (name_slip, address_slip) and RFIs for the
-# document that links two names or for the main home.
-RULES_VERSION = 9
+# document that links two names or for the main home. 10: a word that
+# matched the surname by its spelling is not a given name too (name_verdict).
+RULES_VERSION = 10
 POA_NAME_RULES = 4    # the first checks to want the proof of address's name: reads before them may lack it (needs_reread)
-OWN_NAME_RULES = 5    # the first to want the holder's own given name: a case confirmed before may name the father
+# The last change to the name checks (5: the holder's own given name; 10: one
+# word, one part of the name): a case confirmed before it is checked again on
+# its names (confirmed_on_older_names).
+NAME_RULES = 10
 # What a read covers. 1: the passport's data page and the proof of address.
 # 2: every document on the case. A case read under 1 that no person has
 # touched starts again and is read again (read_before_all_documents).
@@ -427,6 +431,13 @@ def name_verdict(crm, surname, given, filed="", country=""):
         # a patronymic initial: BALAJI K for KRISHNAN BALAJI
         any(names.is_initial(t) and t[0] == s[0][0] for t in c))
     rest = [t for t in c if t not in names.surname_forms(s)]
+    if len(rest) == len(c):
+        # the surname matched by its spelling only: the record's word that
+        # matched it is the surname, not a given name as well (HONG for both
+        # the passport's HOÀNG and its HỒNG)
+        spelt = max(c, key=lambda t: names.surname_score([t], s))
+        if names.surname_score([spelt], s) >= 0.8:
+            rest.remove(spelt)
     giv_ok = not g or (any(names.given_match(a, b) >= 0.9 for a in g for b in rest) and _own_name_kept(g, rest, country))
     if not (sur_ok and giv_ok):
         return False, crm
@@ -1168,17 +1179,23 @@ def needs_reread(case):
 
 
 def confirmed_on_older_names(stored, seed):
-    """A case the agent confirmed before the checks wanted the holder's own
-    given name, whose stored read the name checks now refuse against the
+    """A case the agent confirmed before the last change to the name checks
+    (NAME_RULES), whose stored read the name checks now refuse against the
     record as the file gave it (`seed`: the confirmation rewrote the name),
     and no person has touched since: it starts again and is read again
-    (app._load_seed), and goes to a person."""
+    (app._load_seed). A record the agent corrected itself (name_slip) was
+    checked on the corrected name, and is left alone."""
     rec = stored.get("ai_agent") or {}
-    if (rec.get("decision") not in ("verified", "screening") or rec.get("rules", 1) >= OWN_NAME_RULES
-            or not rec.get("read") or not _untouched(stored)):
+    if (rec.get("decision") not in ("verified", "screening") or rec.get("rules", 1) >= NAME_RULES
+            or rec.get("name_corrected") or not rec.get("read") or not _untouched(stored)):
         return False
-    found, _ = checks(seed, rec["read"])
-    return any(not c["ok"] for c in found if c["check"] in ("Name", "Name on proof of address"))
+    got, client = rec["read"], seed["client"]
+    idr, poa = got.get("id") or {}, got.get("poa") or {}
+    filed, country = _filed_name(seed), client["nationality"]
+    if not name_verdict(client["legal_name"], idr.get("surname", ""), idr.get("given_names", ""), filed=filed, country=country)[0]:
+        return True
+    return bool(seed.get("poa_required") and poa.get("readable")) \
+        and not poa_name_verdict(client["legal_name"], poa, filed=filed, country=country)
 
 
 def read_before_all_documents(stored):

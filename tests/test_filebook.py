@@ -426,6 +426,14 @@ class DocumentTests(unittest.TestCase):
         self.assertIn("1 | DE LUCA | 2 | ANDREW R", de_luca)
         self.assertIn("1 | MAC KENZIE | 2 | THOMAS D", text("KYC-2026-3189"))
         self.assertIn("1 | WALLACE | 2 | MARGARET M", text("KYC-2026-3276"))       # no particle: the last word
+        # its header names the state of its own address, any of the fifty and DC (a Miami licence is Florida's)
+        miami = text("KYC-2026-3931")
+        self.assertIn("FLORIDA", miami)
+        self.assertNotIn("OHIO", miami)
+        from fincrime.documents import svg_cards
+        self.assertEqual([svg_cards.us_state(a) for a in ("179 SE 82ND AVE, PORTLAND, OR 97266", "1 Main St, Washington, DC 20001-1234",
+                                                          "Columbus, OH", "")],
+                         ["OREGON", "DISTRICT OF COLUMBIA", "OHIO", "OHIO"])
 
     def test_the_drawn_sex_follows_what_the_file_says(self):
         # a relationship on the address, an honorific, a married-name change, then the names

@@ -566,6 +566,23 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertFalse(v("PATRICIA WILSON", "ROBERTS", "PATRICIA MARIE")[0])                              # another surname
         self.assertTrue(v("KEVIN NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                        # the name rules know Kevin for Khoa
         self.assertFalse(v("BRANDON NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                     # another given name
+        # one word, one part of the name: HONG cannot be both the passport's HOÀNG and its HỒNG
+        self.assertFalse(v("HONG NGUYEN", "HOÀNG", "PHƯƠNG HỒNG", country="VN")[0])
+        self.assertTrue(v("RAHUL CHOUDHARY", "CHAUDHARY", "RAHUL", country="IN")[0])                       # a spelling of the surname still is
+
+    def test_a_case_confirmed_on_a_word_used_twice_starts_again(self):
+        c = self.free("KYC-2026-3896")                                      # HONG NGUYEN for the passport's HOÀNG, PHƯƠNG HỒNG
+        with mock.patch.object(ai_agent, "name_verdict", lambda crm, s, g, filed="", country="": (True, crm)):
+            self.assertIn(self.run_agent(c)[0]["decision"], ("verified", "screening"))   # the checks before the fix
+        c["ai_agent"]["rules"] = 9
+        StateStore.save("kyc", c)
+        fcc._load_seed()
+        c = fcc.KYC_BY_ID[c["id"]]
+        self.assertNotIn("ai_agent", c)                                     # back to its seeded state, to be read again
+        c["current_reviewer"] = ""
+        rec = self.assert_human(c, "Name on the ID differs from the CRM")  # and now its name goes to a person
+        self.assertTrue(rec["watchlist"])
+        self.assertEqual(c["client"]["legal_name"], "HONG NGUYEN")          # no slip corrected beside an alert
 
     def test_a_record_that_keeps_the_fathers_name_is_not_the_holder(self):
         # an Indian passport's second given name is the father's: a record
