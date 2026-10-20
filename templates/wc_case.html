@@ -39,6 +39,7 @@
         <h4>Case details {{ icon('sliders') }}</h4>
         <div class="kv">
             <div><span class="l">Primary Name</span><span class="v">{{ wc.primary_name }}</span></div>
+            {% if wc.intake_name %}<div id="wc-intake-name"><span class="l">Name at intake</span><span class="v">{{ wc.intake_name }}</span></div>{% endif %}
             <div><span class="l">Gender</span><span class="v">{{ wc.gender }}</span></div>
             <div><span class="l">Date of Birth</span><span class="v">{{ (wc.dob ~ ' 00:00:00')|wc_date if wc.dob else '-' }}</span></div>
             {% for k, v in wc.case_details.items() %}<div><span class="l">{{ k }}</span><span class="v">{{ v }}</span></div>{% endfor %}

@@ -315,6 +315,7 @@ def confirm_data(case, actor, values, summary="", attachment="", alert_case=None
     # The tool re-screens on the confirmed data; the second run appears as a
     # further pair of rows under Screening Result.
     case["screening"]["rows"].extend(cms.rescreen_rows(case, now))
+    sync_screened_name(case, alert_case, wc, actor, now)
     detail = "Name, date of birth and nationality confirmed against the document."
     if case.get("poa_required"):
         detail += " Proof of address checked (age, type, country)."
@@ -333,6 +334,28 @@ def confirm_data(case, actor, values, summary="", attachment="", alert_case=None
             _audit(case, vocab.SYSTEM_USER, "Auto-verify held", "; ".join(problems) + " — an analyst reviews the case.")
         else:
             auto_verify(case, actor, now)
+
+
+def sync_screened_name(case, alert_case, wc, actor, at):
+    """The screening case and its watchlist case name their subject as the
+    latest screening did: after Data Confirming, the confirmed name (the
+    ID's spelling, or a record the AI Agent corrected), not the name at
+    intake, which each keeps as intake_name. The listed records' names are
+    the watchlist's and stay as they are. Returns whether anything changed."""
+    rows = case["screening"].get("rows") or []
+    name = rows[-1].get("user_name", "") if rows else ""
+    changed = False
+    for record, holder, key in ((alert_case, (alert_case or {}).get("screening_info"), "name"), (wc, wc, "primary_name")):
+        if record is None or holder is None or not name or holder.get(key) == name:
+            continue
+        before = holder.get(key, "")
+        holder.setdefault("intake_name", before)
+        holder[key] = name
+        record.setdefault("audit", []).append({"at": at, "actor": actor, "action": "Subject name updated",
+                                               "detail": f"{name} (was {before}): the screening at Data Confirming ran on "
+                                                         f"the confirmed name; the name at intake is kept."})
+        changed = True
+    return changed
 
 
 def _auto_verify_allowed(case):

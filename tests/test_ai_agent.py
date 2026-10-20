@@ -229,10 +229,37 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertIn(("AI Agent", "Name corrected"), [(e["actor"], e["action"]) for e in c["audit"]])
         self.assertEqual(c["screening"]["rows"][-1]["user_name"], "MANASI PRAKASH MORE")    # screened on her own name
         self.assertTrue(ai_agent.needs_verdict(c))
+        # the screening case and the World-Check case name her too; the name at intake is kept, the listed record's is the list's
+        alert, wc = fcc._linked(c)
+        self.assertEqual((alert["screening_info"]["name"], alert["screening_info"]["intake_name"]), ("MANASI PRAKASH MORE", "PRAKASH MORE"))
+        self.assertEqual((wc["primary_name"], wc["intake_name"]), ("MANASI PRAKASH MORE", "PRAKASH MORE"))
+        self.assertEqual(wc["matches"][0]["name"], "MORE, Prakash")
+        self.assertIn("Subject name updated", [e["action"] for e in wc["audit"]])
         self.login("amara.iyer")
         page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
         self.assertIn('id="ai-agent-name"', page)
         self.assertIn("MANASI PRAKASH MORE", page)
+        page = self.c.get(f"/wc/{wc['id']}").data.decode("utf-8")
+        self.assertIn('id="wc-intake-name"', page)
+        self.assertIn("MANASI PRAKASH MORE", page)
+
+    def test_a_case_confirmed_before_names_its_screening_subject_on_reload(self):
+        c = self.free("KYC-2026-3025")                                      # the record KEVIN NGUYEN, the passport NGUYEN, KHOA QUOC
+        rec, _ = self.run_agent(c)
+        self.assertIn(rec["decision"], ("verified", "screening"), rec["reasons"])
+        alert, wc = fcc._linked(c)
+        self.assertEqual(wc["primary_name"], c["client"]["legal_name"])    # confirmed on the ID's spelling: the subject follows
+        # as one confirmed before that stored it: the subject still at intake
+        wc["primary_name"] = alert["screening_info"]["name"] = "KEVIN NGUYEN"
+        for r in (wc, alert["screening_info"]):
+            r.pop("intake_name")
+        for kind, r in (("kyc", c), ("alert", alert), ("wc", wc)):
+            StateStore.save(kind, r)
+        fcc._load_seed()
+        alert, wc = fcc._linked(fcc.KYC_BY_ID[c["id"]])
+        self.assertEqual((wc["primary_name"], wc["intake_name"]), (c["client"]["legal_name"], "KEVIN NGUYEN"))
+        self.assertEqual(alert["screening_info"]["name"], c["client"]["legal_name"])
+        self.assertEqual(wc["audit"][-1]["at"], c["screening"]["rows"][-1]["screen_time"])   # dated by the screening on the name
 
     def test_a_married_surname_on_the_form_and_a_po_box_are_corrected(self):
         self.assert_corrected(self.free("KYC-2026-3033"), "legal_name", "NHUNG VU", "PHAN BICH NHUNG",
