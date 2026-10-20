@@ -342,9 +342,6 @@ def _load_seed():
         replaced = _sync_wc_places()
         if replaced:
             app.logger.info("%d stored watchlist record(s) list every place the file gives now.", replaced)
-        renamed = _sync_screened_names()
-        if renamed:
-            app.logger.info("%d stored case(s) name their screening subject as the screening at Data Confirming did now.", renamed)
 
 
 def _sync_sex():
@@ -387,22 +384,6 @@ def _sync_wc_places():
                 changed += m.get("country") != country
                 m["country"] = country
                 m["key_data"].update(location=locations[0], locations=locations)
-    return changed
-
-
-def _sync_screened_names():
-    """A case confirmed before its screening and watchlist cases took the
-    confirmed name (workflow.sync_screened_name) still names its subject as
-    at intake. Bring them in line, dated by the screening that ran on the
-    name: no one edits a screening subject's name, so nothing a person set is
-    overwritten. Returns how many cases changed."""
-    changed = 0
-    for case in KYC_CASES:
-        rows = case["screening"].get("rows") or []
-        if not rows or rows[-1].get("screen_time") == rows[0].get("screen_time"):
-            continue                    # screened at intake only
-        alert, wc = _linked(case)
-        changed += workflow.sync_screened_name(case, alert, wc, vocab.SYSTEM_USER, rows[-1].get("screen_time", ""))
     return changed
 
 
