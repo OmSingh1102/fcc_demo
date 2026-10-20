@@ -19,7 +19,7 @@
 </div></div>
 
 <div class="card mt-12 pad-0">
-    <table class="tbl dense" id="al-table">
+    <div class="tbl-scroll"><table class="tbl dense" id="al-table">
         <thead><tr><th>When</th><th>Actor</th><th>Record</th><th>Name</th><th>Action</th><th>Detail</th></tr></thead>
         <tbody>
         {% for r in vm.rows %}
@@ -33,7 +33,7 @@
         </tr>
         {% else %}<tr><td colspan="6"><div class="no-data">{{ icon('book') }}No events yet.</div></td></tr>{% endfor %}
         </tbody>
-    </table>
+    </table></div>
     <div class="table-foot"><span>Showing <b id="al-shown">{{ vm.shown }}</b> of {{ vm.total }} events{% if vm.total > vm.shown %} (newest {{ vm.shown }}; download the CSV for all){% endif %}</span></div>
 </div>
 {% endblock %}

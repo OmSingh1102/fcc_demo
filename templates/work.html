@@ -48,7 +48,7 @@
 
 <div class="card pad-0">
     <div class="card-head" style="padding-bottom:10px"><div class="card-title">Cases you hold</div><span class="rowcount">{{ vm.rows|length }} case(s), most urgent first</span></div>
-    <table class="tbl">
+    <div class="tbl-scroll"><table class="tbl">
         <thead><tr><th>Case ID</th><th>Client</th><th>Tenant</th><th>Status</th><th>Pending</th><th>Level</th><th>How it reached you</th><th>Since</th><th>SLA</th><th></th></tr></thead>
         <tbody>
         {% for r in vm.rows %}{% set c = r.case %}
@@ -68,12 +68,12 @@
         <tr><td colspan="10"><div class="no-data">{{ icon('clipboard') }}Nothing in hand. Use Get next case.</div></td></tr>
         {% endfor %}
         </tbody>
-    </table>
+    </table></div>
 </div>
 
 <div class="card mt-12 pad-0">
     <div class="card-head" style="padding-bottom:10px"><div class="card-title">Screening cases you are handling</div></div>
-    <table class="tbl">
+    <div class="tbl-scroll"><table class="tbl">
         <thead><tr><th>Screening case</th><th>Name</th><th>Level</th><th>Status</th><th>Alerts pending</th><th>KYC case SLA</th><th></th></tr></thead>
         <tbody>
         {% for r in vm.screening_rows %}
@@ -90,6 +90,6 @@
         <tr><td colspan="7"><div class="no-data">{{ icon('search') }}No screening case in hand.</div></td></tr>
         {% endfor %}
         </tbody>
-    </table>
+    </table></div>
 </div>
 {% endblock %}

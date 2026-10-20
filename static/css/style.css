@@ -374,17 +374,18 @@ a.kpi:hover { text-decoration: none; border-color: var(--primary); }
 .check { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; cursor: pointer; }
 .check input { width: 14px; height: 14px; accent-color: var(--primary); }
 .radio-row { display: flex; gap: 16px; align-items: center; }
-.range { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px; align-items: center; }
+.range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px; align-items: center; min-width: 0; }
+.range .input { min-width: 0; width: 100%; }
 .range .dash { color: var(--muted-foreground); }
 select.input, .select { appearance: auto; padding-right: 8px; }
 
 /* Filter grid — the 24-field block above the case list. Label to the left of
    each control, three across, exactly as the frames lay it out. */
 .fgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 24px; }
-.fgrid .f { display: grid; grid-template-columns: 128px 1fr; gap: 8px; align-items: center; min-width: 0; }
+.fgrid .f { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 8px; align-items: center; min-width: 0; }
 .fgrid .f label { font-size: 12px; color: var(--muted-foreground); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fgrid .f .input, .fgrid .f .select { height: 28px; font-size: 12px; }
-@media (max-width: 1200px) { .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1500px) { .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }   /* a date range needs ~120px a field */
 @media (max-width: 760px)  { .fgrid { grid-template-columns: 1fr; } }
 /* Multi-select as a details/checkbox list */
 .mselect { position: relative; }
@@ -769,7 +770,7 @@ body.wc-theme a { color: #7cb3ff; }
 .wc-case-head { display: flex; align-items: center; gap: 22px; padding: 10px 0; border-bottom: 1px solid var(--border-strong); margin-top: 8px; flex-wrap: wrap; }
 .wc-case-head .who { display: inline-flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; color: #fff; }
 .wc-case-head .who .nav-ic { width: 18px; height: 18px; color: #9aa0aa; }
-.wc-case-head .kv { display: grid; grid-auto-flow: column; gap: 4px 26px; font-size: 12px; }
+.wc-case-head .kv { display: flex; flex-wrap: wrap; gap: 4px 26px; font-size: 12px; min-width: 0; }
 .wc-case-head .kv .l { color: #9aa0aa; font-size: 11px; display: block; }
 .wc-case-head .kv .v { color: #e6e8ec; display: block; white-space: nowrap; }
 .wc-tabs { display: flex; gap: 4px; margin: 10px 0 0; border-bottom: 1px solid var(--border-strong); }

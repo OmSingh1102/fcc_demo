@@ -39,7 +39,7 @@
 
 <div class="card pad-0">
     <div class="card-head" style="padding-bottom:10px"><div class="card-title">{{ level }} screening cases{% if mine_only %} — mine{% endif %}</div><span class="rowcount">{{ total }} case(s)</span></div>
-    <table class="tbl">
+    <div class="tbl-scroll"><table class="tbl">
         <thead><tr><th>Case ID</th><th>Name</th><th>Level</th><th>Status</th><th>Alerts</th><th>Pending</th><th>Assigned to</th><th>Created Date</th><th>Outcome</th><th></th></tr></thead>
         <tbody>
         {% for r in rows %}
@@ -59,7 +59,7 @@
         <tr><td colspan="10"><div class="no-data">{{ icon('search') }}No data</div></td></tr>
         {% endfor %}
         </tbody>
-    </table>
+    </table></div>
     {% if pages.pages > 1 %}
     <div class="table-foot">
         <span>{{ first }}&ndash;{{ last }} of {{ total }}</span>
