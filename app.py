@@ -205,7 +205,6 @@ _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
               ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"))
-HUB_OWNERS = {"work", "pipeline", "trackers", "audit_log", "ai_screening", "qc_sampling", "routing_console"}
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -223,6 +222,9 @@ def _qc_pending_count():
 
 
 def _side_nav():
+    """The left menu in sections: the cases an analyst works, the screening,
+    the hub SOP 5.2 asks for on top of the as-is screens, the reports; and
+    what is not part of the demo, last."""
     owner = _nav_owner(request.endpoint)
     levels = _levels()
     tenant = _tenant()
@@ -230,24 +232,22 @@ def _side_nav():
     open_l1 = sum(1 for c in KYC_CASES if c["tenant"] == tenant and c["status"] in ("DataConfirming", "DataScreening"))
     open_l2 = sum(1 for c in KYC_CASES if c["tenant"] == tenant and c["status"] == "DataEscalatingL2"
                   and not segregation.hidden_from(c, actor, "L2"))
-    items = [
-        {"label": "Transaction Monitoring", "icon": "activity", "disabled": True},
-        {"label": "Sanctions Screening", "icon": "shield", "has_active": owner == "ns_queue", "children": [
-            {"label": "Name Screening", "icon": "search", "endpoint": "ns_queue", "active": owner == "ns_queue"},
-        ]},
-        {"label": "Due Diligence (KYC/KYB)", "icon": "user-check", "endpoint": "kyc_list", "active": owner == "kyc_list", "count": open_l1},
-    ]
-    if levels & {"L2", "EDD", "QC"}:
-        items.append({"label": "L2 / EDD Queue", "icon": "layers", "endpoint": "queue_l2", "active": owner == "queue_l2", "count": open_l2})
-    items.append({"label": "Analytics", "icon": "bar-chart", "endpoint": "analytics", "active": owner == "analytics"})
-    # The hub — what SOP 5.2 asks for on top of the as-is screens.
-    hub = [
+    cases = [
+        {"label": "Due Diligence", "title": "Due Diligence (KYC/KYB)", "icon": "user-check", "endpoint": "kyc_list",
+         "active": owner == "kyc_list", "count": open_l1},
         {"label": "My Work", "icon": "clipboard", "endpoint": "work", "active": owner == "work",
          "count": routing.load(actor, KYC_CASES) if actor else 0},
+    ]
+    if levels & {"L2", "EDD", "QC"}:
+        cases.append({"label": "L2 / EDD Queue", "icon": "layers", "endpoint": "queue_l2", "active": owner == "queue_l2", "count": open_l2})
+    screening = [
+        {"label": "Name Screening", "icon": "search", "endpoint": "ns_queue", "active": owner == "ns_queue"},
+        {"label": "AI Screening", "icon": "check-circle", "endpoint": "ai_screening_page", "active": owner == "ai_screening"},
+    ]
+    hub = [
         {"label": "Pipeline", "icon": "trending-up", "endpoint": "pipeline", "active": owner == "pipeline"},
         {"label": "Trackers", "icon": "list", "endpoint": "trackers", "active": owner == "trackers"},
         {"label": "Audit Log", "icon": "book", "endpoint": "audit_log", "active": owner == "audit_log"},
-        {"label": "AI Screening", "icon": "check-circle", "endpoint": "ai_screening_page", "active": owner == "ai_screening"},
     ]
     if "QC" in levels:
         hub.append({"label": "QC Sampling", "icon": "shield-check", "endpoint": "qc_sampling", "active": owner == "qc_sampling",
@@ -255,8 +255,14 @@ def _side_nav():
     if levels & {"L2", "QC"}:
         hub.append({"label": "Routing", "icon": "sliders", "endpoint": "routing_console", "active": owner == "routing_console",
                     "count": len(routing.unassigned(tenant, KYC_CASES))})
-    items.append({"label": "Operations Hub", "icon": "briefcase", "has_active": owner in HUB_OWNERS, "children": hub})
-    return items
+    return [
+        {"title": "Cases", "items": cases},
+        {"title": "Screening", "items": screening},
+        {"title": "Operations Hub", "items": hub},
+        {"title": "Insights", "items": [
+            {"label": "Analytics", "icon": "bar-chart", "endpoint": "analytics", "active": owner == "analytics"}]},
+        {"title": "", "items": [{"label": "Transaction Monitoring", "icon": "activity", "disabled": True}]},
+    ]
 
 
 # ─── State ─────────────────────────────────────────────────────────────────────
