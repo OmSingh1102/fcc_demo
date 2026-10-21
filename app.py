@@ -611,7 +611,7 @@ def kyc_list():
     vm = CaseListConsole.compute(KYC_CASES, _tenant(), _actor(), query=read_case_query(request.args))
     return render_template("kyc_list.html", rows=vm["rows"], total=vm["total"], shown=vm["shown"], filters=vm["filters"],
                            query=vm["query"], per_page=vm["per_page"], first=vm["first"], last=vm["last"],
-                           pages=_pager(vm["page"], vm["pages"]), can_upload=CASE_BOOK == "file", outcomes=vm["outcomes"])
+                           pages=_pager(vm["page"], vm["pages"]), can_upload=CASE_BOOK == "file")
 
 
 def _linked(case):

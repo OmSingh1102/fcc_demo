@@ -8,8 +8,6 @@ most of them made a multi-megabyte page that the live refresh re-downloaded
 on every change. The filters keep the semantics the old client-side ones
 had: text boxes match a substring (any case), selects match exactly, dates
 are inclusive ranges, and a row with no date only survives an empty range."""
-from collections import Counter
-
 from fincrime.data import vocab
 from fincrime.engines import ai_agent, sla
 from fincrime.utils.text import display_name
@@ -28,14 +26,8 @@ DATE_FILTERS = (("dob", "dob"), ("created", "created_at"), ("sub", "submitted_at
 INERT = ("regional", "change")          # on the grid, as on the real tool, but not part of this demo
 
 
-# The outcome strip above the list: the AI Agent filter's values, short.
-OUTCOME_LABELS = {"verified": "Handled by AI", "screening": "Alert left for an analyst", "human": "With a person",
-                  "resubmit": "New document asked", "rfi": "Information asked", "not_run": "Not read yet"}
-
-
 def _short(email):
-    """An analyst's display name; a name that is not an e-mail (the AI Agent) as it is."""
-    return (display_name(email) if "@" in email else email) if email else ""
+    return display_name(email) if email else ""
 
 
 def _row(c, analyst_email):
@@ -58,26 +50,7 @@ def _row(c, analyst_email):
         "agent": _agent(c),
         "verdict": _verdict(c),
         "watch": ((c.get("ai_agent") or {}).get("watchlist") or {}).get("finding", ""),
-    } | _agent_line(c)
-
-
-def _agent_line(c):
-    """The row's AI line: the agent's decision in the list's words and one
-    short note on why."""
-    rec = c.get("ai_agent") or {}
-    decision = _agent(c)
-    if decision == "human":
-        note = (rec.get("reasons") or [""])[0]
-    elif decision in ("rfi", "resubmit"):
-        note = rec.get("requested", "")
-    elif decision == "verified":
-        note = "every check passed" + (" · name corrected" if rec.get("name_corrected") else "") \
-            + (" · address updated" if rec.get("address_updated") else "")
-    elif decision == "screening":
-        note = vocab.AI_WATCH_FILTER.get((rec.get("watchlist") or {}).get("finding", ""), "an alert left for an analyst")
-    else:
-        note = ""
-    return {"agent_label": vocab.AI_AGENT_FILTER.get(decision, ""), "agent_note": note}
+    }
 
 
 def _agent(c):
@@ -180,10 +153,7 @@ class CaseListConsole:
         rows_page = shown[(page - 1) * per_page: page * per_page]
         for r in rows_page:                       # the SLA chip is the costly field: page rows only
             r["sla"] = sla.chip(r["case"], now)
-        counted = Counter(r["agent"] for r in rows)
-        outcomes = [(key, OUTCOME_LABELS.get(key, label), counted[key]) for key, label in vocab.AI_AGENT_FILTER.items()
-                    if counted[key]]
         return {"rows": rows_page, "total": len(rows), "shown": len(shown), "page": page, "pages": pages,
                 "per_page": per_page, "first": (page - 1) * per_page + 1 if shown else 0,
                 "last": (page - 1) * per_page + len(rows_page), "query": q, "active": active_filters(q),
-                "filters": filters, "outcomes": outcomes}
+                "filters": filters}
