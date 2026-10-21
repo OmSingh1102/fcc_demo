@@ -908,3 +908,47 @@ body.console table.tbl span.cell-id { color: var(--primary-strong); font-weight:
 body.console .hbar .bar > i, body.console .cap-bar > i { background: linear-gradient(90deg, #ff8a4c, var(--primary)); }
 body.console .cap-bar.over > i { background: var(--danger); }
 body.console .thumb .lab { background: color-mix(in oklch, var(--primary) 90%, transparent); }
+
+/* ── CASE LIST — two-line work rows ──────────────────────────────────────────
+   One row a case: the name large and its ids under it, the stage, the
+   workflow with what the AI did, the people, the SLA. A 3px edge says the
+   workflow (emerald: auto-verified, violet: human-in-the-loop). Above the
+   list, what the AI did across the book, each a one-click filter. */
+.outcome-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.outcome-strip .oc { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border: 1px solid var(--border);
+    border-radius: 999px; background: var(--card); color: var(--muted-foreground); font-size: 12.5px; text-decoration: none; }
+.outcome-strip .oc b { color: var(--foreground); font-weight: 600; }
+.outcome-strip .oc:hover { border-color: var(--primary); color: var(--foreground); text-decoration: none; }
+.outcome-strip .oc.on { background: color-mix(in oklch, var(--primary) 10%, var(--card)); border-color: var(--primary); color: var(--link, var(--primary)); }
+.outcome-strip .oc.on b { color: var(--link, var(--primary)); }
+.outcome-strip .oc::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); }
+.outcome-strip .oc-verified::before { background: #10b981; }
+.outcome-strip .oc-screening::before { background: #3b82f6; }
+.outcome-strip .oc-human::before { background: #8b5cf6; }
+.outcome-strip .oc-rfi::before, .outcome-strip .oc-resubmit::before { background: #64748b; }
+.outcome-strip .oc-not_run::before { background: #f59e0b; }
+table.tbl.worklist { table-layout: fixed; width: 100%; }
+table.tbl.worklist th.c-check { width: 40px; }
+table.tbl.worklist th.c-who { width: 31%; }
+table.tbl.worklist th.c-status { width: 36%; }
+table.tbl.worklist th.c-people { width: 14%; }
+table.tbl.worklist th.c-sla { width: 11%; }
+table.tbl.worklist th.c-open { width: 52px; }
+table.tbl.worklist td { padding: 10px 12px; vertical-align: middle; line-height: 1.35; overflow-wrap: anywhere; }
+table.tbl.worklist td > div + div { margin-top: 4px; }
+table.tbl.worklist tbody tr td:first-child { box-shadow: inset 3px 0 0 var(--border-strong); }
+table.tbl.worklist tbody tr.wl-auto-verified td:first-child { box-shadow: inset 3px 0 0 #10b981; }
+table.tbl.worklist tbody tr.wl-human-in-the-loop td:first-child { box-shadow: inset 3px 0 0 #8b5cf6; }
+table.tbl.worklist tbody tr:hover td { background: color-mix(in oklch, var(--primary) 4%, var(--card)); }
+.worklist .wl-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--foreground); }
+.worklist .wl-name a { color: var(--foreground); text-decoration: none; }
+.worklist .wl-name a:hover { color: var(--link, var(--primary)); text-decoration: underline; }
+.worklist .wl-sub { font-family: ui-monospace, 'Consolas', monospace; font-size: 11.5px; color: var(--muted-foreground); }
+.worklist .wl-sub > span { white-space: nowrap; }       /* a long line breaks between its parts, never inside one */
+.worklist .wl-sub .cell-id { font-size: inherit; }
+.worklist .wl-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.worklist .wl-pending { font-size: 11.5px; color: var(--muted-foreground); }
+.worklist .wl-note { max-width: 100%; font-size: 12px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.worklist .wl-note b { color: var(--foreground); font-weight: 600; }
+.worklist .wl-open { text-align: right; white-space: nowrap; }
+.worklist .wl-open .btn svg { width: 12px; height: 12px; }

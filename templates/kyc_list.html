@@ -35,47 +35,50 @@
     </div>
 </form>
 
+{# What the AI did across the whole book: one click filters the list to it. #}
+{% if outcomes %}
+<div class="outcome-strip" id="outcome-strip">
+    <a class="oc{% if not query.agent %} on{% endif %}" href="{{ url_for('kyc_list') }}">All cases <b>{{ total }}</b></a>
+    {% for key, label, n in outcomes %}
+    <a class="oc oc-{{ key }}{% if query.agent == key %} on{% endif %}" href="{{ url_for('kyc_list', agent=key) }}">{{ label }} <b>{{ n }}</b></a>
+    {% endfor %}
+</div>
+{% endif %}
+
 <div class="card mt-12 pad-0">
     <div class="tbl-scroll">
-        <table class="tbl" id="case-table">
+        <table class="tbl worklist" id="case-table">
             <thead>
             <tr>
-                <th style="width:28px"><input type="checkbox" id="check-all" onclick="checkAll(this)" aria-label="Select every case on this page"></th>
-                <th>Case ID</th>
-                <th>Client ID</th>
-                <th>Client Name</th>
-                <th>Date Of Birth</th>
-                <th>Status</th>
-                <th>Pending Reason</th>
-                <th>Workflow</th>
-                <th>Tag</th>
-                <th>Previous Reviewer</th>
-                <th>Current Reviewer</th>
-                <th>Vendor</th>
-                <th>SLA</th>
-                <th>Details</th>
+                <th class="c-check"><input type="checkbox" id="check-all" onclick="checkAll(this)" aria-label="Select every case on this page"></th>
+                <th class="c-who">Customer</th>
+                <th class="c-status">Status &amp; AI</th>
+                <th class="c-people">Reviewer</th>
+                <th class="c-sla">SLA</th>
+                <th class="c-open"></th>
             </tr>
             </thead>
             <tbody>
             {% for r in rows %}
-            <tr data-case-id="{{ r.id }}" data-status="{{ r.status }}" data-workflow="{{ r.workflow }}">
+            <tr data-case-id="{{ r.id }}" data-status="{{ r.status }}" data-workflow="{{ r.workflow }}" class="wl-{{ r.workflow or 'none' }}">
                 <td><input type="checkbox" class="row-check" value="{{ r.id }}" aria-label="Select {{ r.id }}"></td>
-                <td class="nowrap"><span class="cell-id">{{ r.id }}</span> {% for t in r.tags %}{{ tag_chip(t) }}{% endfor %}{% if r.watch == 'likely_match' %} <span class="tag rose" title="The AI Agent: the documents match an open World-Check record">Likely match</span>{% endif %}</td>
-                <td class="cell-id">{{ r.client_id }}</td>
-                <td class="nowrap strong">{{ r.name }}</td>
-                <td class="nowrap">{{ r.dob or '-' }}</td>
-                <td>{{ status_badge(r.status) }}</td>
-                <td>{{ r.pending_reason or '-' }}</td>
-                <td class="nowrap">{% if r.workflow %}{{ workflow_badge(r.workflow) }}{% else %}-{% endif %}</td>
-                <td>{% if r.tags %}{{ r.tags|join(', ') }}{% else %}-{% endif %}</td>
-                <td class="nowrap">{{ r.previous_reviewer or '-' }}</td>
-                <td class="nowrap">{% if r.mine %}<b>{{ r.current_reviewer }}</b>{% else %}{{ r.current_reviewer or '-' }}{% endif %}</td>
-                <td>{{ r.vendor or '-' }}</td>
+                <td class="wl-who">
+                    <div class="wl-name"><a href="{{ url_for('kyc_detail', case_id=r.id) }}">{{ r.name }}</a>{% for t in r.tags %} {{ tag_chip(t) }}{% endfor %}{% if r.watch == 'likely_match' %} <span class="tag rose" title="The AI Agent: the documents match an open World-Check record">Likely match</span>{% endif %}</div>
+                    <div class="wl-sub"><span class="cell-id">{{ r.id }}</span> <span>· {{ r.client_id }}</span>{% if r.dob %} <span>· b. {{ r.dob }}</span>{% endif %}</div>
+                </td>
+                <td class="wl-ai">
+                    <div class="wl-badges">{{ status_badge(r.status) }}{% if r.workflow %} {{ workflow_badge(r.workflow) }}{% endif %}{% if r.pending_reason %} <span class="wl-pending">{{ r.pending_reason }}</span>{% endif %}</div>
+                    {% if r.agent_label %}<div class="wl-note" title="{{ r.agent_label }}{% if r.agent_note %} — {{ r.agent_note }}{% endif %}"><b>AI:</b> {{ r.agent_label }}{% if r.agent_note %} — {{ r.agent_note }}{% endif %}</div>{% endif %}
+                </td>
+                <td class="wl-people">
+                    <div>{% if r.mine %}<b>{{ r.current_reviewer }}</b>{% else %}{{ r.current_reviewer or '-' }}{% endif %}</div>
+                    <div class="wl-sub">{% if r.previous_reviewer %}<span>prev: {{ r.previous_reviewer }}</span> {% endif %}{% if r.vendor %}<span>{% if r.previous_reviewer %}· {% endif %}{{ r.vendor }}</span>{% endif %}</div>
+                </td>
                 <td>{{ sla_chip(r.sla) }}</td>
-                <td><a class="btn btn-outline btn-xs" href="{{ url_for('kyc_detail', case_id=r.id) }}">Details</a></td>
+                <td class="wl-open"><a class="btn btn-outline btn-xs" href="{{ url_for('kyc_detail', case_id=r.id) }}" title="Open the case" aria-label="Open {{ r.id }}">{{ icon('chevron-right') }}</a></td>
             </tr>
             {% else %}
-            <tr><td colspan="14"><div class="no-data">{{ icon('search') }}No case matches these filters</div></td></tr>
+            <tr><td colspan="6"><div class="no-data">{{ icon('search') }}No case matches these filters</div></td></tr>
             {% endfor %}
             </tbody>
         </table>
