@@ -6,8 +6,6 @@
 {% block content %}
 <div class="tabs chips">
     <span class="tab chip active">Case List</span>
-    <span class="tab chip" title="Not part of this demo">Recheck List</span>
-    <span class="tab chip" title="Not part of this demo">Appeal List</span>
     <button type="button" class="filters-toggle" id="filters-toggle" onclick="toggleFilters()" aria-expanded="true" aria-controls="filters-grid" title="Hide the filters">{{ icon('chevron-up') }} Filters</button>
     {% if can_upload %}<a class="btn btn-primary btn-sm" id="upload-cases" href="{{ url_for('kyc_upload') }}" style="margin-left:8px">{{ icon('upload') }} Upload cases</a>{% endif %}
 </div>
@@ -24,11 +22,9 @@
             <span class="rowcount" id="rowcount">{% if shown != total %}{{ shown }} of {{ total }} match{% endif %}</span>
             <span class="small muted hidden" id="filters-summary"></span>
             <div class="right">
-                <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Download (not part of this demo)">{{ icon('download') }}</button>
                 <a class="btn btn-outline btn-sm" href="{{ url_for('kyc_list') }}">Clear</a>
-                <button type="button" class="btn btn-outline btn-sm" title="Bulk assign — select rows first" onclick="bulkAssign()">Assign</button>
+                {% if can_assign %}<button type="button" class="btn btn-outline btn-sm" title="Bulk assign — select rows first" onclick="bulkAssign()">Assign</button>{% endif %}
                 <button type="submit" class="btn btn-primary btn-sm">Search</button>
-                <button type="button" class="btn btn-outline btn-sm" title="Not part of this demo">Tag {{ icon('chevron-down') }}</button>
                 <button type="button" class="btn {{ 'btn-primary' if query.priority else 'btn-outline' }} btn-sm" onclick="priorityOnly()" id="prio-btn">Priority Review</button>
             </div>
         </div>
@@ -40,7 +36,7 @@
         <table class="tbl" id="case-table">
             <thead>
             <tr>
-                <th style="width:28px"><input type="checkbox" id="check-all" onclick="checkAll(this)" aria-label="Select every case on this page"></th>
+                {% if can_assign %}<th style="width:28px"><input type="checkbox" id="check-all" onclick="checkAll(this)" aria-label="Select every case on this page"></th>{% endif %}
                 <th>Case ID</th>
                 <th>Client ID</th>
                 <th>Client Name</th>
@@ -59,7 +55,7 @@
             <tbody>
             {% for r in rows %}
             <tr data-case-id="{{ r.id }}" data-status="{{ r.status }}" data-workflow="{{ r.workflow }}">
-                <td><input type="checkbox" class="row-check" value="{{ r.id }}" aria-label="Select {{ r.id }}"></td>
+                {% if can_assign %}<td><input type="checkbox" class="row-check" value="{{ r.id }}" aria-label="Select {{ r.id }}"></td>{% endif %}
                 <td class="nowrap"><span class="cell-id">{{ r.id }}</span> {% for t in r.tags %}{{ tag_chip(t) }}{% endfor %}{% if r.watch == 'likely_match' %} <span class="tag rose" title="The AI Agent: the documents match an open World-Check record">Likely match</span>{% endif %}</td>
                 <td class="cell-id">{{ r.client_id }}</td>
                 <td class="nowrap strong">{{ r.name }}</td>
@@ -75,7 +71,7 @@
                 <td><a class="btn btn-outline btn-xs" href="{{ url_for('kyc_detail', case_id=r.id) }}">Details</a></td>
             </tr>
             {% else %}
-            <tr><td colspan="14"><div class="no-data">{{ icon('search') }}No case matches these filters</div></td></tr>
+            <tr><td colspan="{{ 14 if can_assign else 13 }}"><div class="no-data">{{ icon('search') }}No case matches these filters</div></td></tr>
             {% endfor %}
             </tbody>
         </table>
@@ -87,6 +83,7 @@
     </div>
 </div>
 
+{% if can_assign %}
 {% from "_modals.html" import modal_open, modal_close %}
 {{ modal_open('bulk-assign', 'Assign selected cases', 'sm') }}
 <form method="post" action="{{ url_for('kyc_bulk_assign') }}" id="bulk-form">
@@ -103,6 +100,7 @@
         <button type="submit" class="btn btn-primary btn-sm">Assign</button></div>
 </form>
 {{ modal_close() }}
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
@@ -134,8 +132,8 @@
         p.value = p.value === '1' ? '' : '1';
         form.submit();
     };
-    window.checkAll = function (box) {
-        rows.forEach(function (r) { r.querySelector('.row-check').checked = box.checked; });
+    window.checkAll = function (box) {          // the checkboxes and Assign are there for L2 and QC only
+        rows.forEach(function (r) { var c = r.querySelector('.row-check'); if (c) { c.checked = box.checked; } });
     };
     window.bulkAssign = function () {
         var ids = Array.prototype.slice.call(document.querySelectorAll('.row-check:checked')).map(function (c) { return c.value; });

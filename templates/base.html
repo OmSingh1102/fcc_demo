@@ -20,6 +20,7 @@
                 <span class="brand-sep"></span>
                 <span class="brand-name">Compliance</span>
             </a>
+            {% if analyst_tenants|length > 1 %}
             <form method="post" action="{{ url_for('set_tenant') }}" class="tenant-form">
                 <input type="hidden" name="next" value="{{ request.path }}">
                 <select name="tenant" class="input input-sm" onchange="this.form.submit()" aria-label="Tenant">
@@ -28,13 +29,12 @@
                     {% endfor %}
                 </select>
             </form>
+            {% elif tenant %}
+            <span class="tenant-name" title="Your tenant">{{ tenants[tenant].label }}</span>
+            {% endif %}
             <nav class="top-tabs">
                 {% for tab in top_tabs %}
-                {% if tab.endpoint %}
                 <a class="top-tab {% if tab.active %}active{% endif %}" href="{{ url_for(tab.endpoint) }}">{{ tab.label }}</a>
-                {% else %}
-                <span class="top-tab inert" title="Not part of this demo">{{ tab.label }}</span>
-                {% endif %}
                 {% endfor %}
             </nav>
             <div class="topbar-right">
@@ -54,7 +54,6 @@
                     </select>
                 </form>
                 {% endif %}
-                <span class="tb-link">{{ region }} {{ icon('chevron-down') }}</span>
                 <span class="user-chip"><span class="av">{{ user_initials }}</span><span class="nm">{{ session.name }}</span><span class="rl">{{ role_label }}</span></span>
                 <form method="post" action="{{ url_for('logout') }}" class="logout-form">
                     <button type="submit" class="btn btn-ghost btn-sm btn-icon" title="Sign out" aria-label="Sign out">{{ icon('log-out') }}</button>
@@ -68,19 +67,13 @@
         <aside class="app-side" id="app-side">
             <nav class="app-nav">
                 {% for sec in side_nav %}
-                <div class="side-sec{% if not sec.title %} side-sec-end{% endif %}">
-                    {% if sec.title %}<div class="side-sec-title">{{ sec.title }}</div>{% endif %}
+                <div class="side-sec">
+                    <div class="side-sec-title">{{ sec.title }}</div>
                     {% for item in sec['items'] %}
-                    {% if item.disabled %}
-                    <span class="side-link disabled" title="{{ item.label }} — not part of this demo">
-                        <span class="si">{{ icon(item.icon) }}</span><span class="lbl">{{ item.label }}</span>
-                    </span>
-                    {% else %}
                     <a href="{{ url_for(item.endpoint) }}" class="side-link {% if item.active %}active{% endif %}" title="{{ item.title or item.label }}"{% if item.active %} aria-current="page"{% endif %}>
                         <span class="si">{{ icon(item.icon) }}</span><span class="lbl">{{ item.label }}</span>
                         {% if item.count %}<span class="count">{{ item.count }}</span>{% endif %}
                     </a>
-                    {% endif %}
                     {% endfor %}
                 </div>
                 {% endfor %}

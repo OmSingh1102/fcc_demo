@@ -39,8 +39,6 @@
     <div class="f"><label for="f-gifter">Customer tier</label>
         <select class="input" id="f-gifter" name="gifter"><option value="">Select</option>{% for t in vocab.TAGS if t.startswith('Tier') %}{{ opt(t, q.gifter) }}{% endfor %}</select></div>
 
-    <div class="f"><label for="f-regional">Regional customer</label>
-        <select class="input" id="f-regional" name="regional"><option value="">Select</option>{{ opt('Yes', q.regional) }}{{ opt('No', q.regional) }}</select></div>
     <div class="f"><label for="f-nat">Nationality</label>
         <select class="input" id="f-nat" name="nat"><option value="">Select</option>{% for n in filters.issuing %}{{ opt(n, q.nat) }}{% endfor %}</select></div>
     <div class="f"><label for="f-issuing">ID issuing place</label>
@@ -61,8 +59,6 @@
 
     <div class="f"><label for="f-mrr">Manual Review Reason</label>
         <select class="input" id="f-mrr" name="mrr"><option value="">Select</option>{% for m in filters.mrr %}{{ opt(m, q.mrr) }}{% endfor %}</select></div>
-    <div class="f"><label for="f-change">Status Change</label>
-        <select class="input" id="f-change" name="change"><option value="">Select</option>{{ opt('Last 24 hours', q.change) }}{{ opt('Last 7 days', q.change) }}</select></div>
     <div class="f"><label for="f-qcrev">QC Reviewer</label>
         <select class="input" id="f-qcrev" name="qcrev"><option value="">Select</option>{% for r in filters.reviewers %}{{ opt(r, q.qcrev) }}{% endfor %}</select></div>
 

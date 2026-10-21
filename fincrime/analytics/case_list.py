@@ -23,7 +23,6 @@ EXACT_FILTERS = (("reviewer", "current_reviewer"), ("prev", "previous_reviewer")
                  ("qcrev", "qc_reviewer"), ("qcresult", "qc_result"), ("workflow", "workflow"), ("agent", "agent"),
                  ("verdict", "verdict"), ("watch", "watch"))
 DATE_FILTERS = (("dob", "dob"), ("created", "created_at"), ("sub", "submitted_at"))
-INERT = ("regional", "change")          # on the grid, as on the real tool, but not part of this demo
 
 
 def _short(email):
@@ -75,7 +74,7 @@ def read_query(args):
     q = {key: one(key) for key, _ in TEXT_FILTERS + EXACT_FILTERS}
     for key, _ in DATE_FILTERS:
         q[f"{key}_from"], q[f"{key}_to"] = one(f"{key}_from"), one(f"{key}_to")
-    for key in INERT + ("tags", "mrr"):
+    for key in ("tags", "mrr"):
         q[key] = one(key)
     q["status"] = [s for s in (args.getlist("status") if hasattr(args, "getlist") else []) if s in vocab.STATUSES]
     q["priority"] = one("priority") == "1"
@@ -117,7 +116,7 @@ def matches(row, q):
 
 def active_filters(q):
     """How many filter controls hold a value (the fold summary's count)."""
-    keys = [k for k, _ in TEXT_FILTERS + EXACT_FILTERS] + list(INERT) + ["tags", "mrr"]
+    keys = [k for k, _ in TEXT_FILTERS + EXACT_FILTERS] + ["tags", "mrr"]
     keys += [f"{k}_{end}" for k, _ in DATE_FILTERS for end in ("from", "to")]
     return sum(1 for k in keys if q[k]) + len(q["status"])
 

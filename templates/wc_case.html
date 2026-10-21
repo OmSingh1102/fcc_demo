@@ -7,9 +7,6 @@
     <a class="wc-back" href="{{ back_url }}">{{ icon('chevron-left') }} Back to Case Manager</a>
     <div class="wc-toolbar">
         <form method="post" action="{{ url_for('wc_export', wc_case_id=wc.id) }}" style="margin:0"><button type="submit" class="btn">{{ icon('download') }} Export</button></form>
-        <button type="button" class="btn" title="Not part of this demo">{{ icon('refresh-cw') }} Screen</button>
-        <button type="button" class="btn" title="Not part of this demo">{{ icon('link') }} Link cases</button>
-        <button type="button" class="btn" title="Not part of this demo">{{ icon('file-text') }} Notes</button>
         <a class="btn" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='audit') }}">{{ icon('activity') }} Activity</a>
     </div>
 </div>
@@ -29,8 +26,6 @@
 <div class="wc-tabs">
     <a class="wc-tab {% if tab == 'summary' %}active{% endif %}" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='summary') }}">{{ icon('list') }} Summary</a>
     <a class="wc-tab {% if tab == 'worldcheck' %}active{% endif %}" href="{{ url_for('wc_case', wc_case_id=wc.id) }}">{{ icon('globe') }} World-Check {% if facets.status.Unresolved %}<span class="n">{{ facets.status.Unresolved }}</span>{% endif %}</a>
-    <a class="wc-tab {% if tab == 'watchlist' %}active{% endif %}" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='watchlist') }}">{{ icon('shield') }} Watchlist</a>
-    <a class="wc-tab {% if tab == 'linked' %}active{% endif %}" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='linked') }}">{{ icon('link') }} Linked cases</a>
     <a class="wc-tab {% if tab == 'audit' %}active{% endif %}" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='audit') }}">{{ icon('clipboard') }} Audit</a>
 </div>
 
@@ -51,16 +46,11 @@
         <a href="{{ url_for('wc_case', wc_case_id=wc.id, status=(s if status != s else ''), type=mtype) }}" class="{% if status == s %}on{% endif %} {% if s == 'Unresolved' and facets.status[s] %}unresolved{% elif s == 'False positive' and facets.status[s] %}fp{% endif %}">
             <span>{{ s|upper if s == 'Unresolved' else s }}</span><span>({{ facets.status[s] }})</span></a>
         {% endfor %}
-        <div class="facet"><span>Entity Type</span>{{ icon('chevron-down') }}</div>
+        <div class="facet"><span>Entity Type</span></div>
         <div class="tiny" style="padding:0 6px 4px 18px;color:#cbd5e1">{{ 'ENTITY' if wc.gender == '' else 'INDIVIDUAL' }} <span class="muted">({{ wc.matches|length }})</span></div>
-        <div class="facet"><span>Matched Name Type</span>{{ icon('chevron-right') }}</div>
-        <div class="facet"><span>Match Strength</span>{{ icon('chevron-right') }}</div>
-        <div class="facet"><span>Type</span>{{ icon('chevron-down') }}</div>
+        <div class="facet"><span>Type</span></div>
         {% for t, n in facets.type.items() %}
         <a href="{{ url_for('wc_case', wc_case_id=wc.id, status=status, type=(t if mtype != t else '')) }}" class="{% if mtype == t %}on{% endif %}" style="padding-left:18px"><span>{{ t }}</span><span>({{ n }})</span></a>
-        {% endfor %}
-        {% for f in ['Gender', 'Date(s) of Birth', 'Identification', 'Place of Birth', 'Citizenship', 'Country Location', 'Category', 'PEP Status', 'PEP Inactivity Period', 'Keywords', 'Special Interest Categories'] %}
-        <div class="facet"><span>{{ f }}</span>{{ icon('chevron-right') }}</div>
         {% endfor %}
         <a href="{{ url_for('wc_case', wc_case_id=wc.id) }}" class="btn btn-sm" style="margin-top:8px;height:24px;font-size:11px;background:#2a2e37;border:1px solid #3a3f4a;color:#e6e8ec">Reset Filters</a>
     </aside>
@@ -68,19 +58,18 @@
     <section class="wc-panel" style="padding:0;overflow:hidden">
         <div class="row between" style="padding:8px 10px;border-bottom:1px solid var(--border)">
             <span class="small">Showing <b>{{ page.start }}–{{ page.end }}</b> of <b>{{ page.total }}</b> matches for <b>{{ wc.primary_name }}</b></span>
-            <span class="row"><span class="wc-subtab active" style="cursor:default">Resolution</span><span class="wc-subtab dis">Review</span></span>
+            <span class="row"><span class="wc-subtab active" style="cursor:default">Resolution</span></span>
         </div>
         <div class="tbl-scroll">
             <table class="tbl dense">
                 <thead><tr>
-                    <th style="width:26px"><input type="checkbox" disabled></th><th>Name</th><th>Matched Alias</th><th>Match Strength</th><th>Type</th><th>Gender</th><th>Date(s) of Birth</th><th>Place of Birth</th><th>Citizenship</th><th>Country Location</th>
+                    <th>Name</th><th>Matched Alias</th><th>Match Strength</th><th>Type</th><th>Gender</th><th>Date(s) of Birth</th><th>Place of Birth</th><th>Citizenship</th><th>Country Location</th>
                     <th>World-Check ID</th><th>Entered Date</th><th>Updated Date</th><th>Matched Date</th><th>Last Alert Date</th><th>Last Resolved/ Reviewed On</th><th>Last Resolved/ Reviewed By</th><th>Risk Level</th><th></th>
                 </tr></thead>
                 <tbody>
                 {% for m in page['items'] %}
                 {% set r = m.resolution %}
                 <tr>
-                    <td><input type="checkbox" disabled></td>
                     <td class="nowrap"><a href="{{ url_for('wc_match', wc_case_id=wc.id, match_id=m.id, status=status, type=mtype) }}">{{ m.name }}</a></td>
                     <td class="nowrap">{{ m.matched_alias }}</td>
                     <td>{{ strength_bar(m.strength) }}</td>
@@ -101,7 +90,7 @@
                     <td>{% if r.remark %}<span title="Resolution Remark: {{ r.remark }}" style="cursor:help">{{ icon('file-text') }}</span>{% endif %}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="19"><div class="no-data">{{ icon('search') }}No matches for this filter.</div></td></tr>
+                <tr><td colspan="18"><div class="no-data">{{ icon('search') }}No matches for this filter.</div></td></tr>
                 {% endfor %}
                 </tbody>
             </table>

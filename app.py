@@ -196,7 +196,6 @@ def _tenant() -> str:
 # ─── Nav tables ────────────────────────────────────────────────────────────────
 TOP_TABS = [
     {"label": "Case Management", "endpoint": "kyc_list"},
-    {"label": "Monitoring"}, {"label": "Reports"}, {"label": "Administration"},
 ]
 
 # Which side-nav entry a page belongs to, by endpoint prefix. Order matters:
@@ -223,8 +222,7 @@ def _qc_pending_count():
 
 def _side_nav():
     """The left menu in sections: the cases an analyst works, the screening,
-    the hub SOP 5.2 asks for on top of the as-is screens, the reports; and
-    what is not part of the demo, last."""
+    the hub SOP 5.2 asks for on top of the as-is screens, the reports."""
     owner = _nav_owner(request.endpoint)
     levels = _levels()
     tenant = _tenant()
@@ -261,7 +259,6 @@ def _side_nav():
         {"title": "Operations Hub", "items": hub},
         {"title": "Insights", "items": [
             {"label": "Analytics", "icon": "bar-chart", "endpoint": "analytics", "active": owner == "analytics"}]},
-        {"title": "", "items": [{"label": "Transaction Monitoring", "icon": "activity", "disabled": True}]},
     ]
 
 
@@ -503,7 +500,6 @@ def _inject_nav():
         "side_nav": _side_nav() if signed_in else [],
         "role_label": " / ".join(a.get("roles", [])),
         "user_initials": initials(a.get("name", "")),
-        "region": "Global",
         "home_url": url_for("kyc_list") if signed_in else url_for("portal"),
         "demo_mode": DEMO_MODE,
         "switch_users": ANALYSTS if (DEMO_MODE and signed_in) else [],
@@ -617,7 +613,8 @@ def kyc_list():
     vm = CaseListConsole.compute(KYC_CASES, _tenant(), _actor(), query=read_case_query(request.args))
     return render_template("kyc_list.html", rows=vm["rows"], total=vm["total"], shown=vm["shown"], filters=vm["filters"],
                            query=vm["query"], per_page=vm["per_page"], first=vm["first"], last=vm["last"],
-                           pages=_pager(vm["page"], vm["pages"]), can_upload=CASE_BOOK == "file")
+                           pages=_pager(vm["page"], vm["pages"]), can_upload=CASE_BOOK == "file",
+                           can_assign=bool(_levels() & {"L2", "QC"}))      # kyc_bulk_assign's roles
 
 
 def _linked(case):

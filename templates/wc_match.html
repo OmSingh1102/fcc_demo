@@ -29,8 +29,6 @@
 <div class="wc-tabs">
     <a class="wc-tab" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='summary') }}">{{ icon('list') }} Summary</a>
     <a class="wc-tab active" href="{{ url_for('wc_case', wc_case_id=wc.id) }}">{{ icon('globe') }} World-Check {% if unresolved %}<span class="n">{{ unresolved }}</span>{% endif %}</a>
-    <a class="wc-tab" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='watchlist') }}">{{ icon('shield') }} Watchlist</a>
-    <a class="wc-tab" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='linked') }}">{{ icon('link') }} Linked cases</a>
     <a class="wc-tab" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='audit') }}">{{ icon('clipboard') }} Audit</a>
 </div>
 
@@ -72,7 +70,7 @@
                 </div>
             </div>
             <div class="wc-panel">
-                <div class="row" style="margin-bottom:8px"><span class="wc-subtab active" style="cursor:default">Resolution</span><span class="wc-subtab dis">Review</span></div>
+                <div class="row" style="margin-bottom:8px"><span class="wc-subtab active" style="cursor:default">Resolution</span></div>
                 <form method="post" action="{{ url_for('wc_resolve', wc_case_id=wc.id, match_id=m.id) }}">
                     <input type="hidden" name="status_filter" value="{{ status }}"><input type="hidden" name="type_filter" value="{{ mtype }}">
                     <div class="opts">
@@ -104,11 +102,10 @@
             {% for name, label in [('key', 'Key data'), ('further', 'Further information'), ('aliases', 'Aliases'), ('keywords', 'Keywords'), ('pep', 'PEP role details'), ('connections', 'Connections / relationships'), ('sources', 'Sources')] %}
             <span class="wc-subtab {% if loop.first %}active{% endif %}" data-pane="{{ name }}" onclick="wcTab('{{ name }}')">{{ label }}</span>
             {% endfor %}
-            <span class="spacer"></span><span class="small muted" style="align-self:center">Try New Record View <span class="badge slate">OFF</span></span>
         </div>
 
         <div class="wc-pane show" data-pane="key">
-            <div class="row between mb-8"><span class="small strong">KEY DATA {{ type_badges(m.types) }}</span><span class="small muted">Show all Updated Dates <span class="badge slate">off</span> &nbsp; World-Check ID: {{ m.wc_id }}</span></div>
+            <div class="row between mb-8"><span class="small strong">KEY DATA {{ type_badges(m.types) }}</span><span class="small muted">World-Check ID: {{ m.wc_id }}</span></div>
             <table class="wc-compare"><tbody>
                 <tr><td class="k">Name</td><td>{{ m.name }}</td></tr>
                 <tr><td class="k">Record Update</td><td>Update Categorization <span class="badge blue">C6</span><br>Entered Date &nbsp; {{ (m.entered ~ ' 00:00:00')|wc_date }}<br>Updated Date &nbsp; {{ (m.updated ~ ' 00:00:00')|wc_date }}</td></tr>
@@ -126,7 +123,7 @@
             </tbody></table>
         </div>
         <div class="wc-pane" data-pane="further">
-            <div class="row mb-8"><span class="small strong">FURTHER INFORMATION</span><span class="small muted">Language</span><select class="input input-sm" style="width:150px"><option>Original Language</option></select></div>
+            <div class="row mb-8"><span class="small strong">FURTHER INFORMATION</span></div>
             <h4>Biography</h4><p class="small mb-12">{{ fi.biography or '—' }}</p>
             <h4>Identification</h4><p class="small mb-12">{% if fi.identification %}<span class="badge blue">{{ fi.identification }}</span>{% else %}—{% endif %}</p>
             <h4>Reports</h4>{% for d, text in fi.reports %}<p class="small mb-8"><b>{{ d }}:</b> {{ text }}</p>{% else %}<p class="small muted">—</p>{% endfor %}
@@ -137,9 +134,9 @@
         <div class="wc-pane" data-pane="connections"><div class="no-data">No connections or relationships recorded.</div></div>
         <div class="wc-pane" data-pane="sources">
             <div class="row between mb-8"><span class="small strong">SOURCES</span><span class="small muted">World-Check ID: {{ m.wc_id }}</span></div>
-            <table class="wc-compare"><thead><tr><th>Date Added</th><th>Source Links</th><th>Direct Link</th></tr></thead>
-                <tbody>{% for d, u in m.sources %}<tr><td class="k">{{ d }}</td><td><a href="#" onclick="return false" title="Fictional source — does not resolve">{{ u }}</a></td><td>{{ icon('external-link') }}</td></tr>
-                {% else %}<tr><td colspan="3"><div class="no-data">No sources recorded.</div></td></tr>{% endfor %}</tbody></table>
+            <table class="wc-compare"><thead><tr><th>Date Added</th><th>Source</th></tr></thead>
+                <tbody>{% for d, u in m.sources %}<tr><td class="k">{{ d }}</td><td title="Fictional source — the demo's records do not resolve">{{ u }}</td></tr>
+                {% else %}<tr><td colspan="2"><div class="no-data">No sources recorded.</div></td></tr>{% endfor %}</tbody></table>
         </div>
 
         <div class="wc-legal"><b>Legal notice.</b> This console and every record in it are a simulation built for a demonstration. Names, identifiers, biographies, reports and source links are fictional and were generated from the demo's own seed data; none describes a real person, organisation or publication. In a production console the contents of a record are confidential, must be independently verified before any action is taken, and must not be used to draw inferences about a person merely because a record with a similar name exists.</div>

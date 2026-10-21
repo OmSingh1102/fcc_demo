@@ -22,7 +22,6 @@
         {% endif %}
         <a class="small" href="{{ url_for('kyc_detail', case_id=alert.kyc_case_id) }}">{{ icon('arrow-left') }} KYC case</a>
     </div>
-    <a class="btn btn-ghost btn-sm btn-icon" title="Export (not part of this demo)">{{ icon('download') }}</a>
 </div>
 
 {# The AI Agent read the customer's documents: what they say beside the open records. #}
@@ -69,8 +68,7 @@
             <div><span class="l">Watchlist case</span><span class="v"><a href="{{ url_for('wc_case', wc_case_id=alert.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open in World-Check console<span class="ext-ic">{{ icon('external-link') }}</span></a></span></div>
         </div>
         <div class="row mt-12">
-            <div class="input input-sm" style="width:260px;display:inline-flex;align-items:center;justify-content:space-between;background:var(--muted)">
-                <span class="{% if not alert.case_outcome %}muted{% endif %}">{{ alert.case_outcome.value if alert.case_outcome else 'Select Case Outcome' }}</span>{{ icon('chevron-down') }}</div>
+            <span class="small">Case outcome: {% if alert.case_outcome %}<b>{{ alert.case_outcome.value }}</b>{% else %}<span class="muted">none yet</span>{% endif %}</span>
             <button type="button" class="btn btn-primary btn-sm" onclick="openModal('case-outcome')" {% if alert.status != 'Handling' or alert.assigned_to != actor %}disabled title="Handle the case first"{% endif %}>Change Case Outcome</button>
             {% if alert.case_outcome %}<span class="small muted">by {{ alert.case_outcome.by }} at {{ alert.case_outcome.at }}</span>{% endif %}
         </div>
@@ -107,7 +105,7 @@
         </div>
         <button type="button" class="btn btn-primary btn-sm mb-8" onclick="afApply()">Search</button>
         <div class="row mb-8">
-            <div class="input input-sm" style="width:220px;display:inline-flex;align-items:center;justify-content:space-between;background:var(--muted)"><span class="muted" id="sel-outcome">Select Alert Outcome</span>{{ icon('chevron-down') }}</div>
+            <span class="small muted" id="sel-outcome">No alert ticked</span>
             <button type="button" class="btn btn-primary btn-sm" onclick="openAlertOutcome()" {% if alert.status != 'Handling' or alert.assigned_to != actor %}disabled title="Handle the case first"{% endif %}>Change Alert Outcome</button>
             <form method="post" action="{{ url_for('ns_ai_assess', alert_case_id=alert.id) }}" id="ai-form" style="margin:0" onsubmit="return aiAssess(this)">
                 <button type="submit" class="btn btn-outline btn-sm" data-model="{{ ai_model }}" {% if not ai_ready %}disabled title="{{ ai_why }}"{% else %}title="Ask {{ ai_model }} whether the ticked alerts (or every pending one) could be the client — advisory, resolves nothing"{% endif %}>{{ icon('shield-check') }} AI assessment</button>
@@ -127,7 +125,7 @@
                 <tbody>
                 {% for a in alert.alerts %}
                 <tr data-outcome="{{ a.outcome }}" data-mode="{{ a.review_mode }}" data-wl="{{ a.watchlist_id }}" data-type="{{ a.type }}" data-smart="{{ a.smart_strategy }}">
-                    <td><span class="muted">+</span> <input type="checkbox" name="pick" value="{{ a.id }}" aria-label="Tick {{ a.name }}" data-name="{{ a.name }}" data-label="{{ a.result_label }}" data-rationale="{{ a.rationale }}" data-risk="{{ a.risk_level }}" data-match="{{ a.match_id }}" data-ai="{% if a.ai_assessment %}{{ a.ai_assessment.verdict }}, {{ a.ai_assessment.confidence }}% — {{ a.ai_assessment.summary }}{% if a.ai_assessment.missing_data %} Missing: {{ a.ai_assessment.missing_data|join('; ') }}.{% endif %} ({{ a.ai_assessment.model }}){% endif %}" data-ai-outcome="{{ a.ai_assessment.suggested_outcome if a.ai_assessment else '' }}" onchange="afPick()"></td>
+                    <td><input type="checkbox" name="pick" value="{{ a.id }}" aria-label="Tick {{ a.name }}" data-name="{{ a.name }}" data-label="{{ a.result_label }}" data-rationale="{{ a.rationale }}" data-risk="{{ a.risk_level }}" data-match="{{ a.match_id }}" data-ai="{% if a.ai_assessment %}{{ a.ai_assessment.verdict }}, {{ a.ai_assessment.confidence }}% — {{ a.ai_assessment.summary }}{% if a.ai_assessment.missing_data %} Missing: {{ a.ai_assessment.missing_data|join('; ') }}.{% endif %} ({{ a.ai_assessment.model }}){% endif %}" data-ai-outcome="{{ a.ai_assessment.suggested_outcome if a.ai_assessment else '' }}" onchange="afPick()"></td>
                     <td><span class="cell-hex" title="{{ a.id }}">{{ a.id }}</span></td>
                     <td><span class="badge emerald">{{ a.vendor }}</span></td>
                     <td class="mono">{{ a.watchlist_id }}</td>
@@ -227,7 +225,7 @@
     function pickedBoxes() { return boxes().filter(function (b) { return b.checked; }); }
     window.afPick = function () {
         var p = pickedBoxes(), out = document.getElementById('sel-outcome'), shown = shownBoxes(), all = document.getElementById('pick-all');
-        out.textContent = p.length === 0 ? 'Select Alert Outcome' : p.length === 1 ? p[0].dataset.name : p.length + ' alerts selected';
+        out.textContent = p.length === 0 ? 'No alert ticked' : p.length === 1 ? 'Ticked: ' + p[0].dataset.name : p.length + ' alerts ticked';
         out.classList.toggle('muted', p.length === 0);
         all.checked = shown.length > 0 && shown.every(function (b) { return b.checked; });
         all.indeterminate = !all.checked && shown.some(function (b) { return b.checked; });
