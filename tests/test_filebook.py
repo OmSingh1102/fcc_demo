@@ -245,6 +245,9 @@ class AddressTests(unittest.TestCase):
                                                addresses.normalise(apo + ", United States", "US")), "same")
         self.assertNotEqual(addresses.compare(addresses.normalise("Unit 2050 Box 4190, APO AP 96278", "US"),
                                               addresses.normalise("Unit 2050 Box 4191, APO AP 96278", "US")), "same")
+        # the ZIP ends the address, before the country: a five-digit unit or house number is not it
+        self.assertEqual(addresses.normalise("Unit 15324 Box 77, APO AP 96205, United States", "US")["postal5"], "96205")
+        self.assertEqual(addresses.normalise("12345 Main St, Austin, TX 78701, USA", "US")["postal5"], "78701")
 
     def test_a_trailing_country_is_neither_city_nor_street(self):
         a = addresses.normalise("6246 East Palmetto Park Road, Boca Raton, FL 33432, United States", "US")

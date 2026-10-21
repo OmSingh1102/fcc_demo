@@ -168,7 +168,12 @@ def normalise(text, country):
 
     postal, postal5 = "", ""
     if cc == "US":
-        m = re.search(r"\b(\d{5})(?:-(\d{4}))?\s*$", folded_all) or re.search(r"\b(\d{5})(?:-(\d{4}))?\b", folded_all)
+        # the ZIP ends the address, before any country after it: a five-digit
+        # unit or house number earlier on is not it (Unit 15324 Box 77, APO AP 96205, United States)
+        head = list(segments)
+        while len(head) > 1 and fold(head[-1]) in COUNTRY_WORDS:
+            head.pop()
+        m = re.search(r"\b(\d{5})(?:-(\d{4}))?\s*$", fold(", ".join(head))) or re.search(r"\b(\d{5})(?:-(\d{4}))?\b", folded_all)
         if m:
             postal = m.group(0).strip()
             postal5 = m.group(1)

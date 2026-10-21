@@ -329,10 +329,14 @@ def _load_seed():
     redrawn = _redrawn_cases()
     if redrawn:
         app.logger.info("%d stored record(s) were read from an older drawing of their documents, without the proof of "
-                        "address's name, before the agent read every document, or confirmed on a name the checks now "
-                        "refuse; they start again.", len(redrawn))
-    restored = (StateStore.restore("kyc", KYC_BY_ID, skip=redrawn) + StateStore.restore("alert", ALERT_BY_ID, skip=redrawn)
-                + StateStore.restore("wc", WC_BY_ID, skip=redrawn) + StateStore.restore("analyst", ANALYST_BY_KEY)
+                        "address's name, or before the agent read every document; they start again.", len(redrawn))
+    redecided = _redecided_cases(redrawn)
+    skip = set(redrawn)
+    for case_id in redecided:
+        skip.add(case_id)
+        skip.update(r["id"] for r in _linked(KYC_BY_ID[case_id]) if r)
+    restored = (StateStore.restore("kyc", KYC_BY_ID, skip=skip) + StateStore.restore("alert", ALERT_BY_ID, skip=skip)
+                + StateStore.restore("wc", WC_BY_ID, skip=skip) + StateStore.restore("analyst", ANALYST_BY_KEY)
                 + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS}))
     if restored:
         app.logger.info("Restored %d stored record(s) onto the seed.", restored)
@@ -345,6 +349,9 @@ def _load_seed():
         replaced = _sync_wc_places()
         if replaced:
             app.logger.info("%d stored watchlist record(s) list every place the file gives now.", replaced)
+    if redecided:
+        app.logger.info("%d case(s) confirmed on a name or an address the checks now refuse were decided again on "
+                        "their stored read.", _redecide(redecided))
 
 
 def _sync_sex():
@@ -395,21 +402,58 @@ def _redrawn_cases():
     of-address image has been redrawn since they were stored: what was read or decided on them
     was about another picture, so they keep their seeded state and the AI
     Agent reads them again. So do the cases whose stored read lacks the
-    proof of address's name (ai_agent.needs_reread), those confirmed on a
-    name the checks now refuse (ai_agent.confirmed_on_older_names), and
-    those decided before the agent read every document
-    (ai_agent.read_before_all_documents)."""
+    proof of address's name (ai_agent.needs_reread), and those decided
+    before the agent read every document (ai_agent.read_before_all_documents)."""
     out = set()
     for stored in StateStore.records("kyc"):
         case = KYC_BY_ID.get(stored.get("id", ""))
         if case is None or "recon" not in case:
             continue
         if ((stored.get("recon") or {}).get("drawn", "") != case["recon"].get("drawn", "") or ai_agent.needs_reread(stored)
-                or ai_agent.confirmed_on_older_names(stored, case) or ai_agent.read_before_all_documents(stored)):
+                or ai_agent.read_before_all_documents(stored)):
             out.add(case["id"])
             alert, wc = _linked(case)
             out.update(r["id"] for r in (alert, wc) if r)
     return out
+
+
+def _redecided_cases(redrawn):
+    """{KYC id: the agent's stored record} of the cases it confirmed on a name
+    the checks now refuse (ai_agent.confirmed_on_older_names) or with an
+    address it would not write now (ai_agent.address_written_otherwise):
+    they keep their seeded state, and the agent decides them again on the
+    stored read, with no new look at the images. A case read again
+    (`redrawn`) is not decided again."""
+    out = {}
+    for stored in StateStore.records("kyc"):
+        case = KYC_BY_ID.get(stored.get("id", ""))
+        if case is None or "recon" not in case or case["id"] in redrawn:
+            continue
+        if ai_agent.confirmed_on_older_names(stored, case) or ai_agent.address_written_otherwise(stored, case):
+            out[case["id"]] = stored["ai_agent"]
+    return out
+
+
+def _redecide(stored):
+    """Decide again the cases _redecided_cases chose, each on its seed and its
+    stored read, as the worker would have (a case a person holds on the seed
+    stays theirs, as it would for a read again); save them. Returns how many."""
+    done = 0
+    for case_id, record in stored.items():
+        case = KYC_BY_ID[case_id]
+        if not ai_agent.eligible(case):
+            continue
+        reviewer = case.get("current_reviewer", "")
+        alert, wc = _linked(case)
+        ai_agent.redecide(case, alert, wc, record)
+        if reviewer and case["status"] == "Verified":
+            workflow.worklog.close_entry(case, "Verified by the AI Agent", email=reviewer)
+        _save("kyc", case)
+        if alert:
+            _save("alert", alert)
+            _save("wc", wc)
+        done += 1
+    return done
 
 
 def _add_uploaded(rows):

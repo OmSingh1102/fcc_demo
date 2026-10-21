@@ -40,13 +40,16 @@ first request. Claude (`claude-opus-4-8` through Straive's LLM Foundry,
 to PNG with resvg: the passport's data page and back page, the secondary ID
 and the proof of address. Fixed checks, not the model, compare that read
 with the case: readable, name (the file book's name rules: nicknames, word
-order, initials, a garbled CRM encoding), date of birth, nationality, ID
+order, initials, a garbled CRM encoding; not the English first name a
+naturalised citizen goes by, which only a naturalisation certificate links
+to the passport's), date of birth, nationality, ID
 number, expiry, the vendor's result, an endorsement on the passport's back
 page, the secondary ID (readable, the same person as the passport or the
 record, the same date of birth; its address is shown, not checked), and the
 proof of address (readable, holder's name, address, age, type, country).
 Every check passes: the agent confirms the data through the analysts' own
-path. A case whose World-Check alerts the AI screening rules cleared is then
+path, and corrects the record's postal code or old place names to the proof
+of address's (never a code another document prints differently). A case whose World-Check alerts the AI screening rules cleared is then
 Verified with nobody touching it; a case with an alert left goes to Data
 Screening, where an analyst clears the alert, with the agent's **watchlist
 finding** beside each open record (*likely true match*: the passport's name
@@ -194,14 +197,16 @@ The case data is fictional, so nothing sensitive leaves the demo.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-154 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+156 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a
 married surname on the form, a PO Box) and the RFIs, the bad ID photos and the suggested resubmit
-reason, the filled-in Resubmit dialog, a redrawn case read again, a gateway
+reason, the filled-in Resubmit dialog, a redrawn case read again, a case
+confirmed under older name or address rules decided again on its stored
+read, a postal code another document disputes, a gateway
 error, a rate-limit or dropped-connection retry, the name rules, the worker
 on an auto-verified case, Pause/Resume for the team lead),
 `tests/test_console_book.py` (the console on the reconciliation

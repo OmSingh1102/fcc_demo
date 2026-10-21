@@ -564,25 +564,58 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual(v("PRABHU FNU", "", "PRABHU"), (True, "PRABHU"))                                    # single name
         self.assertEqual(v("VÅ© CÃ´ng KhÃ¡nh", "VŨ", "CÔNG KHÁNH")[0], True)                                # mojibake
         self.assertFalse(v("PATRICIA WILSON", "ROBERTS", "PATRICIA MARIE")[0])                              # another surname
-        self.assertTrue(v("KEVIN NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                        # the name rules know Kevin for Khoa
+        # an anglicised first name is no spelling of the passport's: only a naturalisation certificate links them
+        self.assertFalse(v("KEVIN NGUYEN", "NGUYEN", "KHOA QUOC")[0])
+        self.assertTrue(v("DAVID DUY NGUYEN", "NGUYEN", "DUY MINH", country="VN")[0])                       # the record keeps the passport's too
         self.assertFalse(v("BRANDON NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                     # another given name
         # one word, one part of the name: HONG cannot be both the passport's HOÀNG and its HỒNG
         self.assertFalse(v("HONG NGUYEN", "HOÀNG", "PHƯƠNG HỒNG", country="VN")[0])
         self.assertTrue(v("RAHUL CHOUDHARY", "CHAUDHARY", "RAHUL", country="IN")[0])                       # a spelling of the surname still is
 
-    def test_a_case_confirmed_on_a_word_used_twice_starts_again(self):
+    def test_a_case_confirmed_on_a_word_used_twice_is_decided_again(self):
         c = self.free("KYC-2026-3896")                                      # HONG NGUYEN for the passport's HOÀNG, PHƯƠNG HỒNG
         with mock.patch.object(ai_agent, "name_verdict", lambda crm, s, g, filed="", country="": (True, crm)):
             self.assertIn(self.run_agent(c)[0]["decision"], ("verified", "screening"))   # the checks before the fix
         c["ai_agent"]["rules"] = 9
         StateStore.save("kyc", c)
+        read_at = c["ai_agent"]["at"]
         fcc._load_seed()
         c = fcc.KYC_BY_ID[c["id"]]
-        self.assertNotIn("ai_agent", c)                                     # back to its seeded state, to be read again
-        c["current_reviewer"] = ""
-        rec = self.assert_human(c, "Name on the ID differs from the CRM")  # and now its name goes to a person
+        rec = c["ai_agent"]                                                 # back on its seed, decided again on the stored read
+        self.assertEqual((rec["at"], rec["decision"], c["status"]), (read_at, "human", "DataConfirming"))
+        self.assertIn("Name on the ID differs from the CRM", rec["reasons"])   # now its name goes to a person
         self.assertTrue(rec["watchlist"])
         self.assertEqual(c["client"]["legal_name"], "HONG NGUYEN")          # no slip corrected beside an alert
+
+    def test_a_case_confirmed_on_an_anglicised_name_is_decided_again(self):
+        c = self.free("KYC-2026-3025")                                      # KEVIN NGUYEN for the passport's NGUYEN, KHOA QUOC
+        with mock.patch.object(ai_agent, "_given_match", ai_agent.names.given_match):     # the name rules before the fix
+            rec, _ = self.run_agent(c)
+        self.assertEqual((rec["decision"], c["client"]["legal_name"]), ("verified", "KHOA QUOC NGUYEN"))
+        c["ai_agent"]["rules"] = 10
+        StateStore.save("kyc", c)
+        read_at = rec["at"]
+        fcc._load_seed()
+        c = fcc.KYC_BY_ID[c["id"]]
+        rec = c["ai_agent"]
+        self.assertEqual(rec["at"], read_at)                                # the stored read: no new look at the images
+        self.assertEqual((rec["decision"], c["status"], c["pending_reason"]), ("rfi", "DataConfirming", "RFI Sent"))
+        self.assertIn("naturalisation certificate", rec["requested"])
+        self.assertEqual(c["client"]["legal_name"], "KEVIN NGUYEN")         # the record's name as the file gave it
+        self.assertIn("Checked again", [e["action"] for e in c["audit"]])
+        fcc._load_seed()                                                    # decided once: stored as such from then on
+        self.assertEqual(fcc.KYC_BY_ID[c["id"]]["ai_agent"]["decision"], "rfi")
+
+    def test_a_postal_code_another_document_disputes_stays(self):
+        c = self.K["KYC-2026-3473"]                                         # Calcutta 700019 on the record and the passport
+        got = perfect_read(c)
+        got["poa"]["address"] = got["poa"]["address"].replace("700019", "700089")    # one digit misread on the bill
+        got["id"]["address"] = "FLAT NO 303 SUNSHINE ENCLAVE GARIAHAT ROAD BALLYGUNGE CALCUTTA PIN:700019, WEST BENGAL, INDIA"
+        written = ai_agent.address_update(c, got)
+        self.assertIn("Kolkata", written)                                   # the city's current name is still written
+        self.assertTrue(written.endswith("700019"), written)                # the record's PIN, which the passport prints
+        got["id"]["address"] = ""                                           # nothing disputes the bill: its code governs
+        self.assertTrue(ai_agent.address_update(c, got).endswith("700089"))
 
     def test_a_record_that_keeps_the_fathers_name_is_not_the_holder(self):
         # an Indian passport's second given name is the father's: a record
@@ -605,7 +638,7 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertIn("Name on the proof of address differs from the CRM", rec["reasons"])
         self.assertEqual(c["client"]["legal_name"], "PRAKASH MORE")
 
-    def test_a_case_confirmed_on_the_fathers_name_starts_again(self):
+    def test_a_case_confirmed_on_the_fathers_name_is_decided_again(self):
         father, kept = self.K["KYC-2026-3052"], self.clean()
         with mock.patch.object(ai_agent, "_own_name_kept", lambda *a, **k: True):   # the checks before the fix
             for c in (father, kept):
@@ -613,10 +646,15 @@ class AiAgentTestCase(unittest.TestCase):
                 c["ai_agent"]["rules"] = 4
                 StateStore.save("kyc", c)
         self.assertEqual(father["client"]["legal_name"], "MANASI PRAKASH MORE")            # the confirmation rewrote it
+        kept_at = kept["ai_agent"]["at"]
         fcc._load_seed()
-        self.assertNotIn("ai_agent", fcc.KYC_BY_ID[father["id"]])                         # back to its seeded state, read again
-        self.assertEqual(fcc.KYC_BY_ID[father["id"]]["client"]["legal_name"], "PRAKASH MORE")
-        self.assertEqual(fcc.KYC_BY_ID[kept["id"]]["ai_agent"]["decision"], "verified")    # the rest is kept
+        again = fcc.KYC_BY_ID[father["id"]]
+        # back on its seed (PRAKASH MORE), decided again on the stored read: today's
+        # checks correct the father's name as a slip, and confirm
+        self.assertIn("Checked again", [e["action"] for e in again["audit"]])
+        self.assertEqual(again["ai_agent"]["name_corrected"]["from"], "PRAKASH MORE")
+        self.assertEqual((again["ai_agent"]["decision"], again["client"]["legal_name"]), ("verified", "MANASI PRAKASH MORE"))
+        self.assertEqual(fcc.KYC_BY_ID[kept["id"]]["ai_agent"]["at"], kept_at)             # the rest is kept as stored
 
     # ── the verified address written back ──────────────────────────────────
     def test_the_verified_address_corrects_the_record(self):

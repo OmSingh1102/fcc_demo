@@ -181,12 +181,20 @@ VERDICT_TRIES = 3
 # record's own slips corrected (name_slip, address_slip) and RFIs for the
 # document that links two names or for the main home. 10: a word that
 # matched the surname by its spelling is not a given name too (name_verdict).
-RULES_VERSION = 10
+# 11: an anglicised first name is not the passport's (_given_match), and a
+# postal code another document disputes is not written to the record
+# (address_update).
+RULES_VERSION = 11
 POA_NAME_RULES = 4    # the first checks to want the proof of address's name: reads before them may lack it (needs_reread)
 # The last change to the name checks (5: the holder's own given name; 10: one
-# word, one part of the name): a case confirmed before it is checked again on
-# its names (confirmed_on_older_names).
-NAME_RULES = 10
+# word, one part of the name; 11: no anglicised first name): a case confirmed
+# before it is checked again on its names (confirmed_on_older_names).
+NAME_RULES = 11
+# The last change to the address the agent writes back (11: a disputed postal
+# code stays; a unit number is no ZIP): address_written_otherwise.
+ADDRESS_RULES = 11
+# What perceive() returns: a stored read decided again keeps all of it.
+PERCEIVED = ("at", "model", "read", "usage", "seconds", "error", "verdict", "read_version")
 # What a read covers. 1: the passport's data page and the proof of address.
 # 2: every document on the case. A case read under 1 that no person has
 # touched starts again and is read again (read_before_all_documents).
@@ -387,6 +395,16 @@ def _name_key(text):
 DROPPED_FIRST = names.GIVEN_PREFIXES | {"MOHAMMED", "MOHAMMAD", "MUHAMMAD", "MOHD", "MD"}
 
 
+def _given_match(a, b):
+    """names.given_match, less the English first names naturalised citizens
+    take (names.ANGLICISED: KEVIN for KHOA). Those help a screening find a
+    hit, but are no spelling of the passport's name: only a naturalisation
+    certificate links the two (name_link_request)."""
+    if b in names.ANGLICISED.get(a, ()) or a in names.ANGLICISED.get(b, ()):
+        return 0.0
+    return names.given_match(a, b)
+
+
 def _own_name_kept(given, rest, country=""):
     """An ID with two given names, the second of them the father's (an
     Indian passport's MANASI PRAKASH): the CRM must keep the first, or its
@@ -397,7 +415,7 @@ def _own_name_kept(given, rest, country=""):
     if country == "VN" or len(given) != 2 or given[0] in DROPPED_FIRST:
         return True
     own = given[0]
-    return any(names.given_match(own, b) >= 0.9 or (names.is_initial(b) and b == own[0]) for b in rest)
+    return any(_given_match(own, b) >= 0.9 or (names.is_initial(b) and b == own[0]) for b in rest)
 
 
 def name_verdict(crm, surname, given, filed="", country=""):
@@ -438,7 +456,7 @@ def name_verdict(crm, surname, given, filed="", country=""):
         spelt = max(c, key=lambda t: names.surname_score([t], s))
         if names.surname_score([spelt], s) >= 0.8:
             rest.remove(spelt)
-    giv_ok = not g or (any(names.given_match(a, b) >= 0.9 for a in g for b in rest) and _own_name_kept(g, rest, country))
+    giv_ok = not g or (any(_given_match(a, b) >= 0.9 for a in g for b in rest) and _own_name_kept(g, rest, country))
     if not (sur_ok and giv_ok):
         return False, crm
     # the ID's spelling, in the order the CRM keeps (surname first or last)
@@ -667,22 +685,39 @@ def address_update(case, got):
     to it as an analyst would: the documents' postal code where the record's
     was keyed wrong (226001 for 226010), or the current place names where
     the record keeps older ones. '' when the two differ only in how they are
-    written (abbreviations, ZIP+4, the order of a flat and wing)."""
+    written (abbreviations, ZIP+4, the order of a flat and wing). The
+    record's code stays when another document prints the same address
+    under another code than the proof of address (_code_disputed)."""
     country, now = case["client"]["nationality"], case["client"].get("address", "")
     read = _poa_address(((got or {}).get("poa") or {}).get("address", ""), country)
     reg, poa = addresses.normalise(now, country), addresses.normalise(read, country)
     if addresses.compare(reg, poa) != "same":
         return ""
     wrong_code = bool(reg["postal5"] and poa["postal5"]) and reg["postal5"] != poa["postal5"]
+    disputed = wrong_code and _code_disputed(got, country, poa)
     stale = (set(reg["flags"]) & STALE_ADDRESS) - set(poa["flags"])
-    if not wrong_code and not stale:
+    if (not wrong_code or disputed) and not stale:
         return ""
     if not stale:
         # only the code was keyed wrong: correct it in the record's own words (the state the bill leaves out stays)
         text = re.sub(rf"\b{reg['postal5']}(-\d{{4}})?\b", poa["postal5"], now, count=1)
     else:
         text = _as_the_record_keeps(read, country)
+        if disputed:
+            text = re.sub(rf"\b{poa['postal5']}(-\d{{4}})?\b", reg["postal5"], text, count=1)
     return "" if similarity.fold(text) == similarity.fold(now) else text
+
+
+def _code_disputed(got, country, poa):
+    """Does another document (the passport, the secondary ID) print the proof
+    of address's address under another postal code? Then the documents do
+    not agree on the code, and one read of the proof of address (700089
+    where the bill prints 700019) is no ground to rewrite the record's."""
+    for doc in ((got or {}).get("id") or {}, (got or {}).get("secondary") or {}):
+        other = addresses.normalise(doc.get("address", ""), country)
+        if other["postal5"] and other["postal5"] != poa["postal5"] and addresses.compare(other, poa) == "same":
+            return True
+    return False
 
 
 def _as_the_record_keeps(read, country):
@@ -1001,7 +1036,7 @@ def name_slip(case, got, found):
     s, g, rec = n["surname"], n["given"], n["record"]
     if not (s and g and rec and n["sec_holder"] and n["poa_holder"]):
         return None
-    kept = [t for t in rec if any(names.given_match(t, b) >= 0.9 for b in g)]
+    kept = [t for t in rec if any(_given_match(t, b) >= 0.9 for b in g)]
     other = [t for t in rec if _foreign(t, n["words"])]
     if len(g) >= 2 and set(s) <= set(rec) <= set(s + g) and g[0] not in rec and set(rec) - set(s):
         father = " ".join(t for t in rec if t not in s)
@@ -1027,7 +1062,7 @@ def name_link_request(case, got, found):
     s, g, rec = n["surname"], n["given"], n["record"]
     if not (s and g and rec):
         return ""
-    kept = {t for t in rec if any(names.given_match(t, b) >= 0.9 for b in g)}
+    kept = {t for t in rec if any(_given_match(t, b) >= 0.9 for b in g)}
     rest = set(rec) - kept
     if not set(s) & set(rec) and kept and rest and rest <= set(n["secondary"]) and n["poa_holder"] and not n["sec_holder"]:
         document = "your marriage certificate"
@@ -1180,22 +1215,46 @@ def needs_reread(case):
 
 def confirmed_on_older_names(stored, seed):
     """A case the agent confirmed before the last change to the name checks
-    (NAME_RULES), whose stored read the name checks now refuse against the
-    record as the file gave it (`seed`: the confirmation rewrote the name),
-    and no person has touched since: it starts again and is read again
-    (app._load_seed). A record the agent corrected itself (name_slip) was
-    checked on the corrected name, and is left alone."""
+    (NAME_RULES), whose stored read the name checks (the ID's, the secondary
+    ID's, the proof of address's) now refuse against the record as the file
+    gave it (`seed`: the confirmation rewrote the name), and no person has
+    touched since: it starts again and is decided again on its stored read
+    (app._load_seed, redecide). A record the agent corrected itself
+    (name_slip) was checked on the corrected name, and is left alone."""
     rec = stored.get("ai_agent") or {}
     if (rec.get("decision") not in ("verified", "screening") or rec.get("rules", 1) >= NAME_RULES
             or rec.get("name_corrected") or not rec.get("read") or not _untouched(stored)):
         return False
-    got, client = rec["read"], seed["client"]
-    idr, poa = got.get("id") or {}, got.get("poa") or {}
-    filed, country = _filed_name(seed), client["nationality"]
-    if not name_verdict(client["legal_name"], idr.get("surname", ""), idr.get("given_names", ""), filed=filed, country=country)[0]:
-        return True
-    return bool(seed.get("poa_required") and poa.get("readable")) \
-        and not poa_name_verdict(client["legal_name"], poa, filed=filed, country=country)
+    found, _ = checks(seed, rec["read"])
+    return any(not c["ok"] for c in found if c["check"] in NAME_CHECKS)
+
+
+def address_written_otherwise(stored, seed):
+    """A case the agent confirmed, and whose registered address it rewrote to
+    the proof of address's (address_update), before the last change to that
+    rule (ADDRESS_RULES), where the rule now writes another address or none
+    (`seed`: the record as the file gave it), and no person has touched
+    since: it starts again and is decided again on its stored read. An
+    address a record fix wrote (address_slip: the two did not match) is
+    left alone."""
+    rec = stored.get("ai_agent") or {}
+    done = rec.get("address_updated")
+    if (not done or rec.get("decision") not in ("verified", "screening") or rec.get("rules", 1) >= ADDRESS_RULES
+            or not rec.get("read") or not _untouched(stored)):
+        return False
+    country = seed["client"]["nationality"]
+    poa = _poa_address((rec["read"].get("poa") or {}).get("address", ""), country)
+    if addresses.compare(addresses.normalise(done.get("from", ""), country), addresses.normalise(poa, country)) != "same":
+        return False
+    return address_update(seed, rec["read"]) != done.get("to", "")
+
+
+def redecide(case, alert_case, wc, stored):
+    """A case back on its seed (confirmed_on_older_names,
+    address_written_otherwise), decided again on its stored read: the same
+    look at the images, today's checks."""
+    workflow._audit(case, ACTOR, "Checked again", f"The agent's checks changed; its read of {stored.get('at', '')} is decided again.")
+    return decide(case, alert_case, wc, {k: v for k, v in stored.items() if k in PERCEIVED})
 
 
 def read_before_all_documents(stored):
@@ -1242,8 +1301,7 @@ def recheck(case, alert_case, wc):
     workflow._audit(case, ACTOR, "Checked again", "The agent's checks changed; the stored read now passes every one"
                     + (" once the record's slip is corrected." if failing else "."))
     case["screening"]["workflow"] = "auto-verified"
-    return decide(case, alert_case, wc, {k: v for k, v in old.items()
-                                         if k in ("at", "model", "read", "usage", "seconds", "error", "verdict", "read_version")})
+    return decide(case, alert_case, wc, {k: v for k, v in old.items() if k in PERCEIVED})
 
 
 def run_case(case, alert_case, wc, render, call=None, sleep=time.sleep):
