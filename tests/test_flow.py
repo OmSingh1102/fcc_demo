@@ -525,6 +525,14 @@ class FlowTestCase(unittest.TestCase):
             self.assertIn(needle, page, needle)
         self.assertLess(page.index('id="filters-toggle"'), page.index('id="filters-grid"'))
         self.assertLess(page.index('id="filters-grid"'), page.index('id="sort-btn"'))
+        # folded, the first six filters stay (the real list's first two rows): only the rest hide
+        css = self.c.get("/static/css/style.css").data.decode("utf-8")
+        self.assertIn(".filters-card.folded #filters-grid .f:nth-child(n+7) { display: none; }", css)
+        self.assertNotIn(".filters-card.folded #filters-grid { display: none; }", css)
+        grid = page[page.index('id="filters-grid"'):]
+        first = [grid.index(x) for x in ('id="f-case-id"', 'id="f-client-id"', 'id="f-name"', 'id="f-dob-from"',
+                                         'id="f-status-box"', 'id="f-created-from"', 'id="f-reviewer"')]
+        self.assertEqual(first, sorted(first))
 
     def test_case_list_filters_and_pages_on_the_server(self):
         """The filters, the sort and the page are query parameters the server

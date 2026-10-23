@@ -6,7 +6,7 @@
 {% block content %}
 <div class="tabs chips">
     <span class="tab chip active">Case List</span>
-    <button type="button" class="filters-toggle" id="filters-toggle" onclick="toggleFilters()" aria-expanded="true" aria-controls="filters-grid" title="Hide the filters">{{ icon('chevron-up') }} Filters</button>
+    <button type="button" class="filters-toggle" id="filters-toggle" onclick="toggleFilters()" aria-expanded="true" aria-controls="filters-grid" title="Show the first six filters only">{{ icon('chevron-up') }} Filters</button>
     {% if can_upload %}<a class="btn btn-primary btn-sm" id="upload-cases" href="{{ url_for('kyc_upload') }}" style="margin-left:8px">{{ icon('upload') }} Upload cases</a>{% endif %}
 </div>
 
@@ -153,26 +153,27 @@
 
     // ── the filter panel folds behind the arrow at its top right ──
     // The fold is remembered in this browser (the live refresh reloads the
-    // page, so without memory every update would unfold it). A folded panel
-    // still says how many filters are active, so nobody wonders why rows are
+    // page, so without memory every update would unfold it). Folded, the first
+    // six filters stay (style.css) and only the rest hide; the panel then says
+    // how many of the hidden ones are active, so nobody wonders why rows are
     // missing. Clear and Search keep working while it is folded.
     var FOLD_KEY = 'fcc-case-filters-folded';
     var card = form, toggle = document.getElementById('filters-toggle');
     var summary = document.getElementById('filters-summary');
-    function activeFilters() {
+    function activeHidden() {
         var n = 0;
-        document.querySelectorAll('#filters-grid input, #filters-grid select').forEach(function (el) {
+        document.querySelectorAll('#filters-grid .f:nth-child(n+7) input, #filters-grid .f:nth-child(n+7) select').forEach(function (el) {
             if (el.type === 'checkbox') { if (el.checked) { n += 1; } }
             else if ((el.value || '').trim()) { n += 1; }
         });
         return n;
     }
     function paintFold() {
-        var folded = card.classList.contains('folded'), n = activeFilters();
+        var folded = card.classList.contains('folded'), n = activeHidden();
         toggle.classList.toggle('folded', folded);
         toggle.setAttribute('aria-expanded', folded ? 'false' : 'true');
-        toggle.title = folded ? 'Show the filters' : 'Hide the filters';
-        summary.textContent = folded ? ('Filters hidden' + (n ? ' · ' + n + ' active' : '')) : '';
+        toggle.title = folded ? 'Show every filter' : 'Show the first six filters only';
+        summary.textContent = folded ? ('More filters hidden' + (n ? ' · ' + n + ' of them active' : '')) : '';
         summary.classList.toggle('hidden', !folded);
     }
     window.toggleFilters = function () {

@@ -434,8 +434,10 @@ select.input, .select { appearance: auto; padding-right: 8px; }
 .filters-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .filters-toggle .nav-ic { width: 13px; height: 13px; transition: transform .18s; }
 .filters-toggle.folded .nav-ic { transform: rotate(180deg); }
-.filters-card.folded #filters-grid { display: none; }
-.filters-card.folded .toolbar { margin-top: 0; }
+/* Folded, the panel keeps its first six filters (Case ID, Client ID, Client
+   Name, Date Of Birth, Status, Creation Time: the real list's first two rows)
+   and the buttons row; only the rest hide. */
+.filters-card.folded #filters-grid .f:nth-child(n+7) { display: none; }
 .toolbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
 /* ─── Badge / tag ─── */
