@@ -314,6 +314,9 @@ class FlowTestCase(unittest.TestCase):
                  and "/documents/" not in (a.get("href") or "") and a.get("href")]
         self.assertEqual(other, [])                                              # nothing else on the case page
 
+        listing = hrefs(anchors(self.c.get("/kyc/list")), "/kyc/detail/")
+        self.assertTrue(listing and all(new_tab(a) for a in listing))          # the case list's Details buttons
+
         audit = anchors(self.c.get("/audit"))
         self.assertTrue(hrefs(audit, "/wc/") and all(new_tab(a) for a in hrefs(audit, "/wc/")))
         self.assertFalse(any(new_tab(a) for a in hrefs(audit, "/name_screening/case/", "/kyc/detail/")))
