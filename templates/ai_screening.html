@@ -172,7 +172,7 @@
         {% for f in vm.feed %}
         <tr>
             <td class="nowrap">{{ f.at }}</td>
-            <td class="nowrap"><a href="{{ url_for(f.endpoint, **f.args) }}"{% if f.new_tab %} target="_blank" rel="noopener" data-new-window="worldcheck-{{ f.args.wc_case_id }}" title="Opens in a new window"{% endif %}>{{ f.kind }}{% if f.new_tab %}<span class="ext-ic">{{ icon('external-link') }}</span>{% endif %}</a></td>
+            <td class="nowrap"><a href="{{ url_for(f.endpoint, **f.args) }}"{% if f.new_tab %} target="_blank" rel="noopener" title="Opens in a new tab"{% endif %}>{{ f.kind }}{% if f.new_tab %}<span class="ext-ic">{{ icon('external-link') }}</span>{% endif %}</a></td>
             <td class="strong nowrap">{{ f.name }}</td>
             <td class="small">{{ f.detail }}</td>
         </tr>
