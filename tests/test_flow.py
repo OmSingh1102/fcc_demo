@@ -352,6 +352,9 @@ class FlowTestCase(unittest.TestCase):
         m = fcc.worldcheck.find_match(fcc.WC_BY_ID[aid], fcc.ALERT_BY_ID[aid]["alerts"][0]["match_id"])
         self.assertIn(html.escape(m["further_info"]["biography"]), page)
         self.assertEqual(page.count('class="open"'), 1)                              # the first alert starts open
+        # Open in WC stays at the table's right edge, as the case list's Details does
+        self.assertIn('<th class="sticky-right">World-Check</th>', page)
+        self.assertEqual(page.count('<td class="sticky-right"><a class="btn btn-outline btn-xs nowrap" href="/wc/'), n)
 
     def test_ai_rules_evaluate(self):
         """The rule book on synthetic records: fires only on present,

@@ -120,7 +120,7 @@
             <table class="tbl dense" id="alert-table">
                 <thead><tr>
                     <th style="width:28px"><span class="sr-hide">Open</span></th><th style="width:40px"><input type="checkbox" id="pick-all" title="Tick every alert shown" aria-label="Tick every alert shown" onchange="afPickAll(this)"></th><th>Alert ID</th><th>Vendor</th><th>Watch List ID</th><th>Alert Outcome</th><th>AI assessment</th><th>Smart Strategy</th><th>Name</th><th>Matched Alias</th>
-                    <th>Score</th><th>Type</th><th>Date of Birth (DD-MM-YYYY)</th><th>Gender</th><th>Last Resolved By</th><th>Last Resolved Time</th><th>Rationale</th><th>Risk</th><th></th>
+                    <th>Score</th><th>Type</th><th>Date of Birth (DD-MM-YYYY)</th><th>Gender</th><th>Last Resolved By</th><th>Last Resolved Time</th><th>Rationale</th><th>Risk</th><th class="sticky-right">World-Check</th>
                 </tr></thead>
                 <tbody>
                 {% for a in alert.alerts %}
@@ -143,7 +143,7 @@
                     <td class="nowrap">{{ a.resolved_at or '-' }}</td>
                     <td>{{ a.rationale or '-' }}</td>
                     <td>{% if a.risk_level %}{{ outcome_badge(a.risk_level) }}{% else %}-{% endif %}</td>
-                    <td><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=alert.id, match_id=a.match_id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open in WC<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
+                    <td class="sticky-right"><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=alert.id, match_id=a.match_id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open in WC<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
                 </tr>
                 {% include "_alert_detail.html" %}
                 {% else %}
