@@ -22,7 +22,7 @@ def column_of(case, now=None):
     s, p = case["status"], case.get("pending_reason", "")
     if s in ("Submitted", "IDVerification"):
         return "intake"
-    if s in ("DataConfirming", "DataFormat"):
+    if s == "DataConfirming":
         return "l1_confirm"
     if s == "DataScreening":
         return "l2" if p == "Pending Checker 2" else "l1_screen"

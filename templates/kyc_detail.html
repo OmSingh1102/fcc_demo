@@ -181,7 +181,7 @@
         <div class="note info small mb-8" id="ai-agent-requested"><b>Asked the customer (RFI):</b> “{{ ag.requested }}” {{ ag.reasons|join('; ') }}. Every other check passed and nothing was left for an analyst; the case waits for the reply, which is checked when it arrives.</div>
         {% elif ag.reasons %}
         <div class="note warn small mb-8"><b>Sent to a person:</b> {{ ag.reasons|join('; ') }}</div>
-        {% if ag.resubmit and case.status in vocab.CONFIRMING %}<div class="small mb-8" id="ai-agent-resubmit"><b>Suggested:</b> Resubmit ID — “{{ ag.resubmit }}”. The Resubmit dialog opens with it filled in; the decision is the analyst's.</div>{% endif %}
+        {% if ag.resubmit and case.status == 'DataConfirming' %}<div class="small mb-8" id="ai-agent-resubmit"><b>Suggested:</b> Resubmit ID — “{{ ag.resubmit }}”. The Resubmit dialog opens with it filled in; the decision is the analyst's.</div>{% endif %}
         {% elif ag.decision == 'verified' %}
         <div class="note ok small mb-8">Every check passed. The AI Agent confirmed the data, the screening rules had cleared every alert, and the case verified with no analyst step.</div>
         {% else %}

@@ -227,7 +227,7 @@ def _side_nav():
     levels = _levels()
     tenant = _tenant()
     actor = _actor()
-    open_l1 = sum(1 for c in KYC_CASES if c["tenant"] == tenant and c["status"] in (*vocab.CONFIRMING, "DataScreening"))
+    open_l1 = sum(1 for c in KYC_CASES if c["tenant"] == tenant and c["status"] in ("DataConfirming", "DataScreening"))
     open_l2 = sum(1 for c in KYC_CASES if c["tenant"] == tenant and c["status"] == "DataEscalatingL2"
                   and not segregation.hidden_from(c, actor, "L2"))
     cases = [
@@ -352,24 +352,6 @@ def _load_seed():
     if redecided:
         app.logger.info("%d case(s) confirmed on a name or an address the checks now refuse were decided again on "
                         "their stored read.", _redecide(redecided))
-    formatted = _sync_data_format()
-    if formatted:
-        app.logger.info("%d case(s) the AI Agent sent to a person moved from Data Confirming to Data Format.", formatted)
-
-
-def _sync_data_format():
-    """A case the AI Agent sent to a person waits in Data Format
-    (vocab.CONFIRMING); one stored before that name still says Data
-    Confirming. Move it, with an audit row, and save it. Returns how many."""
-    moved = 0
-    for case in KYC_CASES:
-        if (case.get("ai_agent") or {}).get("decision") == "human" and case["status"] == "DataConfirming":
-            ai_agent.to_format(case)
-            workflow._audit(case, vocab.SYSTEM_USER, "Status changed",
-                            "Data Confirming → Data Format: the AI Agent could not capture the details; an analyst confirms them.")
-            _save("kyc", case)
-            moved += 1
-    return moved
 
 
 def _sync_sex():
@@ -717,7 +699,7 @@ def kyc_detail(case_id):
         poa_checks=checks, poa_failed=bool(failed),
         poa_sanction_fail=any(c["label"].startswith("Sanctioned-country") for c in failed),
         poa_resubmit_reason=next((_POA_RESUBMIT[c["label"]] for c in failed if c["label"] in _POA_RESUBMIT), ""),
-        id_resubmit_reason=(case.get("ai_agent") or {}).get("resubmit", "") if case["status"] in vocab.CONFIRMING else "",
+        id_resubmit_reason=(case.get("ai_agent") or {}).get("resubmit", "") if case["status"] == "DataConfirming" else "",
         file_items=investigation.items(case, alert, wc) if case.get("investigation_file") else [],
         agent=_agent_view(case, actor, levels))
 
@@ -822,7 +804,7 @@ def kyc_resubmit(case_id):
 def kyc_escalate(case_id):
     case = _kyc(case_id)
     alert, _wc = _linked(case)
-    back = "dc-modal" if case["status"] in vocab.CONFIRMING else "edd-modal"
+    back = "dc-modal" if case["status"] == "DataConfirming" else "edd-modal"
     return _case_action(case_id, workflow.escalate, request.form.get("reason", ""), request.form.get("comment", ""),
                         request.form.get("fraud_typology", ""), alert_case=alert, extra=(("alert", alert),),
                         success=lambda c: f"Escalated to L2. {_routing_note(c)} The 14-day EDD clock has started.".replace("  ", " "),

@@ -45,7 +45,7 @@ def level_for(case):
     status, pending = case["status"], case.get("pending_reason", "")
     if sla.waiting_on_user(case):
         return ""
-    if status in ("DataConfirming", "DataFormat", "DataScreening"):
+    if status in ("DataConfirming", "DataScreening"):
         return "L2" if pending == "Pending Checker 2" else "L1"
     if status == "DataEscalatingL2":
         return "EDD" if pending == "Pending EDD" else "L2"

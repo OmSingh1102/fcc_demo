@@ -127,7 +127,7 @@ class AiAgentTestCase(unittest.TestCase):
     def assert_human(self, case, needle, answer=None, **id_overrides):
         rec, _ = self.run_agent(case, answer, **id_overrides)
         self.assertEqual(rec["decision"], "human")
-        self.assertEqual((case["status"], case["screening"]["workflow"]), ("DataFormat", "human-in-the-loop"))
+        self.assertEqual((case["status"], case["screening"]["workflow"]), ("DataConfirming", "human-in-the-loop"))
         self.assertTrue(any(needle in r for r in rec["reasons"]), rec["reasons"])
         self.assertEqual((case["audit"][-1]["actor"], case["audit"][-1]["action"]), ("AI Agent", "Sent to a person"))
         return rec
@@ -276,35 +276,12 @@ class AiAgentTestCase(unittest.TestCase):
         self.assert_human(self.free("KYC-2026-3033"), "Date of birth missing on the ID", dob="")
         self.assertEqual(self.K["KYC-2026-3033"]["client"]["legal_name"], "NHUNG VU")
 
-    def test_a_case_the_agent_could_not_capture_is_in_data_format(self):
-        c = self.clean()
-        self.run_agent(c, readable=False, problems=["blurred"])
-        self.assertEqual(c["status"], "DataFormat")
-        # an analyst works it as one in Data Confirming: the L1 queue, the Data Confirm modal, OK moves it on
-        self.assertEqual((routing.level_for(c), fcc.workflow.review_action(c, {"L1"})), ("L1", "dc"))
-        amara = "amara.iyer@straive.com"
-        fcc.workflow.reserve(c, amara)
-        form = {"poa_ok": "1"}
-        for field, key, _label, _type in fcc.workflow.confirm_fields(c):
-            form.update({field: c["client"][key], f"{field}_ok": "1"})
-        alert, wc = fcc._linked(c)
-        fcc.workflow.data_confirm(c, amara, form, alert, wc)
-        self.assertIn(c["status"], ("DataScreening", "Verified"))
-        # a case stored in Data Confirming before the name: moved at start-up, with an audit row
-        d = self.clean()
-        self.run_agent(d, readable=False, problems=["blurred"])
-        d["status"] = "DataConfirming"
-        StateStore.save("kyc", d)
-        fcc._load_seed()
-        moved = fcc.KYC_BY_ID[d["id"]]
-        self.assertEqual((moved["status"], moved["audit"][-1]["action"]), ("DataFormat", "Status changed"))
-
     def test_gateway_error_goes_to_a_person(self):
         c = self.clean()
         rec, _ = self.run_agent(c, error=WorkflowError("The model gateway answered 500: busy"))
         self.assertEqual(rec["decision"], "human")
         self.assertIn("could not read the documents", rec["reasons"][0])
-        self.assertEqual(c["status"], "DataFormat")                       # the agent captured nothing
+        self.assertEqual(c["status"], "DataConfirming")
 
     def test_rate_limit_waits_and_tries_again(self):
         for failure in ("The model gateway answered 429: too many connections", "Could not reach the model gateway."):
@@ -529,7 +506,7 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual(stub.sent, [])                                       # no model call, no images
         self.assertEqual((card["status"], card["ai_agent"]["decision"]), ("Verified", "verified"))
         self.assertIn(("AI Agent", "Checked again"), [(e["actor"], e["action"]) for e in card["audit"]])
-        self.assertEqual((touched["status"], touched["ai_agent"]["decision"]), ("DataFormat", "human"))
+        self.assertEqual((touched["status"], touched["ai_agent"]["decision"]), ("DataConfirming", "human"))
         # still not verified, checked once: its old proof of address, the only thing wrong, is asked for again
         self.assertEqual((bill["status"], bill["ai_agent"]["decision"], bill["ai_agent"]["rules"]),
                          ("ResubmitPOA", "resubmit", ai_agent.RULES_VERSION))
@@ -605,7 +582,7 @@ class AiAgentTestCase(unittest.TestCase):
         fcc._load_seed()
         c = fcc.KYC_BY_ID[c["id"]]
         rec = c["ai_agent"]                                                 # back on its seed, decided again on the stored read
-        self.assertEqual((rec["at"], rec["decision"], c["status"]), (read_at, "human", "DataFormat"))
+        self.assertEqual((rec["at"], rec["decision"], c["status"]), (read_at, "human", "DataConfirming"))
         self.assertIn("Name on the ID differs from the CRM", rec["reasons"])   # now its name goes to a person
         self.assertTrue(rec["watchlist"])
         self.assertEqual(c["client"]["legal_name"], "HONG NGUYEN")          # no slip corrected beside an alert
@@ -803,7 +780,7 @@ class AiAgentTestCase(unittest.TestCase):
         read["back"]["endorsements"] = "THE HOLDER IS ALSO KNOWN AS JOHN SMITH"
         rec, _ = self.run_agent(c, answer=read)
         self.assertIn("An endorsement on the passport's back page: THE HOLDER IS ALSO KNOWN AS JOHN SMITH", rec["reasons"])
-        self.assertEqual(c["status"], "DataFormat")
+        self.assertEqual(c["status"], "DataConfirming")
 
     def test_an_older_read_is_checked_as_it_was(self):
         c = self.clean()

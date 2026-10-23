@@ -7,7 +7,7 @@ strings. The spellings follow the tools being modelled (`DataConfirming`,
 
 # ── KYC case status ──────────────────────────────────────────────────────────
 STATUSES = [
-    "Submitted", "IDVerification", "DataConfirming", "DataFormat", "DataScreening",
+    "Submitted", "IDVerification", "DataConfirming", "DataScreening",
     "DataEscalatingL2", "Verified", "Rejected",
     "ResubmitID", "ResubmitPOA",
     # Present in the status filter of the real list; this demo never moves a
@@ -17,7 +17,7 @@ STATUSES = [
 
 STATUS_TONE = {
     "Submitted": "slate", "IDVerification": "slate",
-    "DataConfirming": "blue", "DataFormat": "violet", "DataScreening": "blue",
+    "DataConfirming": "blue", "DataScreening": "blue",
     "DataEscalatingL2": "amber",
     "Verified": "emerald", "Rejected": "rose",
     "ResubmitID": "amber", "ResubmitPOA": "amber",
@@ -25,16 +25,8 @@ STATUS_TONE = {
     "POAReviewingL3": "violet", "POAResubmit": "amber",
 }
 
-# The Data Confirming step under its two names, which an analyst works the
-# same way. Data Confirming: the case waits for its details to be confirmed
-# (the AI Agent's queue). Data Format: the AI Agent could not capture or
-# confirm them (an unreadable or expired ID, a name or address the documents
-# do not bear out, a model call that failed), so an analyst does. Where the
-# AI captured them but a watchlist hit is left, the case is in Data Screening.
-CONFIRMING = ("DataConfirming", "DataFormat")
-
 # Which are "open" — in somebody's queue.
-OPEN_STATUSES = {"Submitted", "IDVerification", *CONFIRMING, "DataScreening", "DataEscalatingL2"}
+OPEN_STATUSES = {"Submitted", "IDVerification", "DataConfirming", "DataScreening", "DataEscalatingL2"}
 CLOSED_STATUSES = {"Verified", "Rejected"}
 
 # The six verification points on the case page, in order.
@@ -43,7 +35,7 @@ STEP_LABELS = ["Submitted", "ID Verification", "Data Confirming", "Data Screenin
 # Which step a status sits on (0-based). Resubmit statuses sit on Data
 # Confirming: the case is waiting for the user, then re-enters there.
 STATUS_STEP = {
-    "Submitted": 0, "IDVerification": 1, "DataConfirming": 2, "DataFormat": 2, "DataScreening": 3,
+    "Submitted": 0, "IDVerification": 1, "DataConfirming": 2, "DataScreening": 3,
     "DataEscalatingL2": 4, "Verified": 5, "Rejected": 5,
     "ResubmitID": 2, "ResubmitPOA": 2, "POAResubmit": 2,
     "POAScreening": 3, "POAReviewingL1": 3, "POAReviewingL2": 4, "POAReviewingL3": 4,

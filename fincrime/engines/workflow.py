@@ -21,7 +21,6 @@ Ownership changes also keep the work log (engines/worklog) and, on every
 tier hand-off, ask the router (engines/routing) for the next analyst at
 once — SOP 5.2.3, no bot lag.
 
-    (DataFormat: DataConfirming under the name it takes when the AI Agent could not capture the details)
     Submitted → IDVerification → DataConfirming ──OK──▶ DataScreening ──review: FP / no match──▶ Verified
                                       │  │                     │                (business: Checker 2 signs off first)
                                       │  └─Resubmit─▶ ResubmitID / ResubmitPOA
@@ -128,8 +127,7 @@ def verification_points(case):
             state = "current"
         else:
             state = "todo"
-        label = "Data Format" if status == "DataFormat" and p["label"] == "Data Confirming" else p["label"]
-        out.append({"label": label, "at": p["at"], "state": state, "n": i + 1})
+        out.append({"label": p["label"], "at": p["at"], "state": state, "n": i + 1})
     return out
 
 
@@ -139,7 +137,7 @@ def review_action(case, levels, actor=""):
     if s == "DataScreening" and case.get("pending_reason") == "Pending Checker 2":
         checker1 = (case.get("checker1") or {}).get("by")
         return "checker2" if (levels & {"L1", "L2"} and actor != checker1) else ""
-    if s in vocab.CONFIRMING and "L1" in levels:
+    if s == "DataConfirming" and "L1" in levels:
         return "dc"
     if s == "DataScreening" and levels & {"L1", "L2"}:
         return "edd"
@@ -156,7 +154,7 @@ def review_needs(case):
     s = case["status"]
     if s == "DataScreening" and case.get("pending_reason") == "Pending Checker 2":
         return "Checker 2 (not the Checker 1 reviewer)", ["L1", "L2"]
-    return {"DataConfirming": ("Data Confirming", ["L1"]), "DataFormat": ("Data Format", ["L1"]),
+    return {"DataConfirming": ("Data Confirming", ["L1"]),
             "DataScreening": ("Data Screening", ["L1", "L2"]),
             "DataEscalatingL2": ("The L2 / EDD review", ["L2", "EDD"])}.get(s, ("", []))
 
@@ -264,8 +262,7 @@ def data_confirm(case, actor, form, alert_case=None, wc=None):
     summary and attachment. Moves the case to Data Screening, re-runs the
     name screen on the confirmed data and lets the AI screening rules act on
     it; an individual's case with nothing left for an analyst verifies itself."""
-    _require(case["status"] in vocab.CONFIRMING,
-             "Data confirming is only available while the case is in Data Confirming or Data Format.")
+    _require(case["status"] == "DataConfirming", "Data confirming is only available while the case is in Data Confirming.")
     _require_reserved(case, actor)
     values = {}
     for field, client_key, label, _type in confirm_fields(case):
@@ -289,8 +286,7 @@ def confirm_data(case, actor, values, summary="", attachment="", alert_case=None
     """The part of Data Confirm an analyst and the AI Agent share: write the
     confirmed values, move to Data Screening, re-screen, and auto-verify
     when nothing is left. `values` maps each confirm field to its value."""
-    _require(case["status"] in vocab.CONFIRMING,
-             "Data confirming is only available while the case is in Data Confirming or Data Format.")
+    _require(case["status"] == "DataConfirming", "Data confirming is only available while the case is in Data Confirming.")
     now = dates.now_str()
     edited = []
     for field, client_key, label, _type in confirm_fields(case):
@@ -388,7 +384,7 @@ def auto_verify(case, actor, now):
 def resubmit(case, actor, decisions, id_reason, poa_reason, note):
     """Ask the user to upload again. The case leaves the queue; the intake
     SLA clock keeps running."""
-    _require(case["status"] in vocab.CONFIRMING, "Resubmission can only be requested during Data Confirming or Data Format.")
+    _require(case["status"] == "DataConfirming", "Resubmission can only be requested during Data Confirming.")
     _require_reserved(case, actor)
     request_resubmission(case, actor, decisions, id_reason, poa_reason, note)
     _touch_level(case, "L1", actor)
@@ -399,7 +395,7 @@ def request_resubmission(case, actor, decisions, id_reason, poa_reason, note):
     """The part of Resubmit an analyst and the AI Agent share: record what
     the user must upload again and why, and move the case to Resubmit ID or
     Resubmit POA."""
-    _require(case["status"] in vocab.CONFIRMING, "Resubmission can only be requested during Data Confirming or Data Format.")
+    _require(case["status"] == "DataConfirming", "Resubmission can only be requested during Data Confirming.")
     decisions = [d for d in (decisions or []) if d in ("Resubmit ID", "Resubmit POA")]
     _require(decisions, "Choose what the user must resubmit.")
     if "Resubmit ID" in decisions:
@@ -425,8 +421,8 @@ def escalate(case, actor, reason, comment, fraud_typology="", alert_case=None):
     4.1.3 §2.1.1: the fraud tracker needs it); the investigation folder opens
     (§6.2); the linked screening case moves to L2; the router gives the case
     to an L2 analyst at once."""
-    _require(case["status"] in (*vocab.CONFIRMING, "DataScreening"),
-             "Only a case in Data Confirming, Data Format or Data Screening can be escalated from L1.")
+    _require(case["status"] in ("DataConfirming", "DataScreening"),
+             "Only a case in Data Confirming or Data Screening can be escalated from L1.")
     _require_reserved(case, actor)
     _require(reason in vocab.ESCALATE_REASONS, "Pick an escalation reason.")
     comment = _require_text(comment, "A comment")
