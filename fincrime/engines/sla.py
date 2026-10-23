@@ -42,7 +42,7 @@ def waiting_on_user(case):
     """An RFI sent that nobody holds (the AI Agent's): the case waits for the
     user's reply, not for an analyst (routing.level_for)."""
     return case.get("pending_reason") == "RFI Sent" and not case.get("current_reviewer") \
-        and case["status"] in ("DataConfirming", "DataScreening")
+        and case["status"] in ("DataConfirming", "DataFormat", "DataScreening")
 
 
 def chip(case, now=None):

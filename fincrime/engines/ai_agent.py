@@ -921,6 +921,13 @@ def perceive(case, render, call=None, sleep=time.sleep, wc=None):
 DOCUMENTS_READ = "the passport (both pages), the secondary ID and the proof of address"
 
 
+def to_format(case):
+    """Data Confirming → Data Format: the agent could not capture the details
+    (vocab.CONFIRMING). Another status (a person moved the case on) stays."""
+    if case["status"] == "DataConfirming":
+        case["status"] = "DataFormat"
+
+
 def decide(case, alert_case, wc, perceived):
     """The quick half: check the read and act on it. Mutates the case (and,
     when it confirms, the screening and watchlist cases the rules touch);
@@ -960,7 +967,9 @@ def decide(case, alert_case, wc, perceived):
             record["decision"] = "human"
             record["resubmit"] = resubmit_reason(record["read"], record["checks"])
             case["screening"]["workflow"] = "human-in-the-loop"
-            workflow._audit(case, ACTOR, "Sent to a person", "; ".join(record["reasons"]))
+            to_format(case)
+            workflow._audit(case, ACTOR, "Sent to a person", "; ".join(record["reasons"])
+                            + ". Data Format: the agent could not capture the details; an analyst confirms them.")
     else:
         record["decision"] = "verified" if case["status"] == "Verified" else "screening"
     if record.get("verdict"):
@@ -984,7 +993,7 @@ def _may_act_alone(case, alert_case, record):
     """Every document read, no watchlist alert left, nobody holding the case,
     and the screening left nothing for an analyst."""
     return not (record.get("error") or record.get("read_version", 1) < READ_VERSION or record.get("watchlist")
-                or case.get("current_reviewer") or case["status"] != "DataConfirming"
+                or case.get("current_reviewer") or case["status"] not in vocab.CONFIRMING
                 or ai_screening.classify(case, alert_case) != "auto-verified")
 
 
@@ -1181,16 +1190,19 @@ def ask_customer(case, record, ask):
                                       "Requested by the AI Agent: " + "; ".join(record["reasons"]))
     else:
         workflow.send_rfi(case, ACTOR, ask["text"])
+        if case["status"] == "DataFormat":
+            case["status"] = "DataConfirming"       # the agent has it in hand again: it waits on the customer
     record.update(decision=ask["kind"], requested=ask["text"], resubmit="")
     case["screening"]["workflow"] = "auto-verified"
 
 
 def needs_recheck(case):
     """A case the agent sent to a person under older checks, still in Data
-    Confirming, and untouched since: no one reserved it or acted on it."""
+    Format (or Data Confirming, stored before it), and untouched since: no
+    one reserved it or acted on it."""
     rec = case.get("ai_agent") or {}
     return (rec.get("decision") == "human" and bool(rec.get("read")) and not rec.get("error")
-            and rec.get("rules", 1) != RULES_VERSION and case["status"] == "DataConfirming"
+            and rec.get("rules", 1) != RULES_VERSION and case["status"] in vocab.CONFIRMING
             and not case.get("current_reviewer")
             and all(e.get("actor") == ACTOR for e in case.get("audit", []) if e.get("at", "") >= rec.get("at", "")))
 
@@ -1297,6 +1309,8 @@ def recheck(case, alert_case, wc):
         ask = customer_request(case, alert_case, old)
         if ask:
             ask_customer(case, old, ask)
+        else:
+            to_format(case)
         return old
     workflow._audit(case, ACTOR, "Checked again", "The agent's checks changed; the stored read now passes every one"
                     + (" once the record's slip is corrected." if failing else "."))

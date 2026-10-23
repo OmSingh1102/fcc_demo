@@ -77,8 +77,11 @@ other check passed, no alert is left and nobody holds the case:
 
 Anything blurred, cut off,
 expired, missing or different, a declined ID, or a model call that fails:
-the case stays with an analyst, labelled human-in-the-loop, and its page
-shows the reasons and what the agent read. An unreadable or covered ID stays
+the case goes to an analyst, labelled human-in-the-loop, in **Data Format**
+(the agent could not capture the details; the analyst confirms them exactly
+as in Data Confirming), and its page shows the reasons and what the agent
+read. Where the agent captured the details but a watchlist hit is left, the
+case is in **Data Screening**. An unreadable or covered ID stays
 with a person rather than being asked for again (what it hides may be the
 point), and so does a spelling the documents themselves disagree on.
 Companies, and cases a person already holds or has worked,
@@ -197,7 +200,7 @@ The case data is fictional, so nothing sensitive leaves the demo.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-156 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+157 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
