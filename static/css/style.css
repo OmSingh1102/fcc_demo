@@ -501,6 +501,44 @@ table.tbl td.sticky-right { background: var(--card); }
 table.tbl tbody tr:hover td.sticky-right { background: color-mix(in oklch, var(--muted) 60%, var(--card)); }
 table.tbl th.sticky-right { z-index: 2; }
 .table-foot .page-size { width: auto; height: 26px; padding: 0 6px; font-size: 12px; }
+/* The row an alert opens to on the screening case (templates/_alert_detail.html):
+   the + / − toggle, then Smart Review Results | Overview | Others over the
+   World-Check record, held to the visible width while the table scrolls. */
+.row-toggle { width: 18px; height: 18px; line-height: 15px; padding: 0; border: 1px solid var(--border); border-radius: 3px;
+    background: var(--card); color: var(--muted-foreground); font-size: 13px; cursor: pointer; }
+.row-toggle:hover { color: var(--primary); border-color: var(--primary); }
+table.tbl tbody tr.alert-detail:hover { background: transparent; }
+table.tbl tr.alert-detail > td { background: color-mix(in oklch, var(--muted) 35%, var(--card)); padding: 10px 14px 14px; white-space: normal; }
+.ad-wrap { position: sticky; left: 14px; }
+.ad-tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.ad-tab { background: none; border: 0; padding: 6px 0; font-size: 12.5px; color: var(--muted-foreground); cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.ad-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.ad-pane { display: none; }
+.ad-pane.show { display: block; }
+.ad-cols { display: grid; grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 1100px) { .ad-cols { grid-template-columns: 1fr; } }
+.ad-h { font-size: 13px; font-weight: 600; margin: 6px 0; }
+.ad-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 10px; }
+.ad-card h5 { font-size: 12px; font-weight: 600; margin: 12px 0 6px; }
+.ad-card h5:first-child { margin-top: 0; }
+.ad-card h5 .muted { font-weight: 400; margin-left: 4px; }
+.ad-card .no-data { padding: 10px 0; }
+.ad-kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 16px; }
+.ad-kv .l { display: block; font-size: 11px; color: var(--muted-foreground); }
+.ad-kv .v { display: block; font-size: 12.5px; margin-top: 1px; }
+table.ad-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.ad-table th { text-align: left; font-weight: 500; color: var(--muted-foreground); background: var(--muted); padding: 6px 10px; }
+table.ad-table td { padding: 6px 10px; border-top: 1px solid var(--border); vertical-align: top; }
+.ad-fold { border-top: 1px solid var(--border); padding: 6px 2px; font-size: 12.5px; }
+.ad-fold > summary { cursor: pointer; }
+.ad-fold[open] > summary { margin-bottom: 6px; }
+.ad-fold ul { margin: 2px 0 6px 18px; padding: 0; }
+.ad-tag { display: inline-block; font-size: 11px; padding: 1px 6px; border: 1px solid; border-radius: 3px; margin: 4px 0 2px; }
+.ad-tag.green { color: #15803d; border-color: #86efac; background: #f0fdf4; }
+.ad-tag.orange { color: #c2410c; border-color: #fdba74; background: #fff7ed; }
+.ad-date { font-size: 12px; font-weight: 600; margin-top: 4px; }
+.sr-hide { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 table.tbl .cell-id { font-family: ui-monospace, 'Consolas', monospace; font-size: 12px; white-space: nowrap; }
 table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-size: 11.5px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
 .table-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 8px 12px; font-size: 12px; color: var(--muted-foreground); border-top: 1px solid var(--border); }

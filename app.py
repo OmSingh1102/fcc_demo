@@ -995,12 +995,29 @@ def ns_case(alert_case_id):
     alert = _alert(alert_case_id)
     wc = WC_BY_ID.get(alert["id"])
     types = sorted({a["type"] for a in alert["alerts"] if a["type"]})
+    kyc = KYC_BY_ID.get(alert.get("kyc_case_id", ""))
     return render_template("ns_case.html", alert=alert, wc=wc, actor=_actor(), types=types,
-                           kyc=KYC_BY_ID.get(alert.get("kyc_case_id", "")), watch_labels=ai_agent.WATCH_LABELS,
+                           kyc=kyc, watch_labels=ai_agent.WATCH_LABELS, details=_alert_details(alert, wc, kyc),
                            counts=screening.tab_counts(alert["alerts"]), strategies=[r["label"] for r in ai_screening.RULES],
                            recommendation=recommendation.recommend_case_outcome(alert, wc),
                            ai_ready=ai_review.ready(), ai_why=ai_review.why_not(), ai_model=ai_review.MODEL,
                            ai_tone=ai_review.VERDICT_TONE)
+
+
+def _alert_details(alert, wc, kyc):
+    """{alert id: what its row opens to}: the World-Check record behind the
+    alert (Overview, Others), and Smart Review Results: the rules' verdicts
+    on it, submitted against matched data, the AI Agent's finding from the
+    documents."""
+    client = (kyc or {}).get("client") or {}
+    findings = {f["wc_id"]: f for f in ((((kyc or {}).get("ai_agent") or {}).get("watchlist") or {}).get("matches") or [])}
+    out = {}
+    for a in alert["alerts"]:
+        m = worldcheck.find_match(wc, a["match_id"]) if wc else None
+        out[a["id"]] = {"m": m, "rules": ai_screening.review_results(m, client) if m else [],
+                        "compare": worldcheck.comparison_rows(wc, m, client) if m else [],
+                        "finding": findings.get((m or {}).get("wc_id", ""))}
+    return out
 
 
 def _alert_action(alert_case_id, fn, *args, success="", open_modal="", **kwargs):

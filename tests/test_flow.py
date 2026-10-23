@@ -6,6 +6,7 @@ fincrime_state.db beside app.py.
 
 Run:  .venv\\Scripts\\python.exe -m unittest -v
 """
+import html
 import io
 import os
 import re
@@ -322,6 +323,35 @@ class FlowTestCase(unittest.TestCase):
         self.assertFalse(any(new_tab(a) for a in hrefs(audit, "/name_screening/case/", "/kyc/detail/")))
 
         self.assertEqual([a.get("href") for a in anchors(self.c.get(f"/wc/{aid}")) if new_tab(a)], [])
+
+    def test_an_alert_row_opens_to_its_world_check_record(self):
+        """Each alert row on the screening case opens to the World-Check
+        record behind it, as the real case has it: Smart Review Results (the
+        rules' verdicts said out loud), Overview, Others. The first is open."""
+        from fincrime.data.seed import wc_match
+        from fincrime.engines import ai_screening as ai
+        client = {"dob": "1988-02-11", "gender": "M", "nationality": "US"}
+        every = {"dob_mismatch": True, "gender_mismatch": True, "nationality_mismatch": True}
+        verdicts = lambda m, **kw: {r["label"]: r["verdict"] for r in ai.review_results(m, client, enabled=kw.get("en", every), guards={})}
+        self.assertEqual(verdicts(wc_match(key="r1", name="X", dobs=["1962"], gender="Male"))["DOB mismatch"], "fires")
+        same = verdicts(wc_match(key="r2", name="X", dobs=["11-Feb-1988"], gender="Female"))
+        self.assertEqual((same["DOB mismatch"], same["Gender mismatch"]), ("vetoed", "vetoed"))   # the exact DOB stops every rule
+        self.assertEqual(verdicts(wc_match(key="r3", name="X", dobs=["1988"], gender="Male"),
+                                  en=dict(every, nationality_mismatch=False))["Nationality mismatch"], "off")
+
+        self.login("amara.iyer")
+        t = self.K["taylor"]
+        aid = t["screening"]["alert_case_id"]
+        page = self.c.get(f"/name_screening/case/{aid}").data.decode("utf-8")
+        n = len(fcc.ALERT_BY_ID[aid]["alerts"])
+        self.assertEqual((page.count('<tr class="alert-detail hidden"'), page.count('class="row-toggle"')), (n, n))
+        for needle in ("Smart Review Results", "Overview", "Others", "Key Data", "Basic Info", "Record Update", "Date Details",
+                       "Location Details", "Identification Numbers", "Aliases", "Further Information", "[BIOGRAPHY]", "[REPORTS]",
+                       "Keywords", "AI screening rules", "Submitted against matched data"):
+            self.assertIn(needle, page, needle)
+        m = fcc.worldcheck.find_match(fcc.WC_BY_ID[aid], fcc.ALERT_BY_ID[aid]["alerts"][0]["match_id"])
+        self.assertIn(html.escape(m["further_info"]["biography"]), page)
+        self.assertEqual(page.count('class="open"'), 1)                              # the first alert starts open
 
     def test_ai_rules_evaluate(self):
         """The rule book on synthetic records: fires only on present,

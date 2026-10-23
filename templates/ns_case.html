@@ -119,12 +119,13 @@
         <div class="tbl-scroll">
             <table class="tbl dense" id="alert-table">
                 <thead><tr>
-                    <th style="width:40px"><input type="checkbox" id="pick-all" title="Tick every alert shown" aria-label="Tick every alert shown" onchange="afPickAll(this)"></th><th>Alert ID</th><th>Vendor</th><th>Watch List ID</th><th>Alert Outcome</th><th>AI assessment</th><th>Smart Strategy</th><th>Name</th><th>Matched Alias</th>
+                    <th style="width:28px"><span class="sr-hide">Open</span></th><th style="width:40px"><input type="checkbox" id="pick-all" title="Tick every alert shown" aria-label="Tick every alert shown" onchange="afPickAll(this)"></th><th>Alert ID</th><th>Vendor</th><th>Watch List ID</th><th>Alert Outcome</th><th>AI assessment</th><th>Smart Strategy</th><th>Name</th><th>Matched Alias</th>
                     <th>Score</th><th>Type</th><th>Date of Birth (DD-MM-YYYY)</th><th>Gender</th><th>Last Resolved By</th><th>Last Resolved Time</th><th>Rationale</th><th>Risk</th><th></th>
                 </tr></thead>
                 <tbody>
                 {% for a in alert.alerts %}
-                <tr data-outcome="{{ a.outcome }}" data-mode="{{ a.review_mode }}" data-wl="{{ a.watchlist_id }}" data-type="{{ a.type }}" data-smart="{{ a.smart_strategy }}">
+                <tr data-outcome="{{ a.outcome }}" data-mode="{{ a.review_mode }}" data-wl="{{ a.watchlist_id }}" data-type="{{ a.type }}" data-smart="{{ a.smart_strategy }}"{% if loop.first %} class="open"{% endif %}>
+                    <td><button type="button" class="row-toggle" aria-expanded="false" aria-label="Show the World-Check record behind {{ a.name }}" title="Show or hide the World-Check record" onclick="adToggle(this)">+</button></td>
                     <td><input type="checkbox" name="pick" value="{{ a.id }}" aria-label="Tick {{ a.name }}" data-name="{{ a.name }}" data-label="{{ a.result_label }}" data-rationale="{{ a.rationale }}" data-risk="{{ a.risk_level }}" data-match="{{ a.match_id }}" data-ai="{% if a.ai_assessment %}{{ a.ai_assessment.verdict }}, {{ a.ai_assessment.confidence }}% — {{ a.ai_assessment.summary }}{% if a.ai_assessment.missing_data %} Missing: {{ a.ai_assessment.missing_data|join('; ') }}.{% endif %} ({{ a.ai_assessment.model }}){% endif %}" data-ai-outcome="{{ a.ai_assessment.suggested_outcome if a.ai_assessment else '' }}" onchange="afPick()"></td>
                     <td><span class="cell-hex" title="{{ a.id }}">{{ a.id }}</span></td>
                     <td><span class="badge emerald">{{ a.vendor }}</span></td>
@@ -144,8 +145,9 @@
                     <td>{% if a.risk_level %}{{ outcome_badge(a.risk_level) }}{% else %}-{% endif %}</td>
                     <td><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=alert.id, match_id=a.match_id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open in WC<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
                 </tr>
+                {% include "_alert_detail.html" %}
                 {% else %}
-                <tr><td colspan="18"><div class="no-data">{{ icon('search') }}No data</div></td></tr>
+                <tr><td colspan="19"><div class="no-data">{{ icon('search') }}No data</div></td></tr>
                 {% endfor %}
                 </tbody>
             </table>
@@ -209,8 +211,32 @@
         html += '<a href="#" data-p="' + (page + 1) + '" class="' + (page === pages ? 'dis' : '') + '">&rsaquo;</a>';
         pg.innerHTML = html;
         pg.querySelectorAll('a').forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); page = parseInt(a.dataset.p, 10); paint(); }); });
+        syncDetails();
         if (window.afPick) { afPick(); }
     }
+    /* An alert row opens to its World-Check record (templates/_alert_detail.html):
+       the + / − toggle, the detail row showing only under an open row the
+       filters and paging show, and its three tabs. The panel is held to the
+       visible width of the scrolling table, so it reads without scrolling. */
+    function syncDetails() {
+        var width = document.querySelector('#alert-table').parentElement.clientWidth;
+        rows.forEach(function (r) {
+            var det = r.nextElementSibling, b = r.querySelector('.row-toggle');
+            if (!det || !det.classList.contains('alert-detail')) { return; }
+            var open = r.classList.contains('open') && !r.classList.contains('hidden');
+            det.classList.toggle('hidden', !open);
+            if (b) { b.textContent = r.classList.contains('open') ? '−' : '+'; b.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+            var wrap = det.querySelector('.ad-wrap');
+            if (wrap) { wrap.style.width = Math.max(320, width - 30) + 'px'; }
+        });
+    }
+    window.adToggle = function (btn) { btn.closest('tr').classList.toggle('open'); syncDetails(); };
+    window.adTab = function (btn) {
+        var det = btn.closest('.alert-detail');
+        det.querySelectorAll('.ad-tab').forEach(function (t) { t.classList.toggle('active', t === btn); });
+        det.querySelectorAll('.ad-pane').forEach(function (p) { p.classList.toggle('show', p.dataset.pane === btn.dataset.pane); });
+    };
+    window.addEventListener('resize', syncDetails);
     window.afApply = function () { page = 1; paint(); };
     window.afTab = function (btn) {
         tab = btn.dataset.tab; page = 1;

@@ -219,6 +219,51 @@ def evaluate(match, client, *, enabled=None, guards=None):
     return "", ""
 
 
+def review_results(match, client, *, enabled=None, guards=None):
+    """Each rule's verdict on one record, for the screening case's Smart
+    Review Results: [{label, verdict, detail}], verdict one of "fires",
+    "does not fire", "off" or "vetoed". The same tests as evaluate(), said
+    out loud; it decides nothing."""
+    en = rules_enabled() if enabled is None else enabled
+    gd = guards_enabled() if guards is None else guards
+    listed = ", ".join(match.get("dobs") or []) or "none"
+    state = dob_state(client.get("dob", ""), match.get("dobs") or [])
+    out = []
+    if gd.get("san_review") and "SAN" in (match.get("types") or []):
+        out.append({"label": GUARD_BY_KEY["san_review"]["label"], "verdict": "vetoed",
+                    "detail": "A sanctions record: no rule clears it, an analyst decides."})
+    if state == "same":
+        dob = ("vetoed", f"The record lists the client's exact date of birth ({_pretty(client.get('dob', ''))}): "
+                         "always a person's decision, whatever else differs.")
+    elif state == "conflict":
+        dob = ("fires", f"Every date the record lists conflicts with the client's: listed {listed}; client {_pretty(client.get('dob', ''))}.")
+    else:
+        dob = ("does not fire", f"The listed date of birth ({listed}) does not rule the client out "
+                                f"(client {_pretty(client.get('dob', '')) or 'unknown'}): a year that matches, a range, "
+                                "day and month swapped, or no date at all.")
+    cg, mg = _client_gender(client), (match.get("gender") or "").strip().title()
+    if not (cg and mg in ("Male", "Female")):
+        gender = ("does not fire", f"Both genders are needed: record {mg or 'not listed'}; client {cg or 'not known'}.")
+    else:
+        gender = ("fires", f"Record {mg}; client {cg}.") if cg != mg else ("does not fire", f"The same gender: {cg}.")
+    name = vocab.COUNTRY_NAMES.get((client.get("nationality") or "").upper(), "")
+    cit = (match.get("citizenship") or "").strip()
+    if not (name and cit):
+        nat = ("does not fire", f"Both are needed: record {cit or 'not listed'}; client {name or 'not known'}.")
+    elif name.lower() not in cit.lower():
+        nat = ("fires", f"Record {cit}; client {name}.")
+    else:
+        nat = ("does not fire", f"The record's citizenship includes the client's nationality ({name}).")
+    veto = bool(out) or state == "same"            # the sanctions guard, or the exact date of birth, stops every rule
+    for key, (verdict, detail) in (("dob_mismatch", dob), ("gender_mismatch", gender), ("nationality_mismatch", nat)):
+        if not en.get(key) and verdict != "vetoed":
+            verdict, detail = "off", "Switched off on the AI Screening page. " + RULE_BY_KEY[key]["checks"]
+        elif veto and verdict == "fires":
+            verdict, detail = "vetoed", detail + " It would fire, but the record goes to an analyst all the same."
+        out.append({"label": RULE_BY_KEY[key]["label"], "verdict": verdict, "detail": detail})
+    return out
+
+
 # ── the workflow label ───────────────────────────────────────────────────────
 
 def classify(kyc, alert):
