@@ -130,6 +130,22 @@ document.addEventListener('click', function (e) {
     var p = new URLSearchParams(location.search).get('open');
     if (p) { openModal(p); }
 })();
+/* Screening views (the screening case, the World-Check case and its matches)
+   open in a browser window of their own beside the case. A link marked
+   data-new-window opens a window named by that value, so a second click brings
+   the same window forward instead of opening another. Ctrl, Shift or a middle
+   click, or a browser that blocks the window, keep the browser's own
+   behaviour: the link's target="_blank" tab. */
+document.addEventListener('click', function (e) {
+    var a = e.target.closest ? e.target.closest('a[data-new-window]') : null;
+    if (!a || e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey
+        || !a.getAttribute('href') || a.getAttribute('href') === '#') { return; }
+    var w = Math.min(1440, screen.availWidth - 60), h = Math.min(1000, screen.availHeight - 60);
+    var left = (screen.availLeft || 0) + Math.max(0, screen.availWidth - w - 20), top = (screen.availTop || 0) + 20;
+    var win = window.open(a.href, a.getAttribute('data-new-window'),
+                          'popup=yes,width=' + w + ',height=' + h + ',left=' + left + ',top=' + top);
+    if (win) { e.preventDefault(); try { win.focus(); } catch (err) { /* another origin */ } }
+});
 </script>
 {% block extra_js %}{% endblock %}
 </body>

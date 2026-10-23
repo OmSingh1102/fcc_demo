@@ -65,7 +65,7 @@
             <div><span class="l">Last Screen Time</span><span class="v">{{ alert.last_screen_time }} (UTC)</span></div>
             <div><span class="l">KYC Triggered Date</span><span class="v"></span></div>
             <div><span class="l">KYC Case</span><span class="v"><a href="{{ url_for('kyc_detail', case_id=alert.kyc_case_id) }}" class="mono">{{ alert.kyc_case_id }}</a></span></div>
-            <div><span class="l">Watchlist case</span><span class="v"><a href="{{ url_for('wc_case', wc_case_id=alert.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open in World-Check console<span class="ext-ic">{{ icon('external-link') }}</span></a></span></div>
+            <div><span class="l">Watchlist case</span><span class="v"><a href="{{ url_for('wc_case', wc_case_id=alert.id) }}" target="_blank" rel="noopener" data-new-window="worldcheck-{{ alert.id }}" title="Opens in a new window">Open in World-Check console<span class="ext-ic">{{ icon('external-link') }}</span></a></span></div>
         </div>
         <div class="row mt-12">
             <span class="small">Case outcome: {% if alert.case_outcome %}<b>{{ alert.case_outcome.value }}</b>{% else %}<span class="muted">none yet</span>{% endif %}</span>
@@ -142,7 +142,7 @@
                     <td class="nowrap">{{ a.resolved_at or '-' }}</td>
                     <td>{{ a.rationale or '-' }}</td>
                     <td>{% if a.risk_level %}{{ outcome_badge(a.risk_level) }}{% else %}-{% endif %}</td>
-                    <td><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=alert.id, match_id=a.match_id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open in WC<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
+                    <td><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=alert.id, match_id=a.match_id) }}" target="_blank" rel="noopener" data-new-window="worldcheck-{{ alert.id }}" title="Opens in a new window">Open in WC<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
                 </tr>
                 {% else %}
                 <tr><td colspan="18"><div class="no-data">{{ icon('search') }}No data</div></td></tr>

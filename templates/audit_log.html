@@ -26,7 +26,7 @@
         <tr data-kind="{{ r.kind }}" data-actor="{{ r.actor_name }}" data-action="{{ r.action }}" data-text="{{ (r.label ~ ' ' ~ r.record_id ~ ' ' ~ r.detail ~ ' ' ~ r.actor_name)|lower }}">
             <td class="nowrap">{{ r.at }}</td>
             <td class="nowrap">{{ r.actor_name }}</td>
-            <td class="nowrap"><a href="{{ url_for(r.endpoint, **r.args) }}"{% if r.kind == 'wc' %} target="_blank" rel="noopener" title="Opens in a new tab"{% endif %}>{{ r.kind_label }}{% if r.kind == 'wc' %}<span class="ext-ic">{{ icon('external-link') }}</span>{% endif %}</a><br><span class="tiny muted mono">{{ r.record_id[:19] }}</span></td>
+            <td class="nowrap"><a href="{{ url_for(r.endpoint, **r.args) }}"{% if r.kind == 'wc' %} target="_blank" rel="noopener" data-new-window="worldcheck-{{ r.args.wc_case_id }}" title="Opens in a new window"{% endif %}>{{ r.kind_label }}{% if r.kind == 'wc' %}<span class="ext-ic">{{ icon('external-link') }}</span>{% endif %}</a><br><span class="tiny muted mono">{{ r.record_id[:19] }}</span></td>
             <td class="strong nowrap">{{ r.label }}</td>
             <td class="nowrap">{{ r.action }}</td>
             <td><span class="ellipsis" title="{{ r.detail }}" style="max-width:520px">{{ r.detail }}</span></td>

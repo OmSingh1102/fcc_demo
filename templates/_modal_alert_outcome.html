@@ -28,7 +28,7 @@
             <div><label class="btn btn-primary btn-sm" style="cursor:pointer">{{ icon('upload') }} Upload File<input type="file" style="display:none" onchange="document.getElementById('ao-attach').value=this.files[0]?this.files[0].name:'';document.getElementById('ao-fname').textContent=this.files[0]?this.files[0].name:''"></label>
                 <input type="hidden" name="attachment" id="ao-attach"><span class="small" id="ao-fname"></span>
                 <div class="tiny muted">Supported format: pdf, xlsx, csv, jpg, jpeg, gif, png, docx, txt</div></div></div>
-        <div class="small muted">The prefilled label, rationale and risk come from the resolution recorded in the watchlist console. <a id="ao-wc-link" data-base="{{ url_for('wc_case', wc_case_id=alert.id) }}/match/" href="#" target="_blank" rel="noopener" title="Opens in a new tab">Review it there<span class="ext-ic">{{ icon('external-link') }}</span></a> before confirming.</div>
+        <div class="small muted">The prefilled label, rationale and risk come from the resolution recorded in the watchlist console. <a id="ao-wc-link" data-base="{{ url_for('wc_case', wc_case_id=alert.id) }}/match/" href="#" target="_blank" rel="noopener" data-new-window="worldcheck-{{ alert.id }}" title="Opens in a new window">Review it there<span class="ext-ic">{{ icon('external-link') }}</span></a> before confirming.</div>
     </div>
     <div class="modal-foot"><span class="spacer"></span>
         <button type="button" class="btn btn-outline btn-sm" onclick="closeModal('alert-outcome')">Cancel</button>

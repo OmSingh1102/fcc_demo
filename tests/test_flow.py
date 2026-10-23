@@ -301,6 +301,8 @@ class FlowTestCase(unittest.TestCase):
         to_wc = hrefs(cms, "/wc/")
         self.assertGreaterEqual(len(to_wc), 2)          # the console link and the per-match button
         self.assertTrue(all(new_tab(a) for a in to_wc), [a["href"] for a in to_wc if not new_tab(a)])
+        # a window of their own, one per watchlist case (base.html opens a[data-new-window] as a popup)
+        self.assertEqual({a.get("data-new-window") for a in to_wc}, {f"worldcheck-{aid}"})
         popup = [a for a in cms if a.get("id") == "ao-wc-link"]   # its address is set by the page script
         self.assertTrue(popup and new_tab(popup[0]))
         others = [a.get("href") for a in cms if new_tab(a) and "/wc/" not in (a.get("href") or "") and a.get("id") != "ao-wc-link"]
@@ -310,6 +312,8 @@ class FlowTestCase(unittest.TestCase):
         case_page = anchors(self.c.get(f"/kyc/detail/{t['id']}"))
         details = hrefs(case_page, "/name_screening/case/")
         self.assertTrue(details and all(new_tab(a) for a in details))          # the Details buttons
+        self.assertTrue(all(a.get("data-new-window") == "screening-" + a["href"].rsplit("/", 1)[-1] for a in details))
+        self.assertIn("a[data-new-window]", self.c.get(f"/kyc/detail/{t['id']}").data.decode("utf-8"))
         other = [a.get("href") for a in case_page if new_tab(a) and "/name_screening/case/" not in (a.get("href") or "")
                  and "/documents/" not in (a.get("href") or "") and a.get("href")]
         self.assertEqual(other, [])                                              # nothing else on the case page
