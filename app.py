@@ -31,7 +31,7 @@ except ImportError:  # pragma: no cover
 # ─── Modular imports ───────────────────────────────────────────────────────────
 from fincrime.adapters import idv_vendor
 from fincrime.analytics.audit_log import AuditLogConsole
-from fincrime.analytics.case_list import CaseListConsole, read_query as read_case_query
+from fincrime.analytics.case_list import PAGE_SIZES, PER_PAGE, CaseListConsole, read_query as read_case_query
 from fincrime.analytics.ai_console import AiScreeningConsole
 from fincrime.analytics.dashboard import AnalyticsConsole
 from fincrime.analytics.pipeline import PipelineConsole
@@ -652,11 +652,23 @@ def _pager(page, pages):
             "prev": link(page - 1) if page > 1 else "", "next": link(page + 1) if page < pages else ""}
 
 
+def _case_page_size():
+    """Rows a page on the case list: ?per_page= (one of PAGE_SIZES) chooses
+    it, and the choice holds for the rest of the session, through Search,
+    Clear and the menu link."""
+    asked = request.args.get("per_page", "")
+    if asked.isdigit() and int(asked) in PAGE_SIZES:
+        session["case_per_page"] = int(asked)
+    size = session.get("case_per_page", PER_PAGE)
+    return size if size in PAGE_SIZES else PER_PAGE
+
+
 @app.route("/kyc/list")
 def kyc_list():
-    vm = CaseListConsole.compute(KYC_CASES, _tenant(), _actor(), query=read_case_query(request.args))
+    vm = CaseListConsole.compute(KYC_CASES, _tenant(), _actor(), query=read_case_query(request.args),
+                                 per_page=_case_page_size())
     return render_template("kyc_list.html", rows=vm["rows"], total=vm["total"], shown=vm["shown"], filters=vm["filters"],
-                           query=vm["query"], per_page=vm["per_page"], first=vm["first"], last=vm["last"],
+                           query=vm["query"], per_page=vm["per_page"], page_sizes=PAGE_SIZES, first=vm["first"], last=vm["last"],
                            pages=_pager(vm["page"], vm["pages"]), can_upload=CASE_BOOK == "file",
                            can_assign=bool(_levels() & {"L2", "QC"}))      # kyc_bulk_assign's roles
 

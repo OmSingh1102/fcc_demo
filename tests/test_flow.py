@@ -534,9 +534,27 @@ class FlowTestCase(unittest.TestCase):
                                          'id="f-status-box"', 'id="f-created-from"', 'id="f-reviewer"')]
         self.assertEqual(first, sorted(first))
 
+    def test_case_list_page_size_and_frozen_details(self):
+        """The real list's "N / Page" menu (10 by default, the choice kept
+        for the session) and a Details column frozen at the right edge."""
+        self.login("amara.iyer")
+        page = self.c.get("/kyc/list").data.decode("utf-8")
+        self.assertEqual(page.count("<tr data-case-id="), 10)
+        self.assertIn('id="page-size"', page)
+        for n in (10, 20, 30, 40, 50, 100):
+            self.assertIn(f'<option value="{n}"', page)
+        self.assertIn('<option value="10" selected>10 / Page</option>', page)
+        self.assertEqual(self.c.get("/kyc/list?per_page=20").data.decode("utf-8").count("<tr data-case-id="), 20)
+        later = self.c.get("/kyc/list?status=DataConfirming").data.decode("utf-8")    # the size holds: Search, the menu link
+        self.assertIn('<option value="20" selected>20 / Page</option>', later)
+        self.assertEqual(self.c.get("/kyc/list?per_page=7").data.decode("utf-8").count("<tr data-case-id="), 20)   # not a choice
+        self.assertIn('<th class="sticky-right">Details</th>', page)
+        self.assertEqual(page.count('<td class="sticky-right">'), 10)
+
     def test_case_list_filters_and_pages_on_the_server(self):
         """The filters, the sort and the page are query parameters the server
-        applies, so a thousand-case book still sends one 100-row page."""
+        applies, so a thousand-case book still sends one page (10 rows, or
+        what the "N / Page" menu picks)."""
         from werkzeug.datastructures import MultiDict
         from fincrime.analytics.case_list import CaseListConsole, read_query
         self.login("amara.iyer")
@@ -547,7 +565,7 @@ class FlowTestCase(unittest.TestCase):
         self.assertIn('value="taylor"', page)                               # the box keeps what was typed
         self.assertIn("1 of", page)
         verified = [c for c in fcc.KYC_CASES if c["tenant"] == "ttlive" and c["status"] == "Verified"]
-        page = self.c.get("/kyc/list?status=Verified&status=Rejected").data.decode("utf-8")
+        page = self.c.get("/kyc/list?status=Verified&status=Rejected&per_page=100").data.decode("utf-8")
         self.assertEqual(page.count('data-status="Verified"'), len(verified))
         self.assertNotIn('data-status="DataConfirming"', page)
         self.assertIn('value="Verified" checked', page)

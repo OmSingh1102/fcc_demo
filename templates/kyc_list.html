@@ -11,7 +11,8 @@
 </div>
 
 {# One GET form: the filters, the sort and the page live in the URL and run
-   on the server (fincrime/analytics/case_list.py), 100 rows a page. #}
+   on the server (fincrime/analytics/case_list.py), 10 rows a page unless
+   the footer's "N / Page" picks another size. #}
 <form method="get" action="{{ url_for('kyc_list') }}" id="filters-card" class="card filters-card">
     <input type="hidden" name="sort" id="f-sort" value="{{ query.sort }}">
     <input type="hidden" name="priority" id="f-priority" value="{{ '1' if query.priority else '' }}">
@@ -49,7 +50,7 @@
                 <th>Current Reviewer</th>
                 <th>Vendor</th>
                 <th>SLA</th>
-                <th>Details</th>
+                <th class="sticky-right">Details</th>
             </tr>
             </thead>
             <tbody>
@@ -68,7 +69,7 @@
                 <td class="nowrap">{% if r.mine %}<b>{{ r.current_reviewer }}</b>{% else %}{{ r.current_reviewer or '-' }}{% endif %}</td>
                 <td>{{ r.vendor or '-' }}</td>
                 <td>{{ sla_chip(r.sla) }}</td>
-                <td><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('kyc_detail', case_id=r.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
+                <td class="sticky-right"><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('kyc_detail', case_id=r.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
             </tr>
             {% else %}
             <tr><td colspan="{{ 14 if can_assign else 13 }}"><div class="no-data">{{ icon('search') }}No case matches these filters</div></td></tr>
@@ -79,7 +80,9 @@
     <div class="table-foot">
         <span>{% if shown %}{{ first }}&ndash;{{ last }} of {% endif %}Total: <b id="total-count">{{ shown }}</b></span>
         {{ pager(pages) }}
-        <span>{{ per_page }} / Page</span>
+        <select class="input input-sm page-size" id="page-size" aria-label="Rows a page" onchange="setPageSize(this.value)">
+            {% for n in page_sizes %}<option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }} / Page</option>{% endfor %}
+        </select>
     </div>
 </div>
 
@@ -176,6 +179,14 @@
         summary.textContent = folded ? ('More filters hidden' + (n ? ' · ' + n + ' of them active' : '')) : '';
         summary.classList.toggle('hidden', !folded);
     }
+    // "N / Page": the same filters and sort, from the first page, at the new
+    // size (the server keeps the size for the session).
+    window.setPageSize = function (n) {
+        var u = new URL(location.href);
+        u.searchParams.set('per_page', n);
+        u.searchParams.delete('page');
+        location.href = u.toString();
+    };
     window.toggleFilters = function () {
         card.classList.toggle('folded');
         try { localStorage.setItem(FOLD_KEY, card.classList.contains('folded') ? '1' : '0'); } catch (e) { /* no storage: still folds */ }

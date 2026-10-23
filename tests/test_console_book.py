@@ -233,10 +233,11 @@ class ConsoleBookTestCase(unittest.TestCase):
     # the lists, routing and search --------------------------------------------
     def test_case_list_and_queue_are_paged(self):
         self.login("amara.iyer")
-        page = self.c.get("/kyc/list").data.decode("utf-8")
+        self.assertEqual(self.c.get("/kyc/list").data.decode("utf-8").count('data-case-id="'), 10)    # the real list's 10 / Page
+        page = self.c.get("/kyc/list?per_page=100").data.decode("utf-8")
         self.assertEqual(page.count('data-case-id="'), 100)
         self.assertIn('Total: <b id="total-count">943</b>', page)
-        self.assertEqual(self.c.get("/kyc/list?page=10").data.decode("utf-8").count('data-case-id="'), 43)
+        self.assertEqual(self.c.get("/kyc/list?per_page=100&page=10").data.decode("utf-8").count('data-case-id="'), 43)
         page = self.c.get("/kyc/list?case_id=kyc-2026-3011").data.decode("utf-8")
         self.assertEqual(page.count('data-case-id="'), 1)
         self.assertIn('data-case-id="KYC-2026-3011"', page)

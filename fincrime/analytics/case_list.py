@@ -12,7 +12,9 @@ from fincrime.data import vocab
 from fincrime.engines import ai_agent, sla
 from fincrime.utils.text import display_name
 
-PER_PAGE = 100
+# Rows a page: the real list's "N / Page" choices, 10 by default as it opens.
+PAGE_SIZES = (10, 20, 30, 40, 50, 100)
+PER_PAGE = 10
 
 # Query parameters: the filter grid's control ids without their "f-" prefix.
 TEXT_FILTERS = (("case_id", "id"), ("client_id", "client_id"), ("name", "name"), ("idnum", "id_number"),
