@@ -20,7 +20,7 @@
         {% include "_filter_grid.html" %}
         <div class="toolbar">
             <button type="button" class="btn btn-primary btn-sm" onclick="toggleSort()" id="sort-btn">{% if query.sort == 'asc' %}&#8593; Oldest to Latest{% else %}{{ icon('chevron-down') }} Latest to Oldest{% endif %}</button>
-            <span class="rowcount" id="rowcount">{% if shown != total %}{{ shown }} of {{ total }} match{% endif %}</span>
+            <span class="rowcount" id="rowcount">{% if searched and shown != total %}{{ shown }} of {{ total }} match{% endif %}</span>
             <span class="small muted hidden" id="filters-summary"></span>
             <div class="right">
                 <a class="btn btn-outline btn-sm" href="{{ url_for('kyc_list') }}">Clear</a>
@@ -68,14 +68,14 @@
                 <td class="sticky-right"><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('kyc_detail', case_id=r.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
             </tr>
             {% else %}
-            <tr><td colspan="{{ 12 if can_assign else 11 }}"><div class="no-data">{{ icon('search') }}No case matches these filters</div></td></tr>
+            <tr><td colspan="{{ 12 if can_assign else 11 }}"><div class="no-data" id="{{ 'no-match' if searched else 'not-searched' }}">{{ icon('search') }}{% if searched %}No case matches these filters{% else %}Press Search to list cases{% endif %}</div></td></tr>
             {% endfor %}
             </tbody>
         </table>
     </div>
     <div class="table-foot">
-        <span>{% if shown %}{{ first }}&ndash;{{ last }} of {% endif %}Total: <b id="total-count">{{ shown }}</b></span>
-        {{ pager(pages) }}
+        {% if searched %}<span>{% if shown %}{{ first }}&ndash;{{ last }} of {% endif %}Total: <b id="total-count">{{ shown }}</b></span>
+        {{ pager(pages) }}{% else %}<span></span>{% endif %}
         <select class="input input-sm page-size" id="page-size" aria-label="Rows a page" onchange="setPageSize(this.value)">
             {% for n in page_sizes %}<option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }} / Page</option>{% endfor %}
         </select>
