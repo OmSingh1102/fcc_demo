@@ -161,13 +161,19 @@ POLICY = ("The ID must be fully legible (all four edges and the MRZ in shot, not
           "address must be legible, issued within the last 6 months (except an Aadhaar card: it is a permanent "
           "card, so its date of issue does not matter), and show the customer's registered address. The secondary ID "
           "must be legible and name the same person, born on the same day, as the passport or the record (it may write "
-          "the name another way: an initial, surname particles run together, a married name the record keeps); its "
+          "the name another way: an initial, surname particles run together); one in a surname the passport does not "
+          "print (a married or maiden name) needs the marriage certificate that links the two, which is not among these "
+          "documents, even when the record keeps both surnames; its "
           "address is not the address evidence. An endorsement on the passport's back page is for a person to read. "
           "On 1 July 2025 Vietnam merged provinces and abolished district-level units, so an address may name a "
           "former province or district where the other names the province it joined; that is the same place. "
           f"Former → current: {_vn_mergers()}.")
 # Bumped when POLICY changes: verdicts given under an older one are redone.
-# 4: every document, and the open watchlist records.
+# 4: every document, and the open watchlist records. Not bumped on
+# 2026-10-25, when a secondary ID in a surname the passport does not print
+# stopped passing because the record keeps both surnames: that sentence
+# bears only on the cases the checks decide again for it (rules 13), and
+# redecide asks those again; every other verdict would read the same.
 POLICY_VERSION = 4
 # A verdict call that failed (a busy gateway) is asked again on later agent
 # runs, one try per run, this many tries in all.
@@ -187,18 +193,23 @@ VERDICT_TRIES = 3
 # (address_update). 12: an anglicised first name, with the naturalisation
 # certificate on the case, is the record's slip: it takes the passport's legal
 # name and keeps the one the customer goes by as the preferred name (name_slip).
-RULES_VERSION = 12
+# 13: a secondary ID in a surname the passport does not print fails, even when
+# the record keeps both surnames (_second_surname); with nothing else wrong the
+# customer is asked for the marriage certificate (name_link_request).
+RULES_VERSION = 13
 POA_NAME_RULES = 4    # the first checks to want the proof of address's name: reads before them may lack it (needs_reread)
 # The last change to the name rules (5: the holder's own given name; 10: one
 # word, one part of the name; 11: no anglicised first name; 12: an anglicised
-# first name settled by the naturalisation certificate on the case): a case
-# confirmed before it is checked again on its names (confirmed_on_older_names),
-# and one asked about its names before is decided again (asked_on_older_names).
-NAME_RULES = 12
+# first name settled by the naturalisation certificate on the case; 13: a
+# secondary ID in a surname the passport does not print): a case confirmed
+# before it is checked again on its names (confirmed_on_older_names), and one
+# asked about its names before is decided again (asked_on_older_names).
+NAME_RULES = 13
 # The last change to the address the agent writes back (11: a disputed postal
 # code stays; a unit number is no ZIP): address_written_otherwise.
 ADDRESS_RULES = 11
-# What perceive() returns: a stored read decided again keeps all of it.
+# What perceive() returns: a stored read decided again keeps it (redecide
+# leaves out Claude's verdict, which is asked again).
 PERCEIVED = ("at", "model", "read", "usage", "seconds", "error", "verdict", "read_version")
 # What a read covers. 1: the passport's data page and the proof of address.
 # 2: every document on the case. A case read under 1 that no person has
@@ -779,6 +790,23 @@ def _check(out, check, crm, document, ok, note="", info=False):
     out.append(row)
 
 
+SECOND_SURNAME = "Name on the secondary ID is in a surname the passport does not print (a married or maiden name)"
+
+
+def _second_surname(record, idr, printed):
+    """The words of the name a secondary ID prints that are a surname the
+    passport does not print, when the record keeps them beside the passport's
+    own surname (SEEMA VERMA PANDEY: the passport's VERMA, the Aadhaar's SEEMA
+    PANDEY): a married or maiden name. The record keeping both surnames links
+    nothing; the marriage certificate does (name_link_request). [] when the
+    record lacks the passport's surname: the name check fails on it already."""
+    s, g = similarity.tokens(idr.get("surname", "")), similarity.tokens(idr.get("given_names", ""))
+    rec = similarity.tokens(record)
+    if not s or not set(s) <= set(rec):
+        return []
+    return [t for t in similarity.tokens(printed) if t in rec and t not in s and _foreign(t, set(s + g))]
+
+
 def _other_documents(case, got, out, printed):
     """The checks on the passport's back page and the secondary ID. Only a
     read of every document has them (READ_VERSION 2): an older read is
@@ -804,12 +832,14 @@ def _other_documents(case, got, out, printed):
     idr = got.get("id") or {}
     on_passport = bool(printed) and holder_named(name, idr.get("surname", ""), idr.get("given_names", ""), country)
     on_record = same_holder(name, client["legal_name"], filed=filed, country=country)
+    other_surname = on_record and not on_passport and bool(printed) and bool(_second_surname(client["legal_name"], idr, name))
     shown = name or "not read"
     if name and on_record and not on_passport and printed:
         shown += f" (the record's name; the passport reads {printed})"
-    _check(out, "Name on secondary ID", client["legal_name"], shown, on_passport or on_record,
-           "" if on_passport or on_record else ("No name could be read on the secondary ID" if not name
-                                                else "Name on the secondary ID matches neither the passport nor the CRM"))
+    ok = on_passport or (on_record and not other_surname)
+    _check(out, "Name on secondary ID", client["legal_name"], shown, ok,
+           "" if ok else ("No name could be read on the secondary ID" if not name else SECOND_SURNAME if other_surname
+                          else "Name on the secondary ID matches neither the passport nor the CRM"))
     dob = sec.get("dob", "")
     ok = not dob or dob == client["dob"]
     _check(out, "Date of birth on secondary ID", client["dob"], dob or "not printed", ok,
@@ -1083,7 +1113,11 @@ def name_link_request(case, got, found):
     marriage certificate), or the record's surname with given names none of
     the documents prints (an anglicised name: the naturalisation
     certificate, asked for only when the secondary ID is something else;
-    when it is the certificate, name_slip settles the name)."""
+    when it is the certificate, name_slip settles the name), or a record
+    that keeps both surnames beside a secondary ID in the one the passport
+    does not print (_second_surname: the marriage certificate)."""
+    if _failed(found) == {"Name on secondary ID"}:
+        return _second_surname_request(case, got)
     if not _only_names_failed(found) or name_slip(case, got, found):
         return ""
     n = _names_on(case, got)
@@ -1101,6 +1135,22 @@ def name_link_request(case, got, found):
         return ""
     return (f"Please send {document}, or another legal change-of-name document, that links the name on your passport "
             f"({n['printed']}) to the name on your account ({case['client']['legal_name']}).")
+
+
+def _second_surname_request(case, got):
+    """The RFI for the marriage certificate when only the secondary ID's name
+    failed, for a surname the passport does not print that the record keeps
+    beside the passport's (_second_surname), the secondary ID keeps the
+    holder's given name and the proof of address names the passport's
+    holder; else ""."""
+    n = _names_on(case, got)
+    printed = (got.get("secondary") or {}).get("name", "")
+    if not (_second_surname(case["client"]["legal_name"], got.get("id") or {}, printed) and n["poa_holder"]
+            and any(_given_match(t, b) >= 0.9 for t in n["secondary"] for b in n["given"])):
+        return ""
+    second = (_secondary_doc(case) or {}).get("name", "secondary ID")
+    return (f"Please send your marriage certificate, or another legal change-of-name document, that links the name on "
+            f"your passport ({n['printed']}) to the name on your {second} ({printed}).")
 
 
 def _addresses_on(case, got):
@@ -1311,9 +1361,11 @@ def address_written_otherwise(stored, seed):
 def redecide(case, alert_case, wc, stored):
     """A case back on its seed (confirmed_on_older_names,
     asked_on_older_names, address_written_otherwise), decided again on its
-    stored read: the same look at the images, today's checks."""
+    stored read: the same look at the images, today's checks. Claude's
+    verdict is asked again (needs_verdict): the policy it is given may have
+    changed with the checks."""
     workflow._audit(case, ACTOR, "Checked again", f"The agent's checks changed; its read of {stored.get('at', '')} is decided again.")
-    return decide(case, alert_case, wc, {k: v for k, v in stored.items() if k in PERCEIVED})
+    return decide(case, alert_case, wc, {k: v for k, v in stored.items() if k in PERCEIVED and k != "verdict"})
 
 
 def read_before_all_documents(stored):

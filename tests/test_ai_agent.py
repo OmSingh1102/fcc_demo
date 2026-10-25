@@ -272,6 +272,35 @@ class AiAgentTestCase(unittest.TestCase):
         self.c.post(f"/kyc/{c['id']}/reserve")
         self.assertEqual(routing.level_for(c), "L1")
 
+    def test_a_second_surname_beside_the_passports_is_asked_for(self):
+        # SEEMA VERMA PANDEY: the passport VERMA, the bill SEEMA VERMA, the Aadhaar SEEMA PANDEY. The record
+        # keeping both surnames links nothing: the file's analysts obtained the marriage certificate.
+        rec = self.assert_rfi(self.free("KYC-2026-3239"), "your marriage certificate")
+        self.assertIn("(SEEMA VERMA) to the name on your Aadhaar (Seema Pandey)", rec["requested"])    # as the card prints it
+        self.assertEqual(rec["reasons"], [ai_agent.SECOND_SURNAME])
+        # beside a watchlist alert the agent asks nothing itself: a person does
+        rec = self.assert_human(self.free("KYC-2026-3057"), ai_agent.SECOND_SURNAME)     # SUDESHNA SARKAR BOSE
+        self.assertTrue(rec["watchlist"])
+
+    def test_a_case_confirmed_beside_a_second_surname_is_decided_again(self):
+        c = self.free("KYC-2026-3502")                                      # BHAVYA SHENOY GOWDA; Aadhaar BHAVYA GOWDA
+        with mock.patch.object(ai_agent, "_second_surname", lambda *a: []):              # the checks before the fix
+            rec, _ = self.run_agent(c)
+        self.assertEqual((rec["decision"], c["client"]["legal_name"]), ("verified", "BHAVYA SHENOY"))   # confirmed as the passport's
+        c["ai_agent"]["rules"] = 12
+        StateStore.save("kyc", c)
+        read_at = rec["at"]
+        fcc._load_seed()
+        c = fcc.KYC_BY_ID[c["id"]]
+        rec = c["ai_agent"]
+        self.assertEqual(rec["at"], read_at)                                # the stored read: no new look at the images
+        self.assertEqual((rec["decision"], c["status"], c["pending_reason"]), ("rfi", "DataConfirming", "RFI Sent"))
+        self.assertIn("(BHAVYA SHENOY) to the name on your Aadhaar (Bhavya Gowda)", rec["requested"])
+        self.assertEqual(c["client"]["legal_name"], "BHAVYA SHENOY GOWDA")  # the record as the file gave it
+        self.assertNotIn("verdict", rec)                                    # Claude is asked again, on today's policy
+        self.assertTrue(ai_agent.needs_verdict(c))
+        self.assertIn("marriage certificate that links the two", ai_agent.POLICY)
+
     def test_an_anglicised_name_beside_the_naturalisation_certificate_is_corrected(self):
         # KEVIN NGUYEN; the passport, the certificate (the secondary ID) and the bill: KHOA QUOC NGUYEN.
         # The file's analysts kept the legal name and Kevin as the preferred name, and asked for nothing.
@@ -814,6 +843,12 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertFalse(found["Name"]["ok"])                                         # the passport keeps ROBERTS
         self.assertTrue(found["Name on secondary ID"]["ok"])
         self.assertIn("the record's name; the passport reads ROBERTS PATRICIA MARIE", found["Name on secondary ID"]["document"])
+        # but not beside the passport's own surname: a record that keeps both surnames links nothing
+        c = self.K["KYC-2026-3239"]                                                  # SEEMA VERMA PANDEY; Aadhaar SEEMA PANDEY
+        found = {x["check"]: x for x in ai_agent.checks(c, perfect_read(c))[0]}
+        self.assertTrue(found["Name"]["ok"])                                          # the passport's VERMA, SEEMA
+        self.assertEqual((found["Name on secondary ID"]["ok"], found["Name on secondary ID"]["note"]),
+                         (False, ai_agent.SECOND_SURNAME))
 
     def test_the_secondary_ids_address_informs_and_never_fails(self):
         c = self.clean(lambda c: perfect_read(c)["secondary"]["address"])

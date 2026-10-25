@@ -45,7 +45,9 @@ naturalised citizen goes by, which only the naturalisation certificate
 settles), date of birth, nationality, ID
 number, expiry, the vendor's result, an endorsement on the passport's back
 page, the secondary ID (readable, the same person as the passport or the
-record, the same date of birth; its address is shown, not checked), and the
+record, the same date of birth; in a surname the passport does not print it
+needs the marriage certificate, even when the record keeps both surnames;
+its address is shown, not checked), and the
 proof of address (readable, holder's name, address, age, type, country).
 Every check passes: the agent confirms the data through the analysts' own
 path, and corrects the record's postal code or old place names to the proof
@@ -74,8 +76,9 @@ other check passed, no alert is left and nobody holds the case:
 - *What only the customer can give*: the agent asks for it through the
   analysts' own steps. Resubmit POA covers a proof of address older than
   six months. An RFI covers the marriage certificate that links the
-  passport's name to the record's (or the naturalisation certificate, when
-  the case does not already hold it), or which of two homes is the
+  passport's name to the record's or the secondary ID's (or the
+  naturalisation certificate, when the case does not already hold it), or
+  which of two homes is the
   main one. A case waiting on the agent's RFI leaves the queue until
   someone takes it. The list's *AI Agent* filter shows these as *Asked the
   customer*, and a request approves nothing.
@@ -202,14 +205,15 @@ The case data is fictional, so nothing sensitive leaves the demo.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-160 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+162 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a
 married surname on the form, an anglicised first name beside the
-naturalisation certificate, a PO Box) and the RFIs, the bad ID photos and the suggested resubmit
+naturalisation certificate, a PO Box) and the RFIs (a second surname beside
+the passport's among them), the bad ID photos and the suggested resubmit
 reason, the filled-in Resubmit dialog, a redrawn case read again, a case
 confirmed under older name or address rules, or asked for a certificate it
 holds, decided again on its stored read, a postal code another document disputes, a gateway
