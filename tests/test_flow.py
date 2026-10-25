@@ -270,7 +270,7 @@ class FlowTestCase(unittest.TestCase):
         v = self.K["vanguard"]
         r = self.post(f"/kyc/{v['id']}/recalculate_risk")
         self.assertIn(v["risk_rating"], ("Medium", "High"), flash_text(r))
-        listing = self.c.get("/kyc/list?sort=desc").data.decode("utf-8")
+        listing = self.c.get("/kyc/list").data.decode("utf-8")
         self.assertIn(v["id"], listing)
         self.assertNotIn(self.K["mercer"]["id"], listing)                  # tenant scope
 
@@ -315,7 +315,7 @@ class FlowTestCase(unittest.TestCase):
                  and "/documents/" not in (a.get("href") or "") and a.get("href")]
         self.assertEqual(other, [])                                              # nothing else on the case page
 
-        listing = hrefs(anchors(self.c.get("/kyc/list?sort=desc")), "/kyc/detail/")
+        listing = hrefs(anchors(self.c.get("/kyc/list")), "/kyc/detail/")
         self.assertTrue(listing and all(new_tab(a) for a in listing))          # the case list's Details buttons
 
         audit = anchors(self.c.get("/audit"))
@@ -530,7 +530,7 @@ class FlowTestCase(unittest.TestCase):
         page = self.c.get(f"/kyc/detail/{m['id']}").data.decode("utf-8")
         self.assertIn("Human-in-the-loop", page)
         self.assertIn("6 of 7 match(es) auto-resolved", page)
-        listing = self.c.get("/kyc/list?sort=desc").data.decode("utf-8")
+        listing = self.c.get("/kyc/list").data.decode("utf-8")
         self.assertIn('data-workflow="auto-verified"', listing)
         self.assertIn('data-workflow="human-in-the-loop"', listing)
         self.assertIn('id="f-workflow"', listing)
@@ -571,7 +571,7 @@ class FlowTestCase(unittest.TestCase):
         """The real list's "N / Page" menu (10 by default, the choice kept
         for the session) and a Details column frozen at the right edge."""
         self.login("amara.iyer")
-        page = self.c.get("/kyc/list?sort=desc").data.decode("utf-8")
+        page = self.c.get("/kyc/list").data.decode("utf-8")
         self.assertEqual(page.count("<tr data-case-id="), 10)
         self.assertIn('id="page-size"', page)
         for n in (10, 20, 30, 40, 50, 100):
@@ -583,21 +583,6 @@ class FlowTestCase(unittest.TestCase):
         self.assertEqual(self.c.get("/kyc/list?per_page=7").data.decode("utf-8").count("<tr data-case-id="), 20)   # not a choice
         self.assertIn('<th class="sticky-right">Details</th>', page)
         self.assertEqual(page.count('<td class="sticky-right">'), 10)
-
-    def test_case_list_opens_blank(self):
-        """The home window opens with no case listed; the rows come once the
-        analyst searches (the form sends its fields), and Clear goes back."""
-        self.login("amara.iyer")
-        page = self.c.get("/kyc/list").data.decode("utf-8")
-        self.assertEqual(page.count("<tr data-case-id="), 0)
-        self.assertIn('id="not-searched"', page)
-        self.assertNotIn('id="total-count"', page)
-        self.assertIn('id="filters-grid"', page)                                     # the filters are there to search with
-        self.assertIn(f'href="/kyc/list">Clear</a>', page)
-        searched = self.c.get("/kyc/list?case_id=&sort=desc&priority=").data.decode("utf-8")   # Search with nothing filled in
-        self.assertEqual(searched.count("<tr data-case-id="), 10)
-        self.assertNotIn('id="not-searched"', searched)
-        self.assertEqual(self.c.get("/", follow_redirects=True).data.decode("utf-8").count("<tr data-case-id="), 0)
 
     def test_case_list_filters_and_pages_on_the_server(self):
         """The filters, the sort and the page are query parameters the server

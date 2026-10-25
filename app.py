@@ -667,16 +667,11 @@ def _case_page_size():
 
 @app.route("/kyc/list")
 def kyc_list():
-    # The home window opens blank: no case is listed until the analyst
-    # searches (Search, a filter, Priority Review, a link that carries a
-    # filter); the form always sends its fields, so a bare URL is the first view.
-    searched = bool(request.args)
     vm = CaseListConsole.compute(KYC_CASES, _tenant(), _actor(), query=read_case_query(request.args),
                                  per_page=_case_page_size())
-    return render_template("kyc_list.html", rows=vm["rows"] if searched else [], total=vm["total"], shown=vm["shown"],
-                           filters=vm["filters"], query=vm["query"], per_page=vm["per_page"], page_sizes=PAGE_SIZES,
-                           first=vm["first"], last=vm["last"], pages=_pager(vm["page"], vm["pages"]) if searched else [],
-                           searched=searched, can_upload=CASE_BOOK == "file",
+    return render_template("kyc_list.html", rows=vm["rows"], total=vm["total"], shown=vm["shown"], filters=vm["filters"],
+                           query=vm["query"], per_page=vm["per_page"], page_sizes=PAGE_SIZES, first=vm["first"], last=vm["last"],
+                           pages=_pager(vm["page"], vm["pages"]), can_upload=CASE_BOOK == "file",
                            can_assign=bool(_levels() & {"L2", "QC"}))      # kyc_bulk_assign's roles
 
 
