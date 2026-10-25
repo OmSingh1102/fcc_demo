@@ -671,7 +671,7 @@ def kyc_list():
                                  per_page=_case_page_size())
     return render_template("kyc_list.html", rows=vm["rows"], total=vm["total"], shown=vm["shown"], filters=vm["filters"],
                            query=vm["query"], per_page=vm["per_page"], page_sizes=PAGE_SIZES, first=vm["first"], last=vm["last"],
-                           pages=_pager(vm["page"], vm["pages"]), can_upload=CASE_BOOK == "file",
+                           pages=_pager(vm["page"], vm["pages"]), open_only=vm["open_only"], can_upload=CASE_BOOK == "file",
                            can_assign=bool(_levels() & {"L2", "QC"}))      # kyc_bulk_assign's roles
 
 

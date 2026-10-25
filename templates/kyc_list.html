@@ -20,7 +20,7 @@
         {% include "_filter_grid.html" %}
         <div class="toolbar">
             <button type="button" class="btn btn-primary btn-sm" onclick="toggleSort()" id="sort-btn">{% if query.sort == 'asc' %}&#8593; Oldest to Latest{% else %}{{ icon('chevron-down') }} Latest to Oldest{% endif %}</button>
-            <span class="rowcount" id="rowcount">{% if shown != total %}{{ shown }} of {{ total }} match{% endif %}</span>
+            <span class="rowcount" id="rowcount">{% if open_only %}Open cases only — search or filter to include verified ones{% elif shown != total %}{{ shown }} of {{ total }} match{% endif %}</span>
             <span class="small muted hidden" id="filters-summary"></span>
             <div class="right">
                 <a class="btn btn-outline btn-sm" href="{{ url_for('kyc_list') }}">Clear</a>

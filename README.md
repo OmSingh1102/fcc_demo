@@ -37,6 +37,13 @@ Each case page ends with what the file's analyst recorded, for comparison.
 `CONSOLE_CASES=demo` brings back the nineteen scripted scenarios (the
 walkthrough further down, and what the test suite runs on).
 
+**The case list opens on the open cases.** Sign-in lands on the case list,
+and with no filter set it lists only the cases still open (human-in-the-loop
+and those waiting on the customer), never a Verified or Rejected one; sort,
+page size and Priority Review keep that view. Any filter (a case id, a name,
+Status = Verified, Workflow = Auto-verified) searches the whole book, and
+Clear goes back to the open cases.
+
 **The AI Agent** (`fincrime/engines/ai_agent.py`) does Data Confirming on
 every individual's case. It starts on its own when the server takes its
 first request. Claude (`claude-opus-4-8` through Straive's LLM Foundry,
@@ -209,7 +216,7 @@ The case data is fictional, so nothing sensitive leaves the demo.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-162 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+163 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every

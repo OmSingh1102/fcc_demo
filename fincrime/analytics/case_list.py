@@ -7,7 +7,12 @@ reconciliation-log book does): shipping every row to the browser and hiding
 most of them made a multi-megabyte page that the live refresh re-downloaded
 on every change. The filters keep the semantics the old client-side ones
 had: text boxes match a substring (any case), selects match exactly, dates
-are inclusive ranges, and a row with no date only survives an empty range."""
+are inclusive ranges, and a row with no date only survives an empty range.
+
+With no filter in the grid the list opens on the open cases only: none that
+is Verified or Rejected, so the front page is the work still to do. Sort,
+page, page size and Priority Review keep that view; any filter searches the
+whole book, so a verified case is still found by its ID or name."""
 from fincrime.data import vocab
 from fincrime.engines import ai_agent, ai_screening, sla
 from fincrime.utils.text import display_name
@@ -147,7 +152,8 @@ class CaseListConsole:
             "qc_results": [x for x in vocab.QC_RESULTS if x],
             "vendors": distinct("vendor"),
         }
-        shown = [r for r in rows if matches(r, q)]
+        open_only = active_filters(q) == 0                 # the opening view: no closed case
+        shown = [r for r in rows if matches(r, q) and not (open_only and r["status"] in vocab.CLOSED_STATUSES)]
         shown.sort(key=lambda r: r["created_at"], reverse=q["sort"] != "asc")
         pages = max(1, -(-len(shown) // per_page))
         page = min(q["page"], pages)
@@ -156,5 +162,5 @@ class CaseListConsole:
             r["sla"] = sla.chip(r["case"], now)
         return {"rows": rows_page, "total": len(rows), "shown": len(shown), "page": page, "pages": pages,
                 "per_page": per_page, "first": (page - 1) * per_page + 1 if shown else 0,
-                "last": (page - 1) * per_page + len(rows_page), "query": q, "active": active_filters(q),
+                "last": (page - 1) * per_page + len(rows_page), "query": q, "active": active_filters(q), "open_only": open_only,
                 "filters": filters}

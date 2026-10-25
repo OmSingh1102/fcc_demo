@@ -584,6 +584,28 @@ class FlowTestCase(unittest.TestCase):
         self.assertIn('<th class="sticky-right">Details</th>', page)
         self.assertEqual(page.count('<td class="sticky-right">'), 10)
 
+    def test_case_list_opens_on_open_cases(self):
+        """The front page lists no closed case: with no filter set the list
+        holds the open ones only (sort, page size and Priority Review keep
+        that), and any filter searches the whole book, verified cases too."""
+        self.login("amara.iyer")
+        book = [c for c in fcc.KYC_CASES if c["tenant"] == "ttlive"]
+        still_open = [c for c in book if c["status"] not in ("Verified", "Rejected")]
+        verified = [c for c in book if c["status"] == "Verified"]
+        self.assertTrue(still_open and verified)
+        for url in ("/kyc/list?per_page=100", "/kyc/list?sort=asc&per_page=100", "/kyc/list?priority=1&per_page=100"):
+            page = self.c.get(url).data.decode("utf-8")
+            self.assertNotIn('data-status="Verified"', page, url)
+            self.assertNotIn('data-status="Rejected"', page, url)
+            self.assertIn("Open cases only", page, url)
+        self.assertIn(f'Total: <b id="total-count">{len(still_open)}</b>', self.c.get("/kyc/list?per_page=100").data.decode("utf-8"))
+        self.assertIn("Open cases only", self.c.get("/", follow_redirects=True).data.decode("utf-8"))   # where sign-in lands
+        page = self.c.get("/kyc/list?status=Verified&per_page=100").data.decode("utf-8")
+        self.assertEqual(page.count('data-status="Verified"'), len(verified))
+        self.assertNotIn("Open cases only", page)
+        found = self.c.get(f"/kyc/list?case_id={verified[0]['id']}").data.decode("utf-8")
+        self.assertIn(f'data-case-id="{verified[0]["id"]}"', found)                   # a search reaches a verified case
+
     def test_case_list_filters_and_pages_on_the_server(self):
         """The filters, the sort and the page are query parameters the server
         applies, so a thousand-case book still sends one page (10 rows, or
@@ -605,7 +627,7 @@ class FlowTestCase(unittest.TestCase):
         self.assertIn("No case matches", self.c.get("/kyc/list?case_id=no-such-case").data.decode("utf-8"))
         vm = CaseListConsole.compute(fcc.KYC_CASES, "ttlive", query=read_query(MultiDict({"page": "2"})), per_page=10)
         self.assertEqual((vm["page"], len(vm["rows"]), vm["first"]), (2, 10, 11))
-        self.assertEqual(vm["pages"], -(-vm["total"] // 10))
+        self.assertEqual(vm["pages"], -(-vm["shown"] // 10))
         created = [r["created_at"] for r in vm["rows"]]
         self.assertEqual(created, sorted(created, reverse=True))           # latest first by default
         vm = CaseListConsole.compute(fcc.KYC_CASES, "ttlive", query=read_query(MultiDict({"sort": "asc", "page": "99"})), per_page=10)
