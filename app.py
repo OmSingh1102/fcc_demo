@@ -76,7 +76,7 @@ def _who(value):
 # does see globals, and the badge macros need the status colour map.
 app.jinja_env.globals.update(status_tone=vocab.STATUS_TONE, vocab=vocab,
                              icon=app.jinja_env.get_template("_icon.html").module.icon,
-                             ai_summary=ai_screening.summary)
+                             ai_summary=ai_screening.summary, shown_workflow=ai_screening.shown_workflow)
 app.jinja_env.filters.update(wc_date=dates.wc_date, wc_dt=dates.wc_datetime, who=_who, translit=translit)
 
 # ─── Sign-in, analysts and roles ───────────────────────────────────────────────

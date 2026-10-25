@@ -35,7 +35,8 @@
 
 {% macro workflow_badge(workflow, title='') -%}
 {%- if workflow == 'auto-verified' %}<span class="badge emerald" title="{{ title or 'Every screening alert was cleared by the AI screening rules, or there was no match' }}">{{ icon('shield-check') }} Auto-verified</span>
-{%- elif workflow == 'human-in-the-loop' %}<span class="badge violet" title="{{ title or 'An analyst has to clear at least one screening alert' }}">{{ icon('user-check') }} Human-in-the-loop</span>{% endif -%}
+{%- elif workflow == 'human-in-the-loop' %}<span class="badge violet" title="{{ title or 'An analyst has to clear at least one screening alert' }}">{{ icon('user-check') }} Human-in-the-loop</span>
+{%- elif workflow == 'waiting-on-customer' %}<span class="badge amber" title="{{ title or 'Still open: the customer was asked for a document or information, and the reply is checked when it arrives' }}">{{ icon('clock') }} Waiting on customer</span>{% endif -%}
 {%- endmacro %}
 
 {% macro hit_mark(result) -%}

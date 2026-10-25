@@ -23,7 +23,7 @@ import app as fcc  # noqa: E402
 from fincrime.data import recon_book  # noqa: E402
 from fincrime.documents.raster import svg_to_png  # noqa: E402
 from fincrime.documents.svg_cards import ISO3  # noqa: E402
-from fincrime.engines import ai_agent, routing, sla  # noqa: E402
+from fincrime.engines import ai_agent, ai_screening, routing, sla  # noqa: E402
 from fincrime.engines.errors import WorkflowError  # noqa: E402
 
 
@@ -247,6 +247,8 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertIn(needle, rec["requested"])
         self.assertEqual((c["rfi"][-1]["by"], c["rfi"][-1]["message"]), ("AI Agent", rec["requested"]))
         self.assertEqual(c["screening"]["workflow"], "auto-verified")
+        # still open: shown as waiting on the customer, never as auto-verified (closed)
+        self.assertEqual(ai_screening.shown_workflow(c), "waiting-on-customer")
         # it waits on the user: out of the analysts' queue, with the intake clock shown as waiting
         self.assertEqual(routing.level_for(c), "")
         self.assertEqual(sla.chip(c)["text"], "Waiting on user")
@@ -267,7 +269,13 @@ class AiAgentTestCase(unittest.TestCase):
         page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
         self.assertIn('id="ai-agent-requested"', page)
         self.assertIn("Asked the customer (RFI)", page)
+        self.assertIn("Waiting on customer", page)
         self.assertIn(f'data-case-id="{c["id"]}"', self.c.get("/kyc/list?agent=rfi").data.decode("utf-8"))
+        # auto-verified means closed: the open case is listed as waiting on the customer, not as auto-verified
+        mine = f"/kyc/list?case_id={c['id']}&workflow="
+        self.assertIn('data-workflow="waiting-on-customer"', self.c.get(mine + "waiting-on-customer").data.decode("utf-8"))
+        self.assertNotIn(f'data-case-id="{c["id"]}"', self.c.get(mine + "auto-verified").data.decode("utf-8"))
+        self.assertEqual(ai_screening.shown_workflow(dict(c, status="Verified", pending_reason="")), "auto-verified")
         # an analyst who takes it holds it in the queue again
         self.c.post(f"/kyc/{c['id']}/reserve")
         self.assertEqual(routing.level_for(c), "L1")

@@ -160,7 +160,8 @@ AI_WATCH_FILTER = {"likely_match": "Likely true match", "possible_match": "Possi
                    "likely_different": "Likely a different person", "unread": "Not compared"}
 # Every KYC case carries one of these once it has been screened (SOP: current
 # automation; the client's two workflows, 2026-09-24).
-REVIEW_WORKFLOWS = {"auto-verified": "Auto-verified", "human-in-the-loop": "Human-in-the-loop"}
+REVIEW_WORKFLOWS = {"auto-verified": "Auto-verified", "human-in-the-loop": "Human-in-the-loop",
+                    "waiting-on-customer": "Waiting on customer"}
 CASE_OUTCOMES = ["Approve - False Positive", "Escalate - Potential Match", "Escalate - True Positive", "Reject - True Positive"]
 CASE_OUTCOME_RATIONALES = ["All alerts resolved as false positive", "Unresolved potential match", "Confirmed true positive", "Other"]
 SCREENING_PLATFORMS = ["In-house CMS", "Internal_blacklist"]

@@ -7,7 +7,7 @@ from collections import Counter
 
 from fincrime.analytics.pipeline import COLUMNS, column_of, lag_summary
 from fincrime.data import vocab
-from fincrime.engines import qc, routing, sla, worklog
+from fincrime.engines import ai_screening, qc, routing, sla, worklog
 from fincrime.utils import dates
 from fincrime.utils.text import display_name
 
@@ -53,11 +53,14 @@ class AnalyticsConsole:
         outcome_counts = [(o, sum(1 for a in alerts if a["outcome"] == o)) for o in vocab.ALERT_OUTCOMES]
         auto = sum(1 for a in alerts if a.get("resolved_by") == vocab.SYSTEM_USER)
         manual = sum(1 for a in alerts if a["outcome"] != "Pending" and a.get("resolved_by") != vocab.SYSTEM_USER)
-        # The two workflows (auto-verified vs human-in-the-loop) and what the rules fired on.
+        # The workflows (auto-verified = closed, waiting on the customer,
+        # human-in-the-loop) and what the rules fired on.
+        shown = {c["id"]: ai_screening.shown_workflow(c) for c in cases}
+        asked = [c for c in cases if shown[c["id"]] == ai_screening.WAITING]
         hit = [c for c in cases if c["screening"]["hit"]]
-        auto_hit = [c for c in hit if c["screening"].get("workflow") == "auto-verified"]
-        human = [c for c in hit if c["screening"].get("workflow") == "human-in-the-loop"]
-        no_hit = len(cases) - len(hit)
+        auto_hit = [c for c in hit if shown[c["id"]] == "auto-verified"]
+        human = [c for c in hit if shown[c["id"]] == "human-in-the-loop"]
+        no_hit = sum(1 for c in cases if not c["screening"]["hit"] and shown[c["id"]] != ai_screening.WAITING)
         rules_fired = Counter(a.get("smart_strategy") or "rule" for a in alerts if a.get("resolved_by") == vocab.SYSTEM_USER).most_common()
         rationale_counts = Counter(a["rationale"] for a in alerts if a["rationale"]).most_common(6)
 
@@ -109,7 +112,7 @@ class AnalyticsConsole:
                 ("Closed", len(closed), f"avg turnaround {tat_avg} h", "success"),
                 ("Auto-verified", len(auto_hit), f"of {len(hit)} cases with a hit; {no_hit} more had no match", "success"),
             ],
-            "workflow_split": [("Auto-verified (hit)", len(auto_hit)),
+            "workflow_split": [("Auto-verified (hit)", len(auto_hit)), ("Waiting on customer", len(asked)),
                                ("Human-in-the-loop", len(human)), ("No match", no_hit)],
             "rules_fired": rules_fired,
             "status_counts": status_counts,

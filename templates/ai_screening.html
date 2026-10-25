@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-head">
     <div><h2>AI screening rules — {{ vm.tenant_label }}</h2>
-        <p>The preset automation that clears a watchlist record without an analyst, and what it did on this tenant's cases. A deterministic rule book, not a model: every rule is a check a compliance team can read and audit. A case where the rules clear every alert is <b>auto-verified</b>; a case with anything left over is <b>human-in-the-loop</b>, and the analyst handles only what is left.</p></div>
+        <p>The preset automation that clears a watchlist record without an analyst, and what it did on this tenant's cases. A deterministic rule book, not a model: every rule is a check a compliance team can read and audit. A case where the rules clear every alert is <b>auto-verified</b> once it closes, with nothing more asked of the customer; until a customer's reply comes back it is <b>waiting on customer</b>. A case with anything left over is <b>human-in-the-loop</b>, and the analyst handles only what is left.</p></div>
     <div class="row">{% if can_edit %}<span class="badge blue">team lead: switches live</span>{% else %}<span class="badge slate">switches: team lead only</span>{% endif %}</div>
 </div>
 

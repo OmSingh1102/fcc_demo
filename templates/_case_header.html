@@ -14,7 +14,7 @@
         <div class="rail-ids"><span>Case <b class="mono">{{ case.id }}</b></span><span>Client <b class="mono">{{ case.client_id }}</b></span></div>
         <div class="rail-chips">
             {{ status_badge(case.status) }}
-            {% if case.screening.get('workflow') %}{{ workflow_badge(case.screening.workflow, ai_summary(case)) }}{% endif %}
+            {% set shown = shown_workflow(case) %}{% if shown %}{{ workflow_badge(shown, '' if shown == 'waiting-on-customer' else ai_summary(case)) }}{% endif %}
             {{ sla_chip(sla) }}
             {% if case.pending_reason %}<span class="badge amber">{{ case.pending_reason }}</span>{% endif %}
             {% if case.routing and case.routing.status == 'routed' and case.current_reviewer %}<span class="badge blue" title="{{ case.routing.reason }} · {{ vocab.ROUTING_TRIGGERS.get(case.routing.trigger, case.routing.trigger) }} · {{ case.routing.at }}">{{ icon('sliders') }} Auto-routed</span>

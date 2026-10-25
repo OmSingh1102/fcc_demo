@@ -13,7 +13,11 @@ Screening runs in two workflows. **Auto-verified**: no match on any list, or
 every watchlist record cleared by the *AI screening rules*, so the screening
 case closes itself and a Individuals case completes with no analyst step.
 **Human-in-the-loop**: at least one record the rules could not clear, so an
-analyst handles only what is left. The "AI" is a deterministic rule book, not
+analyst handles only what is left. The console shows *Auto-verified* only on a
+case that is closed with nothing more asked of the customer: one the rules
+cleared that still waits on the customer's reply to an RFI or a resubmission
+shows **Waiting on customer** (badge, list filter, analytics) until it closes.
+The "AI" is a deterministic rule book, not
 a model — date-of-birth mismatch, gender mismatch, an optional nationality
 rule and a sanctions guard, each switchable by the team lead on the AI
 Screening page — because a compliance team must be able to read and audit

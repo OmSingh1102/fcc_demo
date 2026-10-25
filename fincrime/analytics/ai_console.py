@@ -34,14 +34,17 @@ class AiScreeningConsole:
         model = dict(ai_review.status(), on=bool(switches_on.get("model_review", True)),
                      count=sum(1 for r in rows if r.get("ai_assessment")))
 
+        shown = {c["id"]: ai_screening.shown_workflow(c) for c in tenant_cases}
+        asked = [c for c in tenant_cases if shown[c["id"]] == ai_screening.WAITING]
         hit = [c for c in tenant_cases if c["screening"]["hit"]]
-        auto_hit = [c for c in hit if c["screening"].get("workflow") == "auto-verified"]
-        human = [c for c in hit if c["screening"].get("workflow") == "human-in-the-loop"]
-        no_hit = [c for c in tenant_cases if not c["screening"]["hit"]]
+        auto_hit = [c for c in hit if shown[c["id"]] == "auto-verified"]
+        human = [c for c in hit if shown[c["id"]] == "human-in-the-loop"]
+        no_hit = [c for c in tenant_cases if not c["screening"]["hit"] and shown[c["id"]] != ai_screening.WAITING]
         closed_by_rules = [c for c in tenant_cases if c.get("closed_by") == vocab.SYSTEM_USER]
         pending = sum(1 for r in rows if r["outcome"] == "Pending")
         tiles = [
-            ("Auto-verified", len(auto_hit), f"of {len(hit)} cases with a screening hit", "success"),
+            ("Auto-verified", len(auto_hit), f"of {len(hit)} cases with a screening hit, closed", "success"),
+            ("Waiting on customer", len(asked), "rules cleared the alerts; still open for a document", ""),
             ("Human-in-the-loop", len(human), f"{pending} alert(s) waiting for an analyst", "warning" if human else ""),
             ("No match", len(no_hit), "auto-verified with nothing to clear", ""),
             ("Records auto-resolved", len(auto_rows), f"of {len(rows)} watchlist records returned", "info"),
@@ -67,8 +70,8 @@ class AiScreeningConsole:
         against = None
         recon = [c for c in tenant_cases if c.get("recon") and not c["recon"].get("uploaded")]
         if recon:
-            auto = [c for c in recon if c["screening"].get("workflow") == "auto-verified"]
-            held = [c for c in recon if c["screening"].get("workflow") != "auto-verified"]
+            auto = [c for c in recon if shown[c["id"]] == "auto-verified"]
+            held = [c for c in recon if shown[c["id"]] != "auto-verified"]
 
             def split(rows):
                 n = Counter(c["recon"]["outcome"] for c in rows)

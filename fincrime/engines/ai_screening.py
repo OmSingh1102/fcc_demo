@@ -279,6 +279,24 @@ def classify(kyc, alert):
     return "human-in-the-loop"
 
 
+WAITING = "waiting-on-customer"
+WAITING_REASONS = ("RFI Sent", "Pending Resubmission")
+
+
+def shown_workflow(kyc):
+    """The workflow label the console shows and counts. Auto-verified means
+    the case is closed and nothing more is asked of the customer (the
+    client's definition, 2026-10-25): a case the rules cleared that is still
+    open, waiting on the customer's reply to an RFI or a resubmission, shows
+    as waiting on the customer instead. The stored label (classify) is the
+    screening's, and it is what the engines read."""
+    workflow = kyc["screening"].get("workflow", "")
+    if workflow == "auto-verified" and kyc["status"] not in vocab.CLOSED_STATUSES and (
+            kyc.get("pending_reason") in WAITING_REASONS or kyc["status"].startswith("Resubmit")):
+        return WAITING
+    return workflow
+
+
 def _counts_text(counter):
     return ", ".join(f"{label} ×{n}" for label, n in counter.most_common()) or "no records"
 

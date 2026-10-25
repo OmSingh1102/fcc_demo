@@ -9,7 +9,7 @@ on every change. The filters keep the semantics the old client-side ones
 had: text boxes match a substring (any case), selects match exactly, dates
 are inclusive ranges, and a row with no date only survives an empty range."""
 from fincrime.data import vocab
-from fincrime.engines import ai_agent, sla
+from fincrime.engines import ai_agent, ai_screening, sla
 from fincrime.utils.text import display_name
 
 # Rows a page: the real list's "N / Page" choices, 10 by default as it opens.
@@ -47,7 +47,7 @@ def _row(c, analyst_email):
         "gifter": next((t for t in c["tags"] if t.startswith("Tier")), ""),
         "edd_rfi": "Yes" if c["pending_reason"] in ("Pending EDD", "RFI Sent") else "No",
         "mine": bool(analyst_email) and c["current_reviewer"] == analyst_email,
-        "workflow": c["screening"].get("workflow", ""),
+        "workflow": ai_screening.shown_workflow(c),
         "agent": _agent(c),
         "verdict": _verdict(c),
         "watch": ((c.get("ai_agent") or {}).get("watchlist") or {}).get("finding", ""),
