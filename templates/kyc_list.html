@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_badges.html" import status_badge, tag_chip, sla_chip, workflow_badge %}
+{% from "_badges.html" import status_badge, tag_chip, sla_chip %}
 {% from "_pager.html" import pager %}
 {% block title %}Case List - Due Diligence (KYC/KYB){% endblock %}
 
@@ -44,7 +44,6 @@
                 <th>Date Of Birth</th>
                 <th>Status</th>
                 <th>Pending Reason</th>
-                <th>Workflow</th>
                 <th>Tag</th>
                 <th>Previous Reviewer</th>
                 <th>Current Reviewer</th>
@@ -63,7 +62,6 @@
                 <td class="nowrap">{{ r.dob or '-' }}</td>
                 <td>{{ status_badge(r.status) }}</td>
                 <td>{{ r.pending_reason or '-' }}</td>
-                <td class="nowrap">{% if r.workflow %}{{ workflow_badge(r.workflow) }}{% else %}-{% endif %}</td>
                 <td>{% if r.tags %}{{ r.tags|join(', ') }}{% else %}-{% endif %}</td>
                 <td class="nowrap">{{ r.previous_reviewer or '-' }}</td>
                 <td class="nowrap">{% if r.mine %}<b>{{ r.current_reviewer }}</b>{% else %}{{ r.current_reviewer or '-' }}{% endif %}</td>
@@ -72,7 +70,7 @@
                 <td class="sticky-right"><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('kyc_detail', case_id=r.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
             </tr>
             {% else %}
-            <tr><td colspan="{{ 14 if can_assign else 13 }}"><div class="no-data">{{ icon('search') }}No case matches these filters</div></td></tr>
+            <tr><td colspan="{{ 13 if can_assign else 12 }}"><div class="no-data">{{ icon('search') }}No case matches these filters</div></td></tr>
             {% endfor %}
             </tbody>
         </table>
