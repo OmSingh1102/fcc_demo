@@ -350,8 +350,8 @@ def _load_seed():
         if replaced:
             app.logger.info("%d stored watchlist record(s) list every place the file gives now.", replaced)
     if redecided:
-        app.logger.info("%d case(s) confirmed on a name or an address the checks now refuse were decided again on "
-                        "their stored read.", _redecide(redecided))
+        app.logger.info("%d case(s) confirmed on a name or an address the checks now refuse, or asked about a name the "
+                        "rules now settle, were decided again on their stored read.", _redecide(redecided))
 
 
 def _sync_sex():
@@ -419,17 +419,19 @@ def _redrawn_cases():
 
 def _redecided_cases(redrawn):
     """{KYC id: the agent's stored record} of the cases it confirmed on a name
-    the checks now refuse (ai_agent.confirmed_on_older_names) or with an
-    address it would not write now (ai_agent.address_written_otherwise):
-    they keep their seeded state, and the agent decides them again on the
-    stored read, with no new look at the images. A case read again
-    (`redrawn`) is not decided again."""
+    the checks now refuse (ai_agent.confirmed_on_older_names), asked the
+    customer about a name the rules now settle (ai_agent.asked_on_older_names)
+    or confirmed with an address it would not write now
+    (ai_agent.address_written_otherwise): they keep their seeded state, and
+    the agent decides them again on the stored read, with no new look at the
+    images. A case read again (`redrawn`) is not decided again."""
     out = {}
     for stored in StateStore.records("kyc"):
         case = KYC_BY_ID.get(stored.get("id", ""))
         if case is None or "recon" not in case or case["id"] in redrawn:
             continue
-        if ai_agent.confirmed_on_older_names(stored, case) or ai_agent.address_written_otherwise(stored, case):
+        if (ai_agent.confirmed_on_older_names(stored, case) or ai_agent.asked_on_older_names(stored, case)
+                or ai_agent.address_written_otherwise(stored, case)):
             out[case["id"]] = stored["ai_agent"]
     return out
 

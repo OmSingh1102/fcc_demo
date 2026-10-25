@@ -41,8 +41,8 @@ to PNG with resvg: the passport's data page and back page, the secondary ID
 and the proof of address. Fixed checks, not the model, compare that read
 with the case: readable, name (the file book's name rules: nicknames, word
 order, initials, a garbled CRM encoding; not the English first name a
-naturalised citizen goes by, which only a naturalisation certificate links
-to the passport's), date of birth, nationality, ID
+naturalised citizen goes by, which only the naturalisation certificate
+settles), date of birth, nationality, ID
 number, expiry, the vendor's result, an endorsement on the passport's back
 page, the secondary ID (readable, the same person as the passport or the
 record, the same date of birth; its address is shown, not checked), and the
@@ -65,12 +65,17 @@ other check passed, no alert is left and nobody holds the case:
   Claude's verdict is asked again on it. This covers a record that kept the
   father's name and dropped the holder's own (PRAKASH MORE for the
   passport's MORE, MANASI PRAKASH), a surname no document prints beside the
-  holder's given name (a married name written on the form), and a PO Box
-  where the proof of address and the secondary ID give the same home.
+  holder's given name (a married name written on the form), an English first
+  name no document prints when the secondary ID is the naturalisation
+  certificate (KEVIN NGUYEN for the passport's NGUYEN, KHOA QUOC: the record
+  takes the legal name and keeps the typed one as the *preferred name*, as
+  the file's analysts did), and a PO Box where the proof of address and the
+  secondary ID give the same home.
 - *What only the customer can give*: the agent asks for it through the
   analysts' own steps. Resubmit POA covers a proof of address older than
-  six months. An RFI covers the marriage or naturalisation certificate that
-  links the passport's name to the record's, or which of two homes is the
+  six months. An RFI covers the marriage certificate that links the
+  passport's name to the record's (or the naturalisation certificate, when
+  the case does not already hold it), or which of two homes is the
   main one. A case waiting on the agent's RFI leaves the queue until
   someone takes it. The list's *AI Agent* filter shows these as *Asked the
   customer*, and a request approves nothing.
@@ -197,16 +202,17 @@ The case data is fictional, so nothing sensitive leaves the demo.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-158 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+160 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a
-married surname on the form, a PO Box) and the RFIs, the bad ID photos and the suggested resubmit
+married surname on the form, an anglicised first name beside the
+naturalisation certificate, a PO Box) and the RFIs, the bad ID photos and the suggested resubmit
 reason, the filled-in Resubmit dialog, a redrawn case read again, a case
-confirmed under older name or address rules decided again on its stored
-read, a postal code another document disputes, a gateway
+confirmed under older name or address rules, or asked for a certificate it
+holds, decided again on its stored read, a postal code another document disputes, a gateway
 error, a rate-limit or dropped-connection retry, the name rules, the worker
 on an auto-verified case, Pause/Resume for the team lead),
 `tests/test_console_book.py` (the console on the reconciliation

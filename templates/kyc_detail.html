@@ -24,6 +24,7 @@
                 <div class="card-head"><div class="card-title">Identity</div></div>
                 <div class="card-body fact-list">
                     <div><span class="l">Legal name</span><span class="v strong">{{ case.client.legal_name }}</span></div>
+                    {% if case.client.preferred_name %}<div id="preferred-name"><span class="l">Preferred name</span><span class="v">{{ case.client.preferred_name }}</span></div>{% endif %}
                     {% if case.client.native_name %}<div><span class="l">Native script</span><span class="v strong">{{ case.client.native_name }}</span></div>{% endif %}
                     <div><span class="l">Date of birth</span><span class="v strong">{{ case.client.dob or '-' }}</span></div>
                     <div><span class="l">Nationality</span><span class="v strong">{{ case.client.nationality }}</span></div>
@@ -187,7 +188,7 @@
         {% else %}
         <div class="note info small mb-8">Every check passed and the AI Agent confirmed the data; a World-Check alert is left, so the case went to Data Screening for an analyst{% if ag.watchlist %}, with the agent's watchlist finding below{% endif %}.</div>
         {% endif %}
-        {% if ag.name_corrected %}<div class="small mb-8" id="ai-agent-name"><b>Name corrected</b> to the documents': {{ ag.name_corrected.to }} <span class="muted">(was {{ ag.name_corrected['from'] }}: {{ ag.name_corrected.why }})</span></div>{% endif %}
+        {% if ag.name_corrected %}<div class="small mb-8" id="ai-agent-name"><b>Name corrected</b> to the documents': {{ ag.name_corrected.to }} <span class="muted">(was {{ ag.name_corrected['from'] }}: {{ ag.name_corrected.why }})</span>{% if ag.name_corrected.preferred %}. <b>Preferred name kept:</b> {{ ag.name_corrected.preferred }}{% endif %}</div>{% endif %}
         {% if ag.address_updated %}<div class="small mb-8" id="ai-agent-address"><b>Address updated</b> to the proof of address's: {{ ag.address_updated.to }} <span class="muted">(was {{ ag.address_updated.from }})</span></div>{% endif %}
         {% set v = ag.verdict %}{% if v %}
         <div class="verdict-box {{ 'differs' if v.decision and not v.agrees }}" id="ai-verdict">

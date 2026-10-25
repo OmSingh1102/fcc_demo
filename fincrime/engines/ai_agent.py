@@ -18,7 +18,8 @@ and hands the case to a person whenever it cannot be sure.
    What the agent settles itself, when nothing else is wrong and nothing is
    left for an analyst: the record's own slips, where the documents agree
    with one another (the father's name kept for the holder's, a married
-   surname on the form, a PO Box for a home), it corrects and confirms
+   surname on the form, an anglicised first name beside the naturalisation
+   certificate, a PO Box for a home), it corrects and confirms
    (record_fixes); a proof of address older than six months, the document
    that links two names, or which home is the main one, it asks the
    customer for through the analysts' own Resubmit POA or RFI
@@ -183,13 +184,17 @@ VERDICT_TRIES = 3
 # matched the surname by its spelling is not a given name too (name_verdict).
 # 11: an anglicised first name is not the passport's (_given_match), and a
 # postal code another document disputes is not written to the record
-# (address_update).
-RULES_VERSION = 11
+# (address_update). 12: an anglicised first name, with the naturalisation
+# certificate on the case, is the record's slip: it takes the passport's legal
+# name and keeps the one the customer goes by as the preferred name (name_slip).
+RULES_VERSION = 12
 POA_NAME_RULES = 4    # the first checks to want the proof of address's name: reads before them may lack it (needs_reread)
-# The last change to the name checks (5: the holder's own given name; 10: one
-# word, one part of the name; 11: no anglicised first name): a case confirmed
-# before it is checked again on its names (confirmed_on_older_names).
-NAME_RULES = 11
+# The last change to the name rules (5: the holder's own given name; 10: one
+# word, one part of the name; 11: no anglicised first name; 12: an anglicised
+# first name settled by the naturalisation certificate on the case): a case
+# confirmed before it is checked again on its names (confirmed_on_older_names),
+# and one asked about its names before is decided again (asked_on_older_names).
+NAME_RULES = 12
 # The last change to the address the agent writes back (11: a disputed postal
 # code stays; a unit number is no ZIP): address_written_otherwise.
 ADDRESS_RULES = 11
@@ -1018,18 +1023,33 @@ def _only_names_failed(found):
     return "Name" in failed and failed <= NAME_CHECKS
 
 
+def _naturalisation_certificate(case, got):
+    """Is the secondary ID a naturalisation certificate, as uploaded and as
+    Claude read it?"""
+    uploaded = (_secondary_doc(case) or {}).get("name", "")
+    printed = (got.get("secondary") or {}).get("document_type", "")
+    return all(re.search(r"NATURALI[SZ]", similarity.fold(t)) for t in (uploaded, printed))
+
+
 def name_slip(case, got, found):
-    """(the documents' name, why) when the record's name is a known slip for
-    the documents' holder, else None. Only the name checks failed, so the
-    record's date of birth and ID number are the passport's, and the
-    secondary ID and the proof of address name the passport's holder too:
+    """(the documents' name, why, the name the customer goes by) when the
+    record's name is a known slip for the documents' holder, else None. Only
+    the name checks failed, so the record's date of birth and ID number are
+    the passport's, and the secondary ID and the proof of address name the
+    passport's holder too:
     - the father's name: the record kept the passport's later given name and
       the surname and dropped the holder's own (PRAKASH MORE for MORE,
       MANASI PRAKASH: the record named her father);
     - a surname no document prints, beside the holder's given name (NHUNG VU
-      for PHAN, BICH NHUNG: a married name written on the form).
+      for PHAN, BICH NHUNG: a married name written on the form);
+    - a first name no document prints, beside the passport's surname, when
+      the secondary ID is the naturalisation certificate (KEVIN NGUYEN for
+      NGUYEN, KHOA QUOC: an anglicised name). The certificate is the document
+      that settles it, and it is on the case: the record takes the legal name
+      and keeps the typed one as the name the customer goes by, as the
+      file's analysts did ("anglicised first name kept as preferred name").
     The name is written in the order the proof of address or the secondary
-    ID prints it."""
+    ID prints it; the name gone by is "" for the first two."""
     if not _only_names_failed(found):
         return None
     n = _names_on(case, got)
@@ -1038,15 +1058,22 @@ def name_slip(case, got, found):
         return None
     kept = [t for t in rec if any(_given_match(t, b) >= 0.9 for b in g)]
     other = [t for t in rec if _foreign(t, n["words"])]
+    first = [t for t in rec if t not in s]
+    goes_by = ""
     if len(g) >= 2 and set(s) <= set(rec) <= set(s + g) and g[0] not in rec and set(rec) - set(s):
-        father = " ".join(t for t in rec if t not in s)
+        father = " ".join(first)
         why = f"the record kept the father's name {father} and the surname, and dropped the holder's own name {g[0]}"
     elif not set(s) & set(rec) and kept and other and set(kept) | set(other) == set(rec):
         why = f"the record carried the surname {' '.join(other)}, which none of the documents prints (a married name on the form)"
+    elif set(s) <= set(rec) and first and set(first) <= set(other) and _naturalisation_certificate(case, got):
+        goes_by = case["client"]["legal_name"]
+        why = (f"the record carried the first name {' '.join(first)}, which none of the documents prints (an anglicised "
+               f"name); the naturalisation certificate on the case names the holder as the passport does, and "
+               f"{goes_by} is kept as the name the customer goes by")
     else:
         return None
     order = next((t for t in (n["poa"], n["secondary"]) if sorted(t) == sorted(s + g)), g + s)
-    return " ".join(order), why
+    return " ".join(order), why, goes_by
 
 
 def name_link_request(case, got, found):
@@ -1055,7 +1082,8 @@ def name_link_request(case, got, found):
     one surname and the secondary ID in the record's (a married name: the
     marriage certificate), or the record's surname with given names none of
     the documents prints (an anglicised name: the naturalisation
-    certificate)."""
+    certificate, asked for only when the secondary ID is something else;
+    when it is the certificate, name_slip settles the name)."""
     if not _only_names_failed(found) or name_slip(case, got, found):
         return ""
     n = _names_on(case, got)
@@ -1117,18 +1145,21 @@ def address_request(case, got, found):
 
 def record_fixes(case, alert_case, record):
     """What the agent corrects on the record by itself, {field: (value,
-    why)}: a name slip (name_slip) or a PO Box (address_slip), and only when
-    every check passes once it is corrected; {} otherwise."""
+    why)}: a name slip (name_slip, with the name the customer goes by when
+    it keeps one) or a PO Box (address_slip), and only when every check
+    passes once it is corrected; {} otherwise."""
     if not _may_act_alone(case, alert_case, record):
         return {}
     got, found = record["read"], record["checks"]
     slip = name_slip(case, got, found)
     address = "" if slip else address_slip(case, got, found)
-    fixes = ({"legal_name": slip} if slip else
+    fixes = ({"legal_name": slip[:2]} if slip else
              {"address": (address, "the record held only a PO Box, which is not a home address; the proof of address and "
                                    "the secondary ID give the same home in the same place")} if address else {})
     if not fixes:
         return {}
+    if slip and slip[2]:
+        fixes["preferred_name"] = (slip[2], "the name the customer goes by")
     trial = dict(case, client=dict(case["client"], **{k: v for k, (v, _) in fixes.items()}))
     return fixes if all(c["ok"] for c in checks(trial, got)[0]) else {}
 
@@ -1142,6 +1173,15 @@ def write_name(case, record, name, why):
     record["name_corrected"] = {"from": before, "to": name, "why": why}
 
 
+def keep_preferred_name(case, record, name):
+    """Keep the name the record carried, which the customer goes by, beside
+    the legal name it now holds (write_name)."""
+    before = case["client"].get("preferred_name", "")
+    case["client"]["preferred_name"] = name
+    workflow._change(case, ACTOR, "preferred name", before, name)
+    record["name_corrected"]["preferred"] = name
+
+
 def correct_record(case, record, fixes):
     """Write the corrections. Claude's verdict was on the record before them:
     it is dropped, and asked again on the corrected record from the stored
@@ -1149,6 +1189,8 @@ def correct_record(case, record, fixes):
     for field, (value, why) in fixes.items():
         if field == "legal_name":
             write_name(case, record, value, why)
+        elif field == "preferred_name":
+            keep_preferred_name(case, record, value)
         else:
             write_address(case, record, value, why)
     record.pop("verdict", None)
@@ -1229,6 +1271,23 @@ def confirmed_on_older_names(stored, seed):
     return any(not c["ok"] for c in found if c["check"] in NAME_CHECKS)
 
 
+def asked_on_older_names(stored, seed):
+    """A case the agent asked the customer about a name (an RFI) before the
+    last change to the name rules (NAME_RULES), whose stored read they now
+    settle on the record as the file gave it (`seed`) as a slip (name_slip:
+    the naturalisation certificate it asked for is on the case), and no
+    person holds or has worked (an RFI decided again on an earlier restart
+    carries its seed's intake rows, dated after the read, so _untouched would
+    not do): it starts again and is decided again on its stored read
+    (app._load_seed, redecide)."""
+    rec = stored.get("ai_agent") or {}
+    if (rec.get("decision") != "rfi" or rec.get("rules", 1) >= NAME_RULES or not rec.get("read")
+            or stored.get("current_reviewer") or _worked_by_a_person(stored)):
+        return False
+    found, _ = checks(seed, rec["read"])
+    return bool(name_slip(seed, rec["read"], found))
+
+
 def address_written_otherwise(stored, seed):
     """A case the agent confirmed, and whose registered address it rewrote to
     the proof of address's (address_update), before the last change to that
@@ -1251,8 +1310,8 @@ def address_written_otherwise(stored, seed):
 
 def redecide(case, alert_case, wc, stored):
     """A case back on its seed (confirmed_on_older_names,
-    address_written_otherwise), decided again on its stored read: the same
-    look at the images, today's checks."""
+    asked_on_older_names, address_written_otherwise), decided again on its
+    stored read: the same look at the images, today's checks."""
     workflow._audit(case, ACTOR, "Checked again", f"The agent's checks changed; its read of {stored.get('at', '')} is decided again.")
     return decide(case, alert_case, wc, {k: v for k, v in stored.items() if k in PERCEIVED})
 

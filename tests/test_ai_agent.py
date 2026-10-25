@@ -240,8 +240,8 @@ class AiAgentTestCase(unittest.TestCase):
         self.assert_corrected(self.free("KYC-2026-3189"), "address", "PO Box 2021, Chicago, IL 60614",
                               "8391 West Devon Avenue, Apartment 5A, Chicago, IL 60614", "only a PO Box")
 
-    def assert_rfi(self, c, needle):
-        rec, _ = self.run_agent(c)
+    def assert_rfi(self, c, needle, answer=None):
+        rec, _ = self.run_agent(c, answer)
         self.assertEqual((rec["decision"], c["status"], c["pending_reason"]), ("rfi", "DataConfirming", "RFI Sent"),
                          rec["reasons"])
         self.assertIn(needle, rec["requested"])
@@ -255,7 +255,12 @@ class AiAgentTestCase(unittest.TestCase):
     def test_the_document_that_links_two_names_is_asked_for(self):
         rec = self.assert_rfi(self.free("KYC-2026-3069"), "your marriage certificate")      # licence WILSON, passport ROBERTS
         self.assertIn("(PATRICIA MARIE ROBERTS) to the name on your account (PATRICIA WILSON)", rec["requested"])
-        self.assert_rfi(self.free("KYC-2026-3259"), "your naturalisation certificate")       # MIKE NGUYEN for NGUYEN MINH MINH
+        # MIKE NGUYEN for NGUYEN MINH MINH, with a licence for second ID: the certificate is not on the case
+        c = self.free("KYC-2026-3259")
+        ai_agent._secondary_doc(c)["name"] = "Driver's License (TX)"
+        read = perfect_read(c)
+        read["secondary"]["document_type"] = "DRIVER LICENSE"
+        self.assert_rfi(c, "your naturalisation certificate", answer=read)
         c = self.free("KYC-2026-3074")                                                       # a second home in Scottsdale
         self.assert_rfi(c, "Please confirm your main home address.")
         self.login("amara.iyer")
@@ -266,6 +271,21 @@ class AiAgentTestCase(unittest.TestCase):
         # an analyst who takes it holds it in the queue again
         self.c.post(f"/kyc/{c['id']}/reserve")
         self.assertEqual(routing.level_for(c), "L1")
+
+    def test_an_anglicised_name_beside_the_naturalisation_certificate_is_corrected(self):
+        # KEVIN NGUYEN; the passport, the certificate (the secondary ID) and the bill: KHOA QUOC NGUYEN.
+        # The file's analysts kept the legal name and Kevin as the preferred name, and asked for nothing.
+        c = self.free("KYC-2026-3025")
+        rec = self.assert_corrected(c, "legal_name", "KEVIN NGUYEN", "KHOA QUOC NGUYEN",
+                                    "the naturalisation certificate on the case names the holder")
+        self.assertEqual((c["client"]["preferred_name"], rec["name_corrected"]["preferred"]), ("KEVIN NGUYEN", "KEVIN NGUYEN"))
+        self.assertIn(("AI Agent", "preferred name", "", "KEVIN NGUYEN"),
+                      [(e["by"], e["field"], e["from"], e["to"]) for e in c["change_log"]])
+        self.assertEqual((c["pending_reason"], c.get("rfi", [])), ("", []))                # nothing asked of the customer
+        self.login("amara.iyer")
+        page = self.c.get(f"/kyc/detail/{c['id']}").data.decode("utf-8")
+        self.assertIn('id="preferred-name"', page)
+        self.assertIn("Preferred name kept:</b> KEVIN NGUYEN", page)
 
     def test_what_the_record_cannot_settle_stays_with_a_person(self):
         # a spelling the documents themselves disagree on (MOHANTI, MAHANTY, MOHANTY)
@@ -564,7 +584,7 @@ class AiAgentTestCase(unittest.TestCase):
         self.assertEqual(v("PRABHU FNU", "", "PRABHU"), (True, "PRABHU"))                                    # single name
         self.assertEqual(v("VÅ© CÃ´ng KhÃ¡nh", "VŨ", "CÔNG KHÁNH")[0], True)                                # mojibake
         self.assertFalse(v("PATRICIA WILSON", "ROBERTS", "PATRICIA MARIE")[0])                              # another surname
-        # an anglicised first name is no spelling of the passport's: only a naturalisation certificate links them
+        # an anglicised first name is no spelling of the passport's: the naturalisation certificate settles it (name_slip)
         self.assertFalse(v("KEVIN NGUYEN", "NGUYEN", "KHOA QUOC")[0])
         self.assertTrue(v("DAVID DUY NGUYEN", "NGUYEN", "DUY MINH", country="VN")[0])                       # the record keeps the passport's too
         self.assertFalse(v("BRANDON NGUYEN", "NGUYEN", "KHOA QUOC")[0])                                     # another given name
@@ -599,12 +619,43 @@ class AiAgentTestCase(unittest.TestCase):
         c = fcc.KYC_BY_ID[c["id"]]
         rec = c["ai_agent"]
         self.assertEqual(rec["at"], read_at)                                # the stored read: no new look at the images
-        self.assertEqual((rec["decision"], c["status"], c["pending_reason"]), ("rfi", "DataConfirming", "RFI Sent"))
-        self.assertIn("naturalisation certificate", rec["requested"])
-        self.assertEqual(c["client"]["legal_name"], "KEVIN NGUYEN")         # the record's name as the file gave it
+        # back on its seed (KEVIN NGUYEN), the naturalisation certificate on the case settles the name as a slip
+        self.assertEqual((rec["decision"], c["status"]), ("verified", "Verified"))
+        self.assertEqual(rec["name_corrected"]["from"], "KEVIN NGUYEN")
+        self.assertEqual((c["client"]["legal_name"], c["client"]["preferred_name"]), ("KHOA QUOC NGUYEN", "KEVIN NGUYEN"))
         self.assertIn("Checked again", [e["action"] for e in c["audit"]])
         fcc._load_seed()                                                    # decided once: stored as such from then on
-        self.assertEqual(fcc.KYC_BY_ID[c["id"]]["ai_agent"]["decision"], "rfi")
+        self.assertEqual(fcc.KYC_BY_ID[c["id"]]["ai_agent"]["at"], read_at)
+        self.assertEqual(fcc.KYC_BY_ID[c["id"]]["client"]["preferred_name"], "KEVIN NGUYEN")
+
+    def test_a_case_asked_for_a_certificate_it_holds_is_decided_again(self):
+        asked, married = self.free("KYC-2026-3172"), self.free("KYC-2026-3069")    # PHILIP for PHUC MINH; WILSON for ROBERTS
+        worked = self.free("KYC-2026-3334")                                          # HELEN for HUONG THI, then a person's note
+        with mock.patch.object(ai_agent, "_naturalisation_certificate", lambda case, got: False):   # the rules before the fix
+            for c in (asked, married, worked):
+                self.assertEqual(self.run_agent(c)[0]["decision"], "rfi", c["ai_agent"]["reasons"])
+                c["ai_agent"]["rules"] = 11
+        self.assertIn("naturalisation certificate", asked["ai_agent"]["requested"])
+        # a read older than the case's intake rows (an RFI decided again on an earlier restart, on a fresh seed)
+        asked["ai_agent"]["at"] = "2000-01-01 00:00:00"
+        self.assertFalse(ai_agent._untouched(asked))
+        ai_agent.workflow._audit(worked, "amara.iyer@straive.com", "Note added")
+        for c in (asked, married, worked):
+            StateStore.save("kyc", c)
+        read_at, married_at, worked_at = asked["ai_agent"]["at"], married["ai_agent"]["at"], worked["ai_agent"]["at"]
+        fcc._load_seed()
+        w = fcc.KYC_BY_ID[worked["id"]]                                     # a person worked it: theirs, as stored
+        self.assertEqual((w["ai_agent"]["at"], w["ai_agent"]["decision"], w["client"]["legal_name"]),
+                         (worked_at, "rfi", "HELEN NGUYEN"))
+        c = fcc.KYC_BY_ID[asked["id"]]
+        rec = c["ai_agent"]
+        self.assertEqual(rec["at"], read_at)                                # the stored read: no new look at the images
+        self.assertEqual((rec["decision"], c["status"], c["pending_reason"], c.get("rfi", [])), ("verified", "Verified", "", []))
+        self.assertEqual((c["client"]["legal_name"], c["client"]["preferred_name"]), ("PHUC MINH NGUYEN", "PHILIP NGUYEN"))
+        self.assertIn("Checked again", [e["action"] for e in c["audit"]])
+        # a marriage certificate the case does not hold is still asked for
+        m = fcc.KYC_BY_ID[married["id"]]
+        self.assertEqual((m["ai_agent"]["at"], m["ai_agent"]["decision"], m["pending_reason"]), (married_at, "rfi", "RFI Sent"))
 
     def test_a_postal_code_another_document_disputes_stays(self):
         c = self.K["KYC-2026-3473"]                                         # Calcutta 700019 on the record and the passport
