@@ -47,7 +47,6 @@
                 <th>Tag</th>
                 <th>Previous Reviewer</th>
                 <th>Current Reviewer</th>
-                <th>Vendor</th>
                 <th>SLA</th>
                 <th class="sticky-right">Details</th>
             </tr>
@@ -65,12 +64,11 @@
                 <td>{% if r.tags %}{{ r.tags|join(', ') }}{% else %}-{% endif %}</td>
                 <td class="nowrap">{{ r.previous_reviewer or '-' }}</td>
                 <td class="nowrap">{% if r.mine %}<b>{{ r.current_reviewer }}</b>{% else %}{{ r.current_reviewer or '-' }}{% endif %}</td>
-                <td>{{ r.vendor or '-' }}</td>
                 <td>{{ sla_chip(r.sla) }}</td>
                 <td class="sticky-right"><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('kyc_detail', case_id=r.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
             </tr>
             {% else %}
-            <tr><td colspan="{{ 13 if can_assign else 12 }}"><div class="no-data">{{ icon('search') }}No case matches these filters</div></td></tr>
+            <tr><td colspan="{{ 12 if can_assign else 11 }}"><div class="no-data">{{ icon('search') }}No case matches these filters</div></td></tr>
             {% endfor %}
             </tbody>
         </table>
