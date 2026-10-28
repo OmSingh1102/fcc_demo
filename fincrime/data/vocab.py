@@ -45,7 +45,7 @@ STATUS_STEP = {
 CHECK_POINTS = ["Submitted", "System Review", "Data Matching", "Data Confirming", "Data Screening", "Data Escalating L2"]
 
 PENDING_REASONS = ["", "Pending EDD", "Pending Skopenow", "RFI Sent", "Pending Resubmission", "Pending QC", "Pending L2",
-                   "Pending Checker 2"]
+                   "Pending Checker 2", "Awaiting Documents"]
 
 MANUAL_REVIEW_REASONS = [
     "Namescreen hit - WC or CMS",

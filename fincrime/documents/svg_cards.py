@@ -586,3 +586,11 @@ def _wrap(W, H, body, doc):
 def render(case, doc):
     fn = RENDERERS.get(doc.get("kind"), national_id_svg)
     return fn(case, doc)
+
+
+def awaiting_svg(title):
+    """The slot of a document whose real image has not been uploaded yet."""
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400" width="640" height="400" font-family="{FONT}">'
+            '<rect x="8" y="8" width="624" height="384" rx="18" fill="#f1f5f9" stroke="#94a3b8" stroke-width="3" stroke-dasharray="14 10"/>'
+            f'<text x="320" y="186" text-anchor="middle" font-size="26" font-weight="600" fill="#334155">{esc(title)}</text>'
+            '<text x="320" y="228" text-anchor="middle" font-size="17" fill="#64748b">Awaiting upload: no image yet</text></svg>')

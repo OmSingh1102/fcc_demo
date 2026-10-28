@@ -399,6 +399,7 @@
         <div class="row" style="gap:10px;flex-wrap:wrap">
             <div class="field" style="flex:1 1 180px"><label for="up-poa-kind">Proof of address type</label>
                 <select class="input" id="up-poa-kind" name="poa_kind">
+                    {% if not prow or not prow.kind or prow.kind == 'other' %}<option value="" selected>Choose the type</option>{% endif %}
                     {% for k, label in vocab.ACCEPTED_POA_TYPES.items() %}<option value="{{ k }}" {% if prow and prow.kind == k %}selected{% endif %}>{{ label }}</option>{% endfor %}
                     <option value="other">Other document</option>
                 </select></div>

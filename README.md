@@ -137,6 +137,27 @@ skipped, up to 500 rows a file. *Download a sample* gives five new cases
 date-of-birth hit, a company). Uploads are stored and rebuilt on restart
 until Reset demo.
 
+**Cases with their real images.** The same form takes an optional ZIP of
+the customers' ID images beside the CSV, each named after its case
+(`KYC-2026-5001_passport.jpg`, `_passport_back`, `_secondary`, `_poa`;
+JPEG, PNG or WebP). Each image is checked and cleaned like one uploaded on
+the case, and put in its place on the new case; the AI Agent then reads the
+images themselves instead of drawings. The columns a document's image is
+drawn from (the passport's printed and MRZ names, the secondary ID's name,
+the three document addresses) become optional: a row that leaves them all
+empty is a case whose images come as files, and it waits ("Awaiting
+Documents", not the agent's yet) until its passport and proof of address
+are in, from the ZIP or with Upload images on the case; an empty slot shows
+"Awaiting upload". The document types stay optional columns that name the
+slots (a proof of address of no named type is "other", for an analyst to
+set). The ZIP's declared sizes are checked before anything is read; a file
+that is wrongly named, for another case, a second image for the same
+place or too big is listed in the notification, not attached. The Upload
+page offers the five sample cases three ways: with the columns the images
+are drawn from, without them, and their images as a ZIP of JPEGs (drawn,
+so fictional), which together walk through the image-first upload.
+Removing an upload deletes its images.
+
 **Real document images** (`fincrime/documents/uploads.py`,
 `fincrime/engines/case_documents.py`). The case page's Documents tab has
 **Upload images**: the customer's own photos or scans of the passport's
@@ -265,14 +286,14 @@ analyst uploads real document images (see **Real document images**).
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-180 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+183 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_documents.py` (real document images on a case, all
 made by Pillow in memory: the slot replaced, the photo turned upright and
 its EXIF gone, served only to the case's tenant, read by the agent in
 place of the drawing, a resubmission back in Data Confirming, bad files and
 closed or held cases refused, kept through a restart, removed by the
-reset), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_ai_agent.py` (the AI Agent with the model call stood
+reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a

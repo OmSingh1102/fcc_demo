@@ -7,12 +7,14 @@ in memory: no real identity document is used.
 Run:  .venv\\Scripts\\python.exe -m unittest -v tests.test_documents
 """
 import base64
+import csv
 import io
 import os
 import re
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +29,8 @@ import app as fcc  # noqa: E402
 from PIL import Image  # noqa: E402
 from fincrime.documents import uploads  # noqa: E402
 from fincrime.engines import ai_agent, case_documents  # noqa: E402
+from fincrime.data import recon_book  # noqa: E402
+from fincrime.filebook import documents as file_documents, loader as file_loader  # noqa: E402
 
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 from test_ai_agent import Stub, perfect_read  # noqa: E402
@@ -202,6 +206,90 @@ class DocumentUploadTestCase(unittest.TestCase):
         self.c.post("/reset")
         self.assertFalse(os.path.exists(path))
         self.assertFalse(case_documents.has_uploads(fcc.KYC_BY_ID[c["id"]]))
+
+
+    # ── cases that come with their images ───────────────────────────────────
+    def upload_csv(self, csv_bytes, images=None, name="new_cases.csv"):
+        data = {"file": (io.BytesIO(csv_bytes), name)}
+        if images is not None:
+            data["images"] = (io.BytesIO(images), "images.zip")
+        return self.c.post("/kyc/upload", data=data, content_type="multipart/form-data", follow_redirects=True)
+
+    def sample_ids(self, data):
+        return [r["kyc_case_id"] for r in csv.DictReader(io.StringIO(data.decode("utf-8-sig")))]
+
+    def test_a_case_without_document_columns_waits_for_its_images(self):
+        data = self.c.get("/kyc/upload/sample.csv?images=1").data
+        header = data.decode("utf-8-sig").splitlines()[0]
+        self.assertNotIn("name_passport_data_page_viz", header)
+        r = self.upload_csv(data)
+        self.assertIn("4 case(s) wait for their images", flash_text(r))
+        ids = self.sample_ids(data)
+        c = fcc.KYC_BY_ID[ids[0]]
+        self.assertTrue(c["awaiting_documents"])
+        self.assertEqual((c["pending_reason"], c["vendor_check"]["result"]), ("Awaiting Documents", "Not run"))
+        self.assertFalse(ai_agent.eligible(c))
+        self.assertIn("Awaiting upload", self.c.get(f"/documents/{c['id']}/d1.svg").data.decode("utf-8"))
+        self.send(c, passport=(photo(), "p.jpg"))
+        self.assertTrue(c["awaiting_documents"])                           # the proof of address is still to come
+        self.send(c, poa=(photo(), "bill.jpg"), poa_kind="bank_statement", poa_country=c["client"]["nationality"])
+        self.assertNotIn("awaiting_documents", c)
+        self.assertEqual(c["pending_reason"], "")
+        self.assertEqual(c["audit"][-1]["action"], case_documents.RECEIVED)
+        self.assertTrue(ai_agent.eligible(c))                              # the agent's to read now
+        self.assertIsNone(ai_agent._secondary_doc(c))                      # an empty slot is no document
+        fcc._load_seed()                                                   # a restart keeps it so
+        again = fcc.KYC_BY_ID[c["id"]]
+        self.assertNotIn("awaiting_documents", again)
+        self.assertTrue(case_documents.slot_row(again, "poa")["upload"])
+
+    def test_a_csv_with_a_zip_of_its_images(self):
+        data = self.c.get("/kyc/upload/sample.csv?images=1").data
+        full = {r["kyc_case_id"]: r for r in csv.DictReader(io.StringIO(self.c.get("/kyc/upload/sample.csv").data.decode("utf-8-sig")))}
+        images = self.c.get("/kyc/upload/sample-images.zip")
+        self.assertEqual(images.mimetype, "application/zip")
+        with zipfile.ZipFile(io.BytesIO(images.data)) as z:
+            self.assertEqual(len(z.namelist()), 16)                        # four people x four documents; the company has none
+        r = self.upload_csv(data, images.data)
+        self.assertIn("16 image(s) from images.zip put on their cases", flash_text(r))
+        self.assertEqual(self.started, ["upload"])
+        ids = self.sample_ids(data)
+        first = fcc.KYC_BY_ID[ids[0]]
+        self.assertNotIn("awaiting_documents", first)
+        self.assertTrue(all(d.get("upload") for d in first["documents"]))
+        # what Claude reads off those images: what the full row prints (this upload's rows left it out)
+        printed = file_documents.synthesise(file_loader.build_case(full[first["id"]], 0))
+        with mock.patch.dict(recon_book.VIEWS, {first["recon"]["id"]: printed}):
+            read = perfect_read(first)
+        alert, wc = fcc._linked(first)
+        with mock.patch.object(ai_agent.ocr, "available", lambda: False):
+            rec = ai_agent.run_case(first, alert, wc, fcc._render_document, call=Stub(read), sleep=lambda s: None)
+        self.assertEqual(rec["decision"], "verified", rec["reasons"])
+        self.assertEqual(case_documents.slot_row(first, "poa")["issued_on_source"], "read")
+        paths = [os.path.join(uploads.base(), d["upload"]["path"]) for d in first["documents"]]
+        batch = StateStore.records("upload")[0]
+        self.c.post(f"/kyc/upload/{batch['id']}/remove", follow_redirects=True)
+        self.assertFalse(any(os.path.exists(p) for p in paths))            # removing the upload removes its images
+
+    def test_a_zip_is_checked(self):
+        data = self.c.get("/kyc/upload/sample.csv?images=1").data
+        first = self.sample_ids(data)[0]
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr(f"{first}_passport.jpg", photo())
+            z.writestr(f"scans/{first.lower()}_PASSPORT.jpg", photo())        # same place again (any case, any folder)
+            z.writestr("holiday.jpg", photo())
+            z.writestr("KYC-2026-0001_poa.jpg", photo())                     # not a case of this upload
+            z.writestr(f"{first}_poa.jpg", bytes(uploads.MAX_BYTES + 1))  # a bomb in miniature: refused before it is read
+            z.writestr("__MACOSX/._x.jpg", b"junk")
+        said = flash_text(self.upload_csv(data, buf.getvalue()))
+        for needle in ("1 image(s) from images.zip put on their cases", "holiday.jpg: not named",
+                       "a second image for the same place", "KYC-2026-0001: no case of that id", "larger than 10 MB"):
+            self.assertIn(needle, said)
+        self.assertNotIn("_x.jpg", said)
+        self.assertIn("not a ZIP archive", flash_text(self.upload_csv(data, b"not a zip", name="again.csv")))
+        with mock.patch.object(case_documents, "ZIP_MAX_FILES", 2):
+            self.assertIn("one upload takes at most 2", flash_text(self.upload_csv(data, buf.getvalue(), name="again.csv")))
 
 
 if __name__ == "__main__":

@@ -244,8 +244,8 @@ def eligible(case):
     when every check passes, or one with an alert left that no person holds
     or has worked, which the agent confirms for an analyst to clear the
     alert. Businesses are the analysts' from the start."""
-    if case["tenant"] != "ttlive" or case["status"] != "DataConfirming" or case.get("agency"):
-        return False
+    if case["tenant"] != "ttlive" or case["status"] != "DataConfirming" or case.get("agency") or case.get("awaiting_documents"):
+        return False                    # (a case waiting for its uploaded images is read once they are in)
     if case["screening"].get("workflow") == "auto-verified":
         return True
     return bool(case["screening"].get("hit")) and not case.get("current_reviewer") and not _worked_by_a_person(case)
@@ -263,14 +263,20 @@ def _id_doc(case):
     return next((d for d in case["documents"] if d.get("category") == "Passport"), None) or case["documents"][0]
 
 
+def _there(doc):
+    """A document with an image: drawn, or uploaded; not a slot still
+    waiting for its upload, which counts as no document."""
+    return not doc.get("awaiting") or bool(doc.get("upload"))
+
+
 def _back_doc(case):
-    return next((d for d in case["documents"] if d.get("category") == "Passport" and d.get("side") == "back"), None)
+    return next((d for d in case["documents"] if d.get("category") == "Passport" and d.get("side") == "back" and _there(d)), None)
 
 
 def _secondary_doc(case):
     """The customer's second identity document: anything that is neither the
     passport nor the proof of address."""
-    return next((d for d in case["documents"] if d.get("category") not in ("Passport", "ProofOfAddress")), None)
+    return next((d for d in case["documents"] if d.get("category") not in ("Passport", "ProofOfAddress") and _there(d)), None)
 
 
 def _image(data, media_type="image/png"):

@@ -301,7 +301,31 @@ def case_records(v, routed_to=""):
     # POA_REDRAWN, AADHAAR_NAMED), "" when never
     kyc["recon"] = dict(_recorded(v), uploaded=bool(v.get("uploaded")), drawn=s.get("drawn", ""))
     alert, wc = pair_screening(kyc, key, [_match(v, key)])
+    if v.get("awaiting_documents") and not company:          # a company's documents stay with the analysts
+        _awaiting(kyc, v)
     return kyc, alert, wc
+
+
+def _awaiting(kyc, v):
+    """An uploaded row without its documents' contents: the case waits for
+    its real images (case_documents.attach). Nothing is drawn in the slots,
+    no ID vendor has seen an image, and a slot's type is only what the row
+    names (an unnamed proof of address gets its type when its image comes)."""
+    kyc["awaiting_documents"] = True
+    kyc["pending_reason"] = AWAITING
+    kyc["vendor_check"].update(result="Not run", reason="", extracted={},
+                               vendor_reason="No ID image yet: the case waits for its documents.")
+    raw = v.get("raw_types", {})
+    for d in kyc["documents"]:
+        if not d.get("hub_file"):
+            continue
+        d.update(awaiting=True, quality="ok")
+        if d["hub_file"] == "secondary" and not raw.get("secondary_id_type"):
+            d["name"] = "Secondary ID"
+        if d["hub_file"] == "poa":
+            d.pop("issued_on", None)
+            if not raw.get("proof_of_address_type"):
+                d.update(name="Proof of address", kind="")
 
 
 def build():
@@ -328,8 +352,17 @@ HISTORY_COLUMNS = ("discrepancy_analysis_dob_address", "case_analyst", "review_d
                    "compliance_action_regulatory_notes", "name_variance_type", "address_variance_type",
                    "pain_point_detail", "normalisation_resolution_applied", "screening_impact",
                    "match_score_after_normalisation", "analyst_handling_time_mins")
-UPLOAD_COLUMNS = tuple(k for k in file_loader.REQUIRED if k not in HISTORY_COLUMNS)
+# What a row prints on its documents, the images being drawn from it. Optional
+# on upload: a row with all of them empty is a case whose real images come as
+# files (the ZIP beside the CSV, or Upload images on the case), and it waits
+# for them. The document types (secondary_id_type, proof_of_address_type)
+# stay optional too; given, they name the slots.
+DOCUMENT_COLUMNS = ("name_passport_data_page_viz", "name_passport_mrz_line_1", "name_secondary_id", "address_passport",
+                    "address_secondary_id", "address_proof_of_address")
+TYPE_COLUMNS = ("secondary_id_type", "proof_of_address_type")
+UPLOAD_COLUMNS = tuple(k for k in file_loader.REQUIRED if k not in HISTORY_COLUMNS + DOCUMENT_COLUMNS + TYPE_COLUMNS)
 UPLOAD_MAX_ROWS = 500
+AWAITING = "Awaiting Documents"
 
 
 def read_upload(text):
@@ -365,6 +398,8 @@ def add_rows(rows, start_seq):
             v = file_documents.synthesise(file_loader.build_case(row, start_seq + i))
             v.pop("raw", None)
             v["uploaded"] = True
+            v["awaiting_documents"] = not any(row.get(k) for k in DOCUMENT_COLUMNS)
+            v["raw_types"] = {k: row.get(k, "") for k in TYPE_COLUMNS}
             VIEWS[v["id"]] = v
             built.append(case_records(v))
         except (KeyError, ValueError, TypeError, IndexError) as exc:
@@ -414,7 +449,30 @@ def sample_rows(first_number, taken=()):
             # agent's decision get an id whose documents carry none
             if want in ("exact", "company") or (s_["capture"] == "none" and not s_["tampered"] and s_["poa_age_days"] <= 183):
                 break
-        r = {k: ("" if k in HISTORY_COLUMNS else row[k]) for k in UPLOAD_COLUMNS + HISTORY_COLUMNS}
+        r = {k: ("" if k in HISTORY_COLUMNS else row[k]) for k in UPLOAD_COLUMNS + DOCUMENT_COLUMNS + TYPE_COLUMNS + HISTORY_COLUMNS}
         r["kyc_case_id"] = new_id
         out.append(r)
     return out
+
+
+def sample_images(rows):
+    """A ZIP of JPEG photos of the sample rows' documents, named for the
+    image-first upload (<case id>_passport.jpg, _passport_back, _secondary,
+    _poa): the images drawn from each row (fictional, marked SPECIMEN), as a
+    batch of real ID photos would come. A company has none: its documents
+    stay with the analysts."""
+    import zipfile
+    from PIL import Image
+    from fincrime.documents.raster import svg_to_png
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for row in rows:
+            v = file_documents.synthesise(file_loader.build_case(row, 0))
+            if v["customer"]["corporate"]:
+                continue
+            for hub, slot in (("passport", "passport"), ("passport-back", "passport_back"), ("secondary", "secondary"), ("poa", "poa")):
+                with Image.open(io.BytesIO(svg_to_png(file_documents.render(v, hub)))) as im:
+                    photo = io.BytesIO()
+                    im.convert("RGB").save(photo, "JPEG", quality=90)
+                z.writestr(f"{row['kyc_case_id']}_{slot}.jpg", photo.getvalue())
+    return buf.getvalue()

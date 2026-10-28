@@ -43,7 +43,7 @@ from fincrime.data import vocab
 from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
 from fincrime.data.state_store import StateStore
-from fincrime.documents import svg_cards, uploads
+from fincrime.documents import ocr, svg_cards, uploads
 from fincrime.engines import (ai_agent, ai_review, ai_screening, case_documents, investigation, qc, recommendation, routing, screening,
                               segregation, sla, worldcheck, workflow)
 from fincrime.engines.errors import WorkflowError
@@ -54,7 +54,7 @@ from fincrime.utils.text import display_name, initials, translit
 # ─── App Setup ─────────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "fincrime-dev-key")
-app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024       # a CSV with a ZIP of its cases' ID images
 
 # The state store must never raise — its restore runs at import, so an
 # unwritable or locked database would take the app down rather than merely
@@ -1000,7 +1000,10 @@ def _too_large(_exc):
 def _render_document(case, doc):
     """A reconciliation-log case's passport, secondary ID and proof of
     address are the file book's images (the file's printed names, MRZ and
-    addresses); everything else is drawn by svg_cards from the case."""
+    addresses); everything else is drawn by svg_cards from the case. A slot
+    still waiting for its uploaded image says so."""
+    if doc.get("awaiting") and not doc.get("upload"):
+        return svg_cards.awaiting_svg(case_documents.slot_title(doc))
     if doc.get("hub_file"):
         svg = recon_book.render(case, doc)
         if svg:
@@ -1565,7 +1568,9 @@ def kyc_upload():
     if request.method == "GET":
         batches = sorted(StateStore.records("upload"), key=lambda b: b.get("at", ""), reverse=True)
         return render_template("kyc_upload.html", columns=recon_book.UPLOAD_COLUMNS, optional=recon_book.HISTORY_COLUMNS,
-                               max_rows=recon_book.UPLOAD_MAX_ROWS, batches=batches, agent_ready=ai_review.configured())
+                               document_columns=recon_book.DOCUMENT_COLUMNS + recon_book.TYPE_COLUMNS,
+                               max_rows=recon_book.UPLOAD_MAX_ROWS, batches=batches, agent_ready=ai_review.configured(),
+                               ocr_ready=ocr.available())
     f = request.files.get("file")
     if not f or not f.filename:
         flash("Choose a CSV file to upload.", "error")
@@ -1578,6 +1583,13 @@ def kyc_upload():
     ok, rows = _run_action(recon_book.read_upload, text)
     if not ok:
         return redirect(url_for("kyc_upload"))
+    zipped, zip_skipped = {}, []
+    z = request.files.get("images")
+    if z and z.filename:
+        ok, res = _run_action(case_documents.read_zip, z.read())
+        if not ok:
+            return redirect(url_for("kyc_upload"))
+        zipped, zip_skipped = res
     seen, fresh, skipped = set(KYC_BY_ID), [], []
     for i, r in enumerate(rows, start=2):
         cid = r["kyc_case_id"]
@@ -1596,16 +1608,54 @@ def kyc_upload():
         now = dates.now_str()
         _save("upload", {"id": f"upload-{now}-{len(StateStore.records('upload')) + 1}", "file": f.filename, "by": _actor(),
                          "at": now, "rows": kept, "cases": [c["id"] for c in cases]})
+        attached = _attach_zipped(cases, zipped, zip_skipped)
         auto = sum(1 for c in cases if c["screening"].get("workflow") == "auto-verified")
-        if auto and ai_review.configured():
+        reading = any(ai_agent.eligible(c) for c in cases) and ai_review.configured()
+        if reading:
             _agent_start("upload")
+        waiting = sum(1 for c in cases if c.get("awaiting_documents"))
         flash(f"{len(cases)} case(s) added from {f.filename}: {auto} auto-verified"
-              + (" — the AI Agent is reading them now" if auto and ai_review.configured() else "")
-              + f", {len(cases) - auto} for analysts." + (f" Skipped {len(skipped)}: {'; '.join(skipped[:5])}" if skipped else ""),
+              + (" — the AI Agent is reading them now" if reading else "")
+              + f", {len(cases) - auto} for analysts."
+              + (f" {attached} image(s) from {z.filename} put on their cases." if z and z.filename else "")
+              + (f" {waiting} case(s) wait for their images (Upload images on the case)." if waiting else "")
+              + (f" Skipped {len(skipped)}: {'; '.join(skipped[:5])}" if skipped else "")
+              + (f" Images skipped {len(zip_skipped)}: {'; '.join(zip_skipped[:5])}" if zip_skipped else ""),
               "success")
         return redirect(url_for("kyc_list", tags="Uploaded"))
     flash("No case was added. " + "; ".join(skipped[:8]), "error")
     return redirect(url_for("kyc_upload"))
+
+
+def _attach_zipped(cases, zipped, skipped):
+    """The ZIP's images onto the cases this upload made, each checked and
+    cleaned as one uploaded on the case (case_documents.attach); a proof of
+    address takes the type its row names (else "other", for an analyst to
+    set). Images for any other case id are reported, not attached. Returns
+    how many images went on."""
+    attached = 0
+    for case in cases:
+        files = zipped.pop(case["id"].upper(), {})
+        images = {}
+        for slot, (blob, name) in files.items():
+            try:
+                jpeg, info = uploads.prepare(blob, name)
+            except WorkflowError as exc:
+                skipped.append(str(exc))
+                continue
+            images[slot] = (jpeg, info, name)
+        if not images:
+            continue
+        poa = case_documents.poa_details({}, case, strict=False) if "poa" in images else None
+        try:
+            case_documents.attach(case, images, _actor(), poa)
+        except WorkflowError as exc:
+            skipped.append(f"{case['id']}: {exc}")
+            continue
+        _save("kyc", case)
+        attached += len(images)
+    skipped += [f"{cid}: no case of that id in this upload" for cid in zipped]
+    return attached
 
 
 @app.route("/kyc/upload/<batch_id>/remove", methods=["POST"])
@@ -1630,13 +1680,30 @@ def kyc_upload_remove(batch_id):
     return redirect(url_for("kyc_upload"))
 
 
+def _sample_rows():
+    nums = [int(m.group(1)) for c in KYC_CASES for m in [re.search(r"(\d+)$", c["id"])] if m]
+    return recon_book.sample_rows(max(nums, default=4010) + 1, taken=set(KYC_BY_ID))
+
+
 @app.route("/kyc/upload/sample.csv")
 def kyc_upload_sample():
-    nums = [int(m.group(1)) for c in KYC_CASES for m in [re.search(r"(\d+)$", c["id"])] if m]
-    start = max(nums, default=4010) + 1
-    rows = recon_book.sample_rows(start, taken=set(KYC_BY_ID))
-    columns = list(recon_book.UPLOAD_COLUMNS + recon_book.HISTORY_COLUMNS)
+    """Five new cases in the log's layout. ?images=1: without the columns the
+    documents are drawn from, for an upload whose images come in the ZIP
+    (/kyc/upload/sample-images.zip, the same five cases)."""
+    rows = _sample_rows()
+    if request.args.get("images") == "1":
+        columns = list(recon_book.UPLOAD_COLUMNS + recon_book.TYPE_COLUMNS + recon_book.HISTORY_COLUMNS)
+        return _csv_response("new_cases_for_images_sample.csv", columns, [[r[c] for c in columns] for r in rows])
+    columns = list(recon_book.UPLOAD_COLUMNS + recon_book.DOCUMENT_COLUMNS + recon_book.TYPE_COLUMNS + recon_book.HISTORY_COLUMNS)
     return _csv_response("new_cases_sample.csv", columns, [[r[c] for c in columns] for r in rows])
+
+
+@app.route("/kyc/upload/sample-images.zip")
+def kyc_upload_sample_images():
+    """JPEG photos of the five sample cases' documents (drawn, so fictional),
+    named for the ZIP upload: what a real batch of ID images looks like."""
+    return Response(recon_book.sample_images(_sample_rows()), mimetype="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="new_cases_images_sample.zip"'})
 
 
 @app.route("/routing/capacity", methods=["POST"])
