@@ -29,7 +29,7 @@
     </div>
     <div class="tbl-scroll">
     <table class="tbl" id="eval-table">
-        <thead><tr><th>Approach</th><th class="num">Outcome right</th><th class="num">Decided without a person</th><th class="num">Settled or left open, right</th><th class="num">Hits cleared wrongly</th><th class="num">Name discrepancy right</th><th class="num">Address discrepancy right</th><th class="num">Cost a case</th><th class="num">Per 1,000</th><th class="num">Seconds</th></tr></thead>
+        <thead><tr><th>Approach</th><th class="num">Outcome right</th><th class="num">Decided without a person</th><th class="num">Settled or left open, right</th><th class="num">Hits cleared wrongly</th><th class="num">Name discrepancy right</th><th class="num">Address discrepancy right</th><th class="num">The three together</th><th class="num">Cost a case</th><th class="num">Per 1,000</th><th class="num">Seconds</th></tr></thead>
         <tbody>
         {% for r in ev.table %}{% set s = r.summary %}
         <tr{% if ev.best and r.key == ev.best.key %} class="arch-current"{% endif %}>
@@ -43,6 +43,7 @@
             <td class="num">{% if s.wrongly_cleared %}<span class="badge rose">{{ s.wrongly_cleared }}</span>{% else %}0{% endif %}</td>
             <td class="num">{{ pct(s.name_accuracy) }}</td>
             <td class="num">{{ pct(s.address_accuracy) }}</td>
+            <td class="num strong">{{ pct(r.overall) }}</td>
             <td class="num">{% if s.cost_per_case is defined %}${{ '%.4f'|format(s.cost_per_case) }}{% else %}$0{% endif %}</td>
             <td class="num">{% if s.cost_per_1000 is defined %}${{ '%.2f'|format(s.cost_per_1000) }}{% else %}$0{% endif %}</td>
             <td class="num">{{ s.seconds_median if s.seconds_median is defined else '—' }}</td>
@@ -52,7 +53,7 @@
     </table>
     </div>
     <div class="card-body small muted" style="padding-top:8px">
-        <b>Outcome right</b>: the analysts' disposition in four (clear, true match, ask the customer, escalate to L2); "to a person" never counts as right. <b>Settled or left open</b>: the same with "ask the customer", "escalate" and "to a person" taken as one answer, open. <b>Hits cleared wrongly</b>: cleared as a false positive when the analysts did not: the mistake that must stay at 0. Cost is the tokens each call used at list price.
+        <b>Outcome right</b>: the analysts' disposition in four (clear, true match, ask the customer, escalate to L2); "to a person" never counts as right. <b>Settled or left open</b>: the same with "ask the customer", "escalate" and "to a person" taken as one answer, open. <b>Hits cleared wrongly</b>: cleared as a false positive when the analysts did not: the mistake that must stay at 0. <b>The three together</b>: the mean of the outcome, name and address scores; the models are ranked by it, and "best" is the first with no hit cleared wrongly. Cost is the tokens each call used at list price.
     </div>
 </div>
 

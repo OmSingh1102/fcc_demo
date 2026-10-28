@@ -637,6 +637,37 @@ def _undecidable():
     return c
 
 
+def overall(s):
+    """The three answers together: the mean of the outcome, name and
+    address scores (None when one is missing, as for the baselines)."""
+    xs = [s.get("accuracy"), s.get("name_accuracy"), s.get("address_accuracy")]
+    return round(sum(xs) / 3, 1) if all(x is not None for x in xs) else None
+
+
+def _ablations(llms):
+    """Plain lines on the runs that differ in one thing only: the same
+    model with and without similar cases, or with two SOP versions."""
+    out = []
+
+    def said(r):
+        s = r["summary"]
+        return (f"{s['accuracy']}% of outcomes, the name {s['name_accuracy']}%, the address {s['address_accuracy']}%"
+                + (f", {s['wrongly_cleared']} hit{'s' if s['wrongly_cleared'] != 1 else ''} cleared wrongly" if s["wrongly_cleared"] else ""))
+
+    full = [r for r in llms if r["summary"]["errors"] <= 0.02 * r["summary"]["cases"]]     # a failed call or two is scored on the rest
+    for a in full:
+        for b in full:
+            if a["model"] != b["model"] or a is b:
+                continue
+            if a["sop"] == b["sop"] and a["examples"] > b["examples"] == 0:
+                out.append(f"Similar cases in the prompt ({a['label']}, SOP {a['sop']}): with {a['examples']}, {said(a)}; "
+                           f"with none, {said(b)}.")
+            if a["examples"] == b["examples"] and int(a["sop"][1:]) > int(b["sop"][1:]):
+                out.append(f"The SOP tuning, on the held-out cases ({a['label']}): SOP {b['sop']}, {said(b)}; "
+                           f"SOP {a['sop']}, {said(a)}.")
+    return out
+
+
 def view(result):
     """Everything the Model evaluation page shows, or None before a run."""
     if not result or not result.get("runs"):
@@ -644,9 +675,10 @@ def view(result):
     runs = result["runs"]
     test = [r for r in runs.values() if r["set"] == "test"]
     base = [r for r in test if r["kind"] != "llm"]
+    for r in test:
+        r["overall"] = overall(r["summary"])
     llms = sorted((r for r in test if r["kind"] == "llm" and r["per_case"]),
-                  key=lambda r: (-(r["summary"]["accuracy"] or 0), -(r["summary"].get("name_accuracy") or 0),
-                                 r["summary"].get("cost_per_case") or 0))
+                  key=lambda r: (-(r["overall"] or 0), r["summary"].get("cost_per_case") or 0))
     table = sorted(base, key=lambda r: r["kind"] != "rules") + llms
     for r in table:
         s = r["summary"]
@@ -654,7 +686,7 @@ def view(result):
         r["title"] = r["label"] + (f" · SOP {r['sop']}, {r['examples']} similar cases" if r["kind"] == "llm" and r["examples"]
                                    else f" · SOP {r['sop']} alone" if r["kind"] == "llm" else "")
     complete = [r for r in llms if not r["summary"]["errors"] and len(r["per_case"]) == result["split"]["sizes"]["test"]]
-    best = next((r for r in complete if r["summary"]["wrongly_cleared"] == 0), complete[0] if complete else None)
+    best = next((r for r in complete if r["summary"]["wrongly_cleared"] == 0), None)
     lines = []
     rules = next((r for r in base if r["kind"] == "rules"), None)
     tree = next((r for r in base if r["kind"] == "tree"), None)
@@ -662,21 +694,31 @@ def view(result):
         lines.append(f"In this file the analysts' outcome follows the date of birth: the console's rules settle "
                      f"{rules['summary']['automated']}% of the {rules['summary']['cases']} held-out cases with no mistake and send "
                      f"the rest to a person; a decision tree learned from the 800 other cases gets {tree['summary']['accuracy']}% "
-                     f"of the outcomes right.")
+                     f"of the outcomes right. Where the models add to that is naming the discrepancies and writing the reasons.")
     if best:
         s = best["summary"]
-        lines.append(f"Best language model: {best['title']}: {s['accuracy']}% of outcomes, the name discrepancy {s['name_accuracy']}% "
-                     f"(the console's name rules: {rules['summary']['name_accuracy'] if rules else '—'}%), the address "
-                     f"discrepancy {s['address_accuracy']}%, ${s['cost_per_case']} a case (${s['cost_per_1000']} per 1,000).")
+        lines.append(f"Best language model (the three answers together, and no hit cleared wrongly): {best['title']}: "
+                     f"{s['accuracy']}% of outcomes, the name discrepancy {s['name_accuracy']}% (the console's hand-written name rules: "
+                     f"{rules['summary']['name_accuracy'] if rules else '—'}%), the address discrepancy {s['address_accuracy']}%, "
+                     f"${s['cost_per_case']} a case (${s['cost_per_1000']} per 1,000).")
         near = [r for r in complete if r is not best and r["summary"]["wrongly_cleared"] == 0
-                and (r["summary"]["accuracy"] or 0) >= (s["accuracy"] or 0) - 1
-                and (r["summary"].get("name_accuracy") or 0) >= (s.get("name_accuracy") or 0) - 3
+                and (r["overall"] or 0) >= (best["overall"] or 0) - 2
                 and (r["summary"].get("cost_per_case") or 1) < (s.get("cost_per_case") or 0)]
         if near:
             cheap = min(near, key=lambda r: r["summary"]["cost_per_case"])
             cs = cheap["summary"]
-            lines.append(f"Within a point of it for less: {cheap['title']}: {cs['accuracy']}% of outcomes, the name "
-                         f"{cs['name_accuracy']}%, at ${cs['cost_per_case']} a case (${cs['cost_per_1000']} per 1,000).")
+            lines.append(f"Within two points of it for less: {cheap['title']}: {cs['accuracy']}% of outcomes, the name "
+                         f"{cs['name_accuracy']}%, the address {cs['address_accuracy']}%, at ${cs['cost_per_case']} a case "
+                         f"(${cs['cost_per_1000']} per 1,000), {s['cost_per_case'] / cs['cost_per_case']:.1f}x less.")
+        safe = [r for r in complete if r["summary"]["wrongly_cleared"] == 0 and r is not best and r["overall"] is not None]
+        if safe:
+            cheap = min(safe, key=lambda r: r["summary"]["cost_per_case"])
+            cs = cheap["summary"]
+            if cheap not in near and cs["cost_per_case"] < s["cost_per_case"]:
+                lines.append(f"The cheapest with no hit cleared wrongly: {cheap['title']}: {cheap['overall']}% on the three "
+                             f"together against {best['overall']}%, at ${cs['cost_per_case']} a case (${cs['cost_per_1000']} per "
+                             f"1,000), {s['cost_per_case'] / cs['cost_per_case']:.0f}x less.")
+    lines += _ablations(llms)
     cleared = [r["title"] for r in table if r["summary"]["wrongly_cleared"]]
     lines.append("No approach cleared a hit the analysts did not clear." if not cleared else
                  f"Cleared a hit the analysts did not clear (the dangerous mistake): {', '.join(cleared)}.")
