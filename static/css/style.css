@@ -659,6 +659,7 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 .fact-list .v.strong { font-weight: 600; }
 .fact-list > .fact-actions { display: flex; gap: 6px; padding-top: 10px; }
 
+.doc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .doc-card { display: flex; flex-direction: column; overflow: hidden; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .doc-thumb { position: relative; display: block; width: 100%; aspect-ratio: 4 / 3; overflow: hidden; padding: 0; border: 0; background: #2b2b2b; cursor: zoom-in; }

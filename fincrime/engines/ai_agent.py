@@ -51,7 +51,8 @@ import time
 from fincrime.data import vocab
 from fincrime.documents.raster import svg_to_png
 from fincrime.documents.svg_cards import ISO3
-from fincrime.engines import ai_screening, workflow
+from fincrime.documents import uploads
+from fincrime.engines import ai_screening, case_documents, workflow
 from fincrime.engines.errors import WorkflowError
 from fincrime.filebook import addresses, llm, names, similarity
 from fincrime.utils import dates
@@ -249,8 +250,10 @@ def eligible(case):
 
 def _worked_by_a_person(case):
     """Has an analyst acted on the case? Their audit entries carry their
-    e-mail; the system, the vendor, the screening and the agent do not."""
-    return any("@" in (e.get("actor") or "") for e in case.get("audit", []))
+    e-mail; the system, the vendor, the screening and the agent do not.
+    Sending the customer's images in (case_documents) is not working it."""
+    return any("@" in (e.get("actor") or "") and e.get("action") not in case_documents.PASSIVE_ACTIONS
+               for e in case.get("audit", []))
 
 
 def _id_doc(case):
@@ -267,8 +270,17 @@ def _secondary_doc(case):
     return next((d for d in case["documents"] if d.get("category") not in ("Passport", "ProofOfAddress")), None)
 
 
-def _image(png):
-    return {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64.b64encode(png).decode()}}
+def _image(data, media_type="image/png"):
+    return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode()}}
+
+
+def _picture(case, doc, render):
+    """The image block for one document: the photo or scan uploaded for it
+    (documents/uploads), else the drawing of it."""
+    up = doc.get("upload")
+    if up:
+        return _image(uploads.load(up["path"]), up["media_type"])
+    return _image(svg_to_png(render(case, doc)))
 
 
 def read(case, render, call=None, sleep=time.sleep):
@@ -282,7 +294,7 @@ def read(case, render, call=None, sleep=time.sleep):
             content.append({"type": "text", "text": missing + f" Return `{key}` unreadable with empty fields."})
             return
         n += 1
-        content.extend([{"type": "text", "text": f"Image {n} is {intro}"}, _image(svg_to_png(render(case, doc)))])
+        content.extend([{"type": "text", "text": f"Image {n} is {intro}"}, _picture(case, doc, render)])
 
     add(_id_doc(case), "id", "the customer's ID (passport data page). Read it into `id`.", "There is no ID.")
     add(_back_doc(case), "back", "the passport's back page. Read it into `back`.", "There is no passport back page.")
@@ -965,6 +977,7 @@ def decide(case, alert_case, wc, perceived):
     if record["error"]:
         record["reasons"] = [f"AI Agent could not read the documents: {record['error']}"]
     else:
+        case_documents.date_from_read(case, record["read"])
         record["checks"], values = checks(case, record["read"])
         watch = watchlist_findings(case, wc, record["read"])
         if watch:

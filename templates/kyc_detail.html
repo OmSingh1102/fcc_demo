@@ -47,7 +47,7 @@
             </div>
             <div class="card">
                 <div class="card-head"><div class="card-title">ID vendor check</div>
-                    {{ outcome_badge('Approved' if case.vendor_check.result == 'Approved' else 'Rejected') }}</div>
+                    {{ outcome_badge('Not run' if case.vendor_check.result == 'Not run' else ('Approved' if case.vendor_check.result == 'Approved' else 'Rejected')) }}</div>
                 <div class="card-body fact-list">
                     <div><span class="l">Vendor</span><span class="v">{{ case.vendor_check.vendor }}</span></div>
                     <div><span class="l">Reason</span><span class="v">{{ case.vendor_check.reason or '-' }}</span></div>
@@ -101,6 +101,12 @@
 
     {# ── Documents: the uploads as cards ── #}
     <div class="tab-panel" role="tabpanel" data-panel="documents" hidden>
+        {% if can_upload_docs %}
+        <div class="doc-toolbar" id="doc-toolbar">
+            <span class="small muted">{% if case.documents|selectattr('upload')|list %}Images uploaded in the console are marked; the rest are drawn from the case file.{% else %}These images are drawn from the case file. Upload the customer's real photos or scans to replace them.{% endif %}</span>
+            <button type="button" class="btn btn-primary btn-sm" id="upload-docs-btn" onclick="openModal('upload-docs-modal')">{{ icon('upload') }} Upload images</button>
+        </div>
+        {% endif %}
         <div class="doc-grid" id="doc-grid">
             {% for d in case.documents %}{% set src = url_for('document_svg', case_id=case.id, doc_id=d.id) %}
             <div class="doc-card">
@@ -109,6 +115,7 @@
                 <div class="doc-meta">
                     <div class="doc-name">{{ d.name }}</div>
                     <div class="doc-sub">{{ d.category }} · {{ d.side }}{% if d.quality != 'ok' %} <span class="badge amber">{{ d.quality }}</span>{% endif %}</div>
+                    {% if d.upload %}<div class="doc-sub" data-uploaded="{{ d.id }}"><span class="badge blue">Uploaded</span> by {{ d.upload.by|who }} · {{ d.upload.at }}{% if d.issued_on and d.category == 'ProofOfAddress' %} · issued {{ d.issued_on }}{% if d.issued_on_source == 'read' %} (read by the AI Agent){% endif %}{% endif %}</div>{% endif %}
                 </div>
                 <div class="doc-actions">
                     <button type="button" class="btn btn-primary btn-xs" onclick="docPreview('{{ src }}', '{{ d.name }} — {{ d.side }}')">Preview</button>
@@ -176,6 +183,7 @@
         </div>
     </div>
     <div class="card-body" style="padding-top:0">
+        {% if case.documents_uploaded_at and case.documents_uploaded_at > ag.at %}<div class="note warn small mb-8" id="ai-agent-stale"><b>Documents uploaded after this read</b> ({{ case.documents_uploaded_at }}): the checks below are on the images the agent saw before.</div>{% endif %}
         {% if ag.decision == 'resubmit' %}
         <div class="note info small mb-8" id="ai-agent-requested"><b>Asked the customer:</b> Resubmit POA — “{{ ag.requested }}”. {{ ag.reasons|join('; ') }}. Every other check passed and nothing was left for an analyst; the new proof of address is read and checked again when it arrives.</div>
         {% elif ag.decision == 'rfi' %}
@@ -348,6 +356,39 @@
         <button type="submit" class="btn btn-primary btn-sm">Save</button></div>
 </form>
 {{ modal_close() }}
+
+{% if can_upload_docs %}
+{{ modal_open('upload-docs-modal', 'Upload document images', '') }}
+<form method="post" action="{{ url_for('kyc_documents_upload', case_id=case.id) }}" enctype="multipart/form-data" id="upload-docs-form">
+    <div class="modal-body">
+        <p class="small muted mb-8">The customer's real photos or scans: JPEG, PNG or WebP, up to 10 MB each. Each image replaces the drawn one in its place. Images are turned upright and saved again without their EXIF data (camera, GPS). The AI Agent reads them through Straive's LLM Foundry.</p>
+        {% for slot, label in upload_slots %}
+        <div class="field"><label for="up-{{ slot }}">{{ label }}</label>
+            <input class="input" type="file" id="up-{{ slot }}" name="{{ slot }}" accept="image/jpeg,image/png,image/webp"></div>
+        {% endfor %}
+        {% set prow = case.documents|selectattr('category', 'equalto', 'ProofOfAddress')|first %}
+        <div class="row" style="gap:10px;flex-wrap:wrap">
+            <div class="field" style="flex:1 1 180px"><label for="up-poa-kind">Proof of address type</label>
+                <select class="input" id="up-poa-kind" name="poa_kind">
+                    {% for k, label in vocab.ACCEPTED_POA_TYPES.items() %}<option value="{{ k }}" {% if prow and prow.kind == k %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                    <option value="other">Other document</option>
+                </select></div>
+            <div class="field" style="flex:1 1 140px"><label for="up-poa-issued">Issue date <span class="muted">(optional)</span></label>
+                <input class="input" type="date" id="up-poa-issued" name="poa_issued_on"></div>
+            <div class="field" style="flex:1 1 160px"><label for="up-poa-country">Issued in</label>
+                <select class="input" id="up-poa-country" name="poa_country">
+                    {% set pc = (prow.country if prow and prow.country else case.client.nationality) %}
+                    {% for code, cname in vocab.COUNTRY_NAMES.items()|sort(attribute='1') %}<option value="{{ code }}" {% if code == pc %}selected{% endif %}>{{ cname }}</option>{% endfor %}
+                </select></div>
+        </div>
+        <div class="tiny muted">The type, date and country apply to a proof of address uploaded here. Leave the date empty and the AI Agent takes the one it reads off the document.</div>
+    </div>
+    <div class="modal-foot"><span class="spacer"></span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="closeModal('upload-docs-modal')">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Upload</button></div>
+</form>
+{{ modal_close() }}
+{% endif %}
 
 {{ modal_open('rfi-modal', 'Request for Information', 'sm') }}
 <form method="post" action="{{ url_for('kyc_rfi', case_id=case.id) }}">

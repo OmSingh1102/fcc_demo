@@ -137,6 +137,30 @@ skipped, up to 500 rows a file. *Download a sample* gives five new cases
 date-of-birth hit, a company). Uploads are stored and rebuilt on restart
 until Reset demo.
 
+**Real document images** (`fincrime/documents/uploads.py`,
+`fincrime/engines/case_documents.py`). The case page's Documents tab has
+**Upload images**: the customer's own photos or scans of the passport's
+data page and back page, the secondary ID and the proof of address (JPEG,
+PNG or WebP, up to 10 MB each). Each one is opened with Pillow (a renamed
+file or an iPhone HEIC is refused with the reason), turned upright from its
+EXIF orientation, shrunk to 2,576 pixels on its long side and saved again
+as JPEG without its EXIF block (camera, GPS), then takes the drawn image's
+place in its slot. The proof of address takes the type and country chosen
+in the dialog and an issue date, typed in or read off the document by the
+AI Agent. The ID vendor never saw the new image, so its result reads "Not
+run". A case waiting for a resubmission is back in Data Confirming, and a
+case in Data Confirming sets the agent's earlier read aside: the agent
+reads the real images (Claude gets the photo itself, not a drawing) when
+the case is its to take. Uploading images is not working the case, so a
+case with an open alert stays the agent's. The files live in `uploads/`
+beside the state database (`FCC_UPLOAD_DIR` overrides), which `.gitignore`
+keeps out of the repository; the image route serves them only to
+analysts of the case's tenant, never cached. They survive a restart, and
+Reset demo deletes them. **These are real people's identity documents**:
+they stay on this machine, but the AI Agent sends them to Straive's LLM
+Foundry to be read, so use this only with the client's approval. A
+Render deploy's disk is wiped on every deploy and restart.
+
 The console's names and colours are client-neutral: the two onboarding
 lines are **Individuals** and **Businesses**, customer tiers are Tier 1–4,
 the top tabs are Monitoring / Reports / Administration and the accent is a
@@ -150,7 +174,8 @@ templates, a single stylesheet, a SQLite state store, no JS framework.
 
 All people, companies, documents and screening records are fictional. The
 identity documents are drawn as SVGs from the seed data and carry a
-"SPECIMEN" watermark. Vendor names appear as text labels only.
+"SPECIMEN" watermark, except images an analyst uploads (above). Vendor
+names appear as text labels only.
 
 Links that open the World-Check console, from the in-house CMS case, its
 Alert Outcome dialog and the Audit Log, open it in a new tab marked with a
@@ -208,7 +233,8 @@ data it found missing on the ticked alerts (or every pending one), with an
 audit row on each case. It is advisory: it resolves nothing, never runs at
 intake, and the AI Screening page shows its status and a switch. On Render
 the blueprint asks for the key; leave it blank to run without the feature.
-The case data is fictional, so nothing sensitive leaves the demo.
+The case data is fictional, so nothing sensitive leaves the demo, unless an
+analyst uploads real document images (see **Real document images**).
 
 ## Tests
 
@@ -216,9 +242,14 @@ The case data is fictional, so nothing sensitive leaves the demo.
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-163 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+169 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
-restart), `tests/test_ai_agent.py` (the AI Agent with the model call stood
+restart), `tests/test_documents.py` (real document images on a case, all
+made by Pillow in memory: the slot replaced, the photo turned upright and
+its EXIF gone, served only to the case's tenant, read by the agent in
+place of the drawing, a resubmission back in Data Confirming, bad files and
+closed or held cases refused, kept through a restart, removed by the
+reset), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a

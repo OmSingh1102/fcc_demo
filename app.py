@@ -43,9 +43,9 @@ from fincrime.data import vocab
 from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
 from fincrime.data.state_store import StateStore
-from fincrime.documents import svg_cards
-from fincrime.engines import (ai_agent, ai_review, ai_screening, investigation, qc, recommendation, routing, screening, segregation, sla,
-                              worldcheck, workflow)
+from fincrime.documents import svg_cards, uploads
+from fincrime.engines import (ai_agent, ai_review, ai_screening, case_documents, investigation, qc, recommendation, routing, screening,
+                              segregation, sla, worldcheck, workflow)
 from fincrime.engines.errors import WorkflowError
 from fincrime.engines.wc_report_pdf import render_wc_export
 from fincrime.utils import dates
@@ -407,8 +407,8 @@ def _redrawn_cases():
     out = set()
     for stored in StateStore.records("kyc"):
         case = KYC_BY_ID.get(stored.get("id", ""))
-        if case is None or "recon" not in case:
-            continue
+        if case is None or "recon" not in case or case_documents.has_uploads(stored):
+            continue                    # real images uploaded: nothing was drawn, and the seed would drop them
         if ((stored.get("recon") or {}).get("drawn", "") != case["recon"].get("drawn", "") or ai_agent.needs_reread(stored)
                 or ai_agent.read_before_all_documents(stored)):
             out.add(case["id"])
@@ -428,7 +428,7 @@ def _redecided_cases(redrawn):
     out = {}
     for stored in StateStore.records("kyc"):
         case = KYC_BY_ID.get(stored.get("id", ""))
-        if case is None or "recon" not in case or case["id"] in redrawn:
+        if case is None or "recon" not in case or case["id"] in redrawn or case_documents.has_uploads(stored):
             continue
         if (ai_agent.confirmed_on_older_names(stored, case) or ai_agent.asked_on_older_names(stored, case)
                 or ai_agent.address_written_otherwise(stored, case)):
@@ -486,6 +486,7 @@ def _remove_uploaded(ids):
     StateStore.delete("wc", paired)
     for cid in ids:
         recon_book.VIEWS.pop(cid, None)
+        uploads.remove_case(cid)
     _bump_state()
     return gone
 
@@ -715,7 +716,9 @@ def kyc_detail(case_id):
         poa_resubmit_reason=next((_POA_RESUBMIT[c["label"]] for c in failed if c["label"] in _POA_RESUBMIT), ""),
         id_resubmit_reason=(case.get("ai_agent") or {}).get("resubmit", "") if case["status"] == "DataConfirming" else "",
         file_items=investigation.items(case, alert, wc) if case.get("investigation_file") else [],
-        agent=_agent_view(case, actor, levels))
+        agent=_agent_view(case, actor, levels), upload_slots=uploads.SLOTS,
+        can_upload_docs=(case["status"] not in vocab.CLOSED_STATUSES and not case.get("agency")
+                         and bool(levels & {"L1", "L2", "EDD", "QC"})))
 
 
 @app.route("/kyc/detail/<case_id>/audit")
@@ -917,11 +920,81 @@ def kyc_bulk_assign():
 # ─── Documents ─────────────────────────────────────────────────────────────────
 @app.route("/documents/<case_id>/<doc_id>.svg")
 def document_svg(case_id, doc_id):
-    """A synthetic document drawn from the case data (see documents/svg_cards)."""
+    """A document's image: the photo or scan uploaded for it (a real
+    person's ID: only to analysts of the case's tenant, never cached), else
+    the synthetic document drawn from the case data (see documents/svg_cards)."""
     case = _kyc(case_id)
     doc = next((d for d in case["documents"] if d["id"] == doc_id), None) or abort(404)
+    up = doc.get("upload")
+    if up:
+        if case["tenant"] not in ((_analyst() or {}).get("tenants") or ["ttlive"]):
+            abort(404)
+        try:
+            data = uploads.load(up["path"])
+        except (OSError, WorkflowError):
+            abort(404)
+        return Response(data, mimetype=up["media_type"],
+                        headers={"Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff",
+                                 "Content-Disposition": f'inline; filename="{case_id}-{doc_id}.jpg"'})
     return Response(_render_document(case, doc), mimetype="image/svg+xml",
                     headers={"Cache-Control": "no-store"})
+
+
+@app.route("/kyc/<case_id>/documents", methods=["POST"])
+@role_required("L1", "L2", "EDD", "QC")
+def kyc_documents_upload(case_id):
+    """The customer's real document images onto a case: each one checked and
+    cleaned (documents/uploads), then in its slot in place of the drawing
+    (case_documents.attach). The AI Agent reads them when the case is its to
+    take."""
+    case = _kyc(case_id)
+    back = url_for("kyc_detail", case_id=case_id) + "#documents"
+    if case["tenant"] not in ((_analyst() or {}).get("tenants") or ["ttlive"]):
+        abort(404)
+    holder = case.get("current_reviewer", "")
+    if holder and holder != _actor():
+        flash(f"{display_name(holder)} holds this case; documents go on it once it is released or with them.", "error")
+        return redirect(back)
+    images = {}
+    for slot, label in uploads.SLOTS:
+        f = request.files.get(slot)
+        if f and f.filename:
+            ok, res = _run_action(uploads.prepare, f.read(), label)
+            if not ok:
+                return redirect(back)
+            images[slot] = (res[0], res[1], f.filename)
+    poa = None
+    if "poa" in images:
+        ok, poa = _run_action(case_documents.poa_details, request.form, case)
+        if not ok:
+            return redirect(back)
+    with AI_AGENT_LOCK:
+        if case_id in AI_AGENT["busy"]:
+            flash("The AI Agent is reading this case right now. Upload the images again in a minute.", "error")
+            return redirect(back)
+        ok, filled = _run_action(case_documents.attach, case, images, _actor(), poa)
+        if not ok:
+            return redirect(back)
+        _save("kyc", case)
+    reads = ai_agent.eligible(case) and not case.get("ai_agent")
+    if reads and ai_review.configured():
+        _agent_start("documents")
+        then = " The AI Agent is reading them now."
+    elif reads:
+        then = " The AI Agent reads them once LLM_FOUNDRY_KEY is set."
+    elif case["status"] != "DataConfirming":
+        then = " The case is past Data Confirming, so the AI Agent does not read them; the analyst on it reviews them."
+    else:
+        then = " The AI Agent does not take this case (a person holds or has worked it); the analyst reviews them."
+    flash(f"Uploaded: {', '.join(filled)}." + then, "success")
+    return redirect(back)
+
+
+@app.errorhandler(413)
+def _too_large(_exc):
+    flash(f"The upload is larger than {app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024)} MB in all; send fewer or smaller files.",
+          "error")
+    return redirect(_back())
 
 
 def _render_document(case, doc):
@@ -1593,6 +1666,7 @@ def reset_demo():
     if not DEMO_MODE:
         abort(404)
     cleared = StateStore.clear()
+    uploads.remove_all()                # every case is back on its seed, drawn documents and all
     _load_seed()
     _bump_state()
     flash("Demo reset — the seeded case book is back." if cleared else "Could not clear the stored state.",

@@ -20,6 +20,10 @@ fincrime_state.db*
 # contain real people's identity documents and addresses. Never commit them.
 docs/reference-screens/
 
+# Document images uploaded in the console (fincrime/documents/uploads.py):
+# customers' real passports, IDs and proofs of address. Never commit them.
+uploads/
+
 # Logs
 server.log
 *.stackdump

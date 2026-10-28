@@ -12,6 +12,8 @@ import csv
 import io
 import zipfile
 
+from fincrime.documents import uploads
+from fincrime.engines.errors import WorkflowError
 from fincrime.utils import dates
 from fincrime.utils.text import display_name
 
@@ -99,7 +101,14 @@ def zip_bytes(case, alert, wc, *, render_pdf, render_doc):
                 text += ["", f"Analyst review ({sk.get('reviewed_by', '')}): {sk['notes']}"]
             z.writestr(f"{safe}/Skopenow_report.txt", "\n".join(text) + "\n")
         for d in case.get("documents", []):
-            z.writestr(f"{safe}/documents/{d['id']}_{d['kind']}_{d['side'].replace(' ', '')}.svg", render_doc(case, d))
+            stem = f"{safe}/documents/{d['id']}_{d['kind']}_{d['side'].replace(' ', '')}"
+            if d.get("upload"):             # the customer's own photo or scan, as uploaded (re-saved as JPEG)
+                try:
+                    z.writestr(stem + ".jpg", uploads.load(d["upload"]["path"]))
+                except (OSError, WorkflowError):
+                    z.writestr(stem + "_missing.txt", "The uploaded image is no longer on this machine.\n")
+            else:
+                z.writestr(stem + ".svg", render_doc(case, d))
         if case.get("attachments"):
             z.writestr(f"{safe}/attachments.txt", "\n".join(f"{a['at']}  {a['by']}  {a['name']}" for a in case["attachments"]) + "\n")
     return f"{safe}.zip", buf.getvalue()
