@@ -548,7 +548,7 @@ class AiAgentTestCase(unittest.TestCase):
         touched = self.clean(lambda c: self.poa_kind("aadhaar")(c) and c["id"] != card["id"])
         bill = self.clean(lambda c: self.poa_kind("utility_bill")(c) and c["screening"]["workflow"] == "auto-verified"
                           and not c["current_reviewer"])
-        with mock.patch.object(ai_agent.vocab, "POA_NO_AGE_LIMIT", ()), \
+        with mock.patch.dict(fcc.SOP_SETTINGS["values"], {"poa_no_age_limit": []}), \
                 mock.patch.object(ai_agent, "customer_request", lambda *a: ""):  # the checks before the fix
             for c in (card, touched, bill):
                 self.assertEqual(self.run_agent(c, answer=self.old_read(c))[0]["decision"], "human")

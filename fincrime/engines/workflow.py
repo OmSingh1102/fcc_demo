@@ -29,12 +29,13 @@ once — SOP 5.2.3, no bot lag.
 """
 from fincrime.adapters import cms, skopenow
 from fincrime.data import vocab
-from fincrime.engines import ai_screening, routing, segregation, worklog
+from fincrime.engines import ai_screening, routing, segregation, sop, worklog
 from fincrime.engines.errors import WorkflowError
 from fincrime.utils import dates
 
-# Kept as an alias: the list now lives in vocab as the demo's stand-in for
-# the internal library of sanctioned / prohibited jurisdictions.
+# Kept as an alias of the shipped list (vocab, the demo's stand-in for the
+# internal library of sanctioned / prohibited jurisdictions); the checks read
+# the SOP's current list (sop.value("sanctioned_countries")).
 HIGH_RISK_COUNTRIES = vocab.SANCTIONED_OR_PROHIBITED
 
 
@@ -227,26 +228,27 @@ def poa_checks(case, now=None):
     checks = []
     kind = d.get("kind", "")
     issued = dates.parse(d.get("issued_on") or "")
-    if kind in vocab.POA_NO_AGE_LIMIT:
-        checks.append({"label": "Issued within the last 6 months", "ok": True,
-                       "detail": f"not required: {vocab.ACCEPTED_POA_TYPES[kind]} is a permanent card"})
+    age_label, limit, sanctioned = sop.poa_age_label(), sop.value("poa_max_age_days"), set(sop.value("sanctioned_countries"))
+    if kind in sop.value("poa_no_age_limit"):
+        checks.append({"key": "poa_age", "label": age_label, "ok": True,
+                       "detail": f"not required: {vocab.ACCEPTED_POA_TYPES.get(kind, kind)} is a permanent card"})
     elif issued is None:
-        checks.append({"label": "Issued within the last 6 months", "ok": False, "detail": "The document shows no issue date."})
+        checks.append({"key": "poa_age", "label": age_label, "ok": False, "detail": "The document shows no issue date."})
     else:
         age = ((now or dates.now()) - issued).days
-        checks.append({"label": "Issued within the last 6 months", "ok": age <= vocab.POA_MAX_AGE_DAYS,
-                       "detail": f"issued {d['issued_on']}, {age} days ago (limit {vocab.POA_MAX_AGE_DAYS})"})
-    checks.append({"label": "Accepted document type (internal library)", "ok": kind in vocab.ACCEPTED_POA_TYPES,
+        checks.append({"key": "poa_age", "label": age_label, "ok": age <= limit,
+                       "detail": f"issued {d['issued_on']}, {age} days ago (limit {limit})"})
+    checks.append({"key": "poa_type", "label": "Accepted document type (internal library)", "ok": kind in sop.value("accepted_poa_types"),
                    "detail": vocab.ACCEPTED_POA_TYPES.get(kind, kind.replace("_", " ") or "unknown type")})
     country = (d.get("country") or "").upper()
     cname = vocab.COUNTRY_NAMES.get(country, country or "unknown country")
-    checks.append({"label": "Not from a sanctioned or prohibited country", "ok": country not in vocab.SANCTIONED_OR_PROHIBITED,
+    checks.append({"key": "poa_country", "label": "Not from a sanctioned or prohibited country", "ok": country not in sanctioned,
                    "detail": f"issued in {cname}"})
     id_country = (case["client"].get("id_issuing_place") or case["client"].get("nationality") or "").upper()
-    if id_country in vocab.SANCTIONED_OR_PROHIBITED:
+    if id_country in sanctioned:
         idname = vocab.COUNTRY_NAMES.get(id_country, id_country)
         same = country == id_country
-        checks.append({"label": "Sanctioned-country ID rule (SOP 4.1.2 §2.3)", "ok": not same,
+        checks.append({"key": "sanctioned_id", "label": "Sanctioned-country ID rule (SOP 4.1.2 §2.3)", "ok": not same,
                        "detail": (f"ID and POA are both from {idname} — escalate" if same
                                   else f"ID from {idname}, POA from {cname} — process normally")})
     return checks
@@ -401,7 +403,7 @@ def request_resubmission(case, actor, decisions, id_reason, poa_reason, note):
     if "Resubmit ID" in decisions:
         _require(id_reason in vocab.RESUBMIT_ID_REASONS, "Pick a Resubmit ID reason.")
     if "Resubmit POA" in decisions:
-        _require(poa_reason in vocab.RESUBMIT_POA_REASONS, "Pick a Resubmit POA reason.")
+        _require(poa_reason in sop.resubmit_poa_reasons(), "Pick a Resubmit POA reason.")
     now = dates.now_str()
     prior = (case.get("resubmit") or {}).get("count", 0)
     case["resubmit"] = {"decisions": decisions, "id_reason": id_reason if "Resubmit ID" in decisions else "",
@@ -437,7 +439,7 @@ def escalate(case, actor, reason, comment, fraud_typology="", alert_case=None):
     case["pending_reason"] = "Pending L2"
     case["case_review_level"] = "L2"
     case["escalated_at"] = now
-    case["edd_due_at"] = dates.add_hours(now, vocab.SLA_HOURS_EDD)
+    case["edd_due_at"] = dates.add_hours(now, sop.value("sla_days_edd") * 24)
     case["escalate_reason"] = reason
     case["fraud_typology"] = fraud_typology
     _point(case, "Data Escalating L2", now)
@@ -631,14 +633,15 @@ def recalculate_risk(case, actor):
     score = 0
     reasons = []
     agency = case.get("agency") or {}
+    high_risk = set(sop.value("sanctioned_countries"))
     for ubo in agency.get("ubos", []):
-        if ubo.get("nationality") in HIGH_RISK_COUNTRIES:
+        if ubo.get("nationality") in high_risk:
             score += 2
             reasons.append(f"UBO {ubo['name']} ({ubo['nationality']}) is in a high-risk jurisdiction")
-        if ubo.get("pct", 0) >= 50 and ubo.get("nationality") in HIGH_RISK_COUNTRIES:
+        if ubo.get("pct", 0) >= 50 and ubo.get("nationality") in high_risk:
             score += 1
             reasons.append("majority owner in a high-risk jurisdiction")
-    if case["client"]["nationality"] in HIGH_RISK_COUNTRIES:
+    if case["client"]["nationality"] in high_risk:
         score += 2
         reasons.append("incorporated in a high-risk jurisdiction")
     if case["screening"]["hit"]:

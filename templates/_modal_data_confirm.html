@@ -99,7 +99,7 @@
             <label><span class="req">*</span>Resubmit POA Reason</label>
             <select class="input" name="poa_reason">
                 <option value="">Select</option>
-                {% for r in vocab.RESUBMIT_POA_REASONS %}<option {% if r == poa_resubmit_reason %}selected{% endif %}>{{ r }}</option>{% endfor %}
+                {% for r in sop.resubmit_poa_reasons() %}<option {% if r == poa_resubmit_reason %}selected{% endif %}>{{ r }}</option>{% endfor %}
             </select>
         </div>
         <div class="field"><label>Specify the reason</label><textarea class="textarea" name="note" maxlength="200" placeholder="Optional note for the audit trail"></textarea></div>

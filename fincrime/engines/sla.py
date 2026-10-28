@@ -1,8 +1,12 @@
 """The two clocks from the SOP: 48 hours for confirming and screening, 14 days
-for an EDD escalation. The intake clock is set once at submission and never
-reset by a resubmit or an L2 return — a case bounced back and forth still
-shows how long the customer has been waiting."""
+for an EDD escalation, both as the SOP rules page sets them (engines/sop):
+each deadline is counted from when the case was ingested, or escalated, at
+the current setting, so a change moves every open case's deadline at once.
+The intake clock starts at ingestion and is never reset by a resubmit or an
+L2 return — a case bounced back and forth still shows how long the customer
+has been waiting."""
 from fincrime.data import vocab
+from fincrime.engines import sop
 from fincrime.utils import dates
 
 
@@ -11,8 +15,10 @@ def active_due(case):
     if case["status"] in vocab.CLOSED_STATUSES:
         return "", "closed"
     if case["status"] == "DataEscalatingL2" and case.get("edd_due_at"):
-        return case["edd_due_at"], "EDD"
-    return case.get("sla_due_at", ""), "L1"
+        start = case.get("escalated_at")
+        return (dates.add_hours(start, sop.value("sla_days_edd") * 24) if start else case["edd_due_at"]), "EDD"
+    start = case.get("created_at")
+    return (dates.add_hours(start, sop.value("sla_hours_l1")) if start else case.get("sla_due_at", "")), "L1"
 
 
 def remaining_hours(case, now=None):

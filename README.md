@@ -205,6 +205,28 @@ else. Without it the check says OCR is not available and blocks nothing.
 The ID vendor pop-up's extracted values are labelled "(vendor)": they are
 the mock vendor's, not this OCR.
 
+**SOP rules, changed at runtime** (`fincrime/engines/sop.py`, the **SOP
+rules** page in the left menu, `/sop`). The parameters the verification
+checks take from the SOP are settings, not code: the proof of address's
+age limit (183 days, "6 months") and the cards it does not apply to
+(Aadhaar), the accepted proof-of-address types, the sanctioned or
+prohibited countries, the L1 SLA (48 hours from ingestion) and the EDD SLA
+(14 days from escalation), and whether OCR must read an uploaded passport's
+MRZ. Everyone can read them; the team lead (QC) changes one at a time, each
+change checked (30–730 days, 1–240 hours, 1–60 days, known countries and
+types, at least one accepted type) and kept in the page's history (who,
+when, from what to what), through a restart, until Reset demo. Every check
+reads them when it runs, so a change applies at once, with no restart: the
+Data Confirm dialog's proof-of-address checks, the AI Agent's checks, the
+Resubmit POA reasons, Claude's policy text and every open case's SLA
+deadline. The open cases the agent decided under other values and nobody
+has touched since are checked again on its stored read, with no new look at
+the images: one waiting for the new proof of address it asked for comes
+back and verifies when the one it holds now passes (a longer limit), and
+one with a person is confirmed when it passes or has its reasons brought
+up to date. Closed cases stay closed. At the shipped values every label and
+text reads as before ("Issued within the last 6 months").
+
 The console's names and colours are client-neutral: the two onboarding
 lines are **Individuals** and **Businesses**, customer tiers are Tier 1–4,
 the top tabs are Monitoring / Reports / Administration and the accent is a
@@ -286,14 +308,14 @@ analyst uploads real document images (see **Real document images**).
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-183 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+188 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_documents.py` (real document images on a case, all
 made by Pillow in memory: the slot replaced, the photo turned upright and
 its EXIF gone, served only to the case's tenant, read by the agent in
 place of the drawing, a resubmission back in Data Confirming, bad files and
 closed or held cases refused, kept through a restart, removed by the
-reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_ai_agent.py` (the AI Agent with the model call stood
+reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a

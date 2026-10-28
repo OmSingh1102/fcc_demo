@@ -55,7 +55,7 @@ from fincrime.data import vocab
 from fincrime.documents.raster import svg_to_png
 from fincrime.documents.svg_cards import ISO3
 from fincrime.documents import ocr, uploads
-from fincrime.engines import ai_screening, case_documents, workflow
+from fincrime.engines import ai_screening, case_documents, sop, workflow
 from fincrime.engines.errors import WorkflowError
 from fincrime.filebook import addresses, llm, names, similarity
 from fincrime.utils import dates
@@ -159,11 +159,24 @@ def _vn_mergers():
     return "; ".join(f"{', '.join(olds)} → {new}" for new, olds in sorted(joined.items()))
 
 
-POLICY = ("The ID must be fully legible (all four edges and the MRZ in shot, nothing covering it, not blurred or "
+def _age_exemption():
+    exempt = sop.value("poa_no_age_limit")
+    if exempt == ["aadhaar"]:
+        return " (except an Aadhaar card: it is a permanent card, so its date of issue does not matter)"
+    if exempt:
+        return f" (except {', '.join(sop.poa_type_labels(exempt))}: permanent cards, so their date of issue does not matter)"
+    return ""
+
+
+def policy():
+    """The bank's document policy Claude's verdict is given, in the SOP's
+    current terms (sop: the proof of address's age limit and the cards it
+    does not apply to); at the shipped values it reads as POLICY."""
+    return ("The ID must be fully legible (all four edges and the MRZ in shot, nothing covering it, not blurred or "
           "damaged), not expired, and its name, date of birth, nationality and number must match the record (a "
           "spelling variant, a nickname, another word order or an added middle name is acceptable). The proof of "
-          "address must be legible, issued within the last 6 months (except an Aadhaar card: it is a permanent "
-          "card, so its date of issue does not matter), and show the customer's registered address. The secondary ID "
+          f"address must be legible, issued within the last {sop.poa_age_text()}{_age_exemption()}, "
+          "and show the customer's registered address. The secondary ID "
           "must be legible and name the same person, born on the same day, as the passport or the record (it may write "
           "the name another way: an initial, surname particles run together); one in a surname the passport does not "
           "print (a married or maiden name) needs the marriage certificate that links the two, which is not among these "
@@ -172,6 +185,9 @@ POLICY = ("The ID must be fully legible (all four edges and the MRZ in shot, not
           "On 1 July 2025 Vietnam merged provinces and abolished district-level units, so an address may name a "
           "former province or district where the other names the province it joined; that is the same place. "
           f"Former → current: {_vn_mergers()}.")
+
+
+POLICY = policy()                       # the shipped text (sop's defaults at import)
 # Bumped when POLICY changes: verdicts given under an older one are redone.
 # 4: every document, and the open watchlist records. Not bumped on
 # 2026-10-25, when a secondary ID in a surname the passport does not print
@@ -231,7 +247,8 @@ RESUBMIT_UNCLEAR = ("Please resubmit a clear, good quality valid proof of identi
                     "document is visible")
 RESUBMIT_EXPIRED = "The document you have submitted is expired"
 # What the agent asks for by itself (vocab.RESUBMIT_POA_REASONS), and the
-# proof-of-address check that alone lets it.
+# proof-of-address check that alone lets it, as the shipped SOP words them;
+# the agent uses the current words (sop.poa_old_reason, sop.poa_age_label).
 RESUBMIT_POA_OLD = "The proof of address is older than 6 months"
 POA_TOO_OLD = "Issued within the last 6 months"
 
@@ -359,7 +376,7 @@ def verdict_input(case, got, now=None, wc=None):
               "proof_of_address_document": poa[0]["name"] if poa else ""}
     vendor = vc.get("result", "") + (f" ({vc['vendor_reason']})" if vc.get("vendor_reason") else "")
     listed = [_listed(m) for m in open_matches(wc)]
-    return (f"Today is {now:%Y-%m-%d}.\nPolicy: {POLICY}\nCustomer record: {json.dumps(record, ensure_ascii=False)}\n"
+    return (f"Today is {now:%Y-%m-%d}.\nPolicy: {policy()}\nCustomer record: {json.dumps(record, ensure_ascii=False)}\n"
             f"ID-verification vendor: {vendor or 'no result'}\n"
             f"Read from the documents: {json.dumps(got, ensure_ascii=False)}\n"
             + (f"Watchlist records the name screening left open: {json.dumps(listed, ensure_ascii=False)}" if listed
@@ -942,17 +959,19 @@ def checks(case, got, now=None, scanned=None):
         failures = workflow.poa_failures(case, now)
         issued = dates.parse(poa.get("issued_on", ""))
         kind = (workflow.poa_docs(case) or [{}])[0].get("kind", "")
-        if issued is not None and (now - issued).days > vocab.POA_MAX_AGE_DAYS and kind not in vocab.POA_NO_AGE_LIMIT \
-                and not any(f["label"] == "Issued within the last 6 months" and poa["issued_on"] in f["detail"] for f in failures):
+        exempt = sop.value("poa_no_age_limit")
+        if issued is not None and (now - issued).days > sop.value("poa_max_age_days") and kind not in exempt \
+                and not any(f.get("key") == "poa_age" and poa["issued_on"] in f["detail"] for f in failures):
             # the document's own date, when the upload's record does not already report that date too old
-            failures.append({"label": "Issued within the last 6 months", "detail": f"the document reads {poa['issued_on']}"})
-        if issued is None and poa.get("readable") and kind not in vocab.POA_NO_AGE_LIMIT:
+            failures.append({"key": "poa_age", "label": sop.poa_age_label(), "detail": f"the document reads {poa['issued_on']}"})
+        if issued is None and poa.get("readable") and kind not in exempt:
             # the record's date proves nothing about the document: its own date must be legible
             failures.append({"label": "Issue date readable", "detail": "the date on the document could not be read"})
         _check(out, "Proof of address checks", "", "; ".join(f["detail"] for f in failures) or "passed", not failures,
                "; ".join(f"{f['label']}: {f['detail']}" for f in failures))
         if failures:
             out[-1]["failures"] = [f["label"] for f in failures]
+            out[-1]["failure_keys"] = [f.get("key", "") for f in failures]
     values = {"name": name_value, "dob": client["dob"], "nationality": client["nationality"]}
     return out, values
 
@@ -963,7 +982,6 @@ def checks(case, got, now=None, scanned=None):
 # Claude's read: number, date of birth, expiry, nationality. A difference
 # only in characters OCR mistakes for one another is shown, not failed.
 MRZ_CHECK = "Passport MRZ read by OCR"
-OCR_MRZ_REQUIRED = False            # an unreadable MRZ is information only
 _LOOKALIKE = (set("0OQD"), set("1ILT7"), set("2Z"), set("5S"), set("6G"), set("8B3"), set("4A"))
 
 
@@ -1007,7 +1025,8 @@ def _mrz_check(out, idr, scanned):
     if not (m and m.get("valid")):
         why = ("OCR found no machine-readable zone on the passport" if not m
                else "OCR's reading of the MRZ does not add up (its check digits)")
-        _check(out, MRZ_CHECK, "", "not readable", not OCR_MRZ_REQUIRED, why, info=not OCR_MRZ_REQUIRED)
+        required = sop.value("ocr_mrz_required")             # the SOP rules page; off: information only
+        _check(out, MRZ_CHECK, "", "not readable", not required, why, info=not required)
         return
     f = m["fields"]
     number = similarity.squash(similarity.fold(idr.get("document_number", ""))).upper()
@@ -1055,7 +1074,7 @@ def decide(case, alert_case, wc, perceived):
     """The quick half: check the read and act on it. Mutates the case (and,
     when it confirms, the screening and watchlist cases the rules touch);
     the caller saves them."""
-    record = dict(perceived, checks=[], reasons=[], rules=RULES_VERSION)
+    record = dict(perceived, checks=[], reasons=[], rules=RULES_VERSION, sop=sop.version())
     values = {}
     if record["error"]:
         record["reasons"] = [f"AI Agent could not read the documents: {record['error']}"]
@@ -1286,7 +1305,7 @@ def address_request(case, got, found):
     second = (_secondary_doc(case) or {}).get("name", "secondary ID")
     return (f"Please confirm your main home address. Your proof of address and your {second} show {shown}; your account "
             f"holds {held}. If you have moved, reply to confirm the new address; if {held} is still your main home, "
-            f"please send a proof of address for it dated within the last 6 months.")
+            f"please send a proof of address for it dated within the last {sop.poa_age_text()}.")
 
 
 def record_fixes(case, alert_case, record):
@@ -1354,8 +1373,8 @@ def customer_request(case, alert_case, record):
     got, found = record["read"], record["checks"]
     failed = [c for c in found if not c["ok"]]
     if len(failed) == 1 and failed[0]["check"] == "Proof of address checks" \
-            and set(failed[0].get("failures") or ()) == {POA_TOO_OLD}:
-        return {"kind": "resubmit", "text": RESUBMIT_POA_OLD}
+            and set(failed[0].get("failure_keys") or ()) == {"poa_age"}:
+        return {"kind": "resubmit", "text": sop.poa_old_reason()}
     text = name_link_request(case, got, found) or address_request(case, got, found)
     return {"kind": "rfi", "text": text} if text else None
 
@@ -1499,7 +1518,7 @@ def recheck(case, alert_case, wc):
     found, _ = checks(case, old["read"], scanned=old.get("ocr"))
     failing = any(not c["ok"] for c in found)
     if failing and not record_fixes(case, alert_case, dict(old, checks=found)):
-        old.update(checks=found, reasons=[c["note"] for c in found if not c["ok"]], rules=RULES_VERSION,
+        old.update(checks=found, reasons=[c["note"] for c in found if not c["ok"]], rules=RULES_VERSION, sop=sop.version(),
                    resubmit=resubmit_reason(old["read"], found))
         ask = customer_request(case, alert_case, old)
         if ask:
@@ -1509,6 +1528,41 @@ def recheck(case, alert_case, wc):
                     + (" once the record's slip is corrected." if failing else "."))
     case["screening"]["workflow"] = "auto-verified"
     return decide(case, alert_case, wc, {k: v for k, v in old.items() if k in PERCEIVED})
+
+
+def needs_sop_recheck(case):
+    """A case the agent decided under other SOP values (sop.version) and no
+    person has touched since its read: one it left with a person in Data
+    Confirming, or one waiting for the new proof of address it asked for."""
+    rec = case.get("ai_agent") or {}
+    if rec.get("sop", 0) == sop.version() or not rec.get("read") or rec.get("error"):
+        return False
+    waiting = rec.get("decision") == "resubmit" and case["status"] == "ResubmitPOA"
+    with_a_person = rec.get("decision") == "human" and case["status"] == "DataConfirming"
+    return (waiting or with_a_person) and _untouched(case)
+
+
+def sop_recheck(case, alert_case, wc):
+    """The SOP's current values on the stored read (no new look at the
+    images). A case waiting for a new proof of address comes back and is
+    decided when the one it holds now passes (a longer age limit); when it
+    still fails, the request to the customer stands. A case with a person is
+    checked again as recheck() does: confirmed when it now passes, its
+    reasons brought up to date when not."""
+    rec = case["ai_agent"]
+    if rec["decision"] == "resubmit":
+        found, _ = checks(case, rec["read"], scanned=rec.get("ocr"))
+        if any(not c["ok"] for c in found):
+            rec["sop"] = sop.version()
+            return rec
+        case["status"] = "DataConfirming"
+        case["pending_reason"] = ""
+        workflow._audit(case, ACTOR, "Checked again", "The SOP rules changed: the proof of address the customer was asked "
+                        "to replace passes them now, so the request is withdrawn.")
+        return decide(case, alert_case, wc, {k: v for k, v in rec.items() if k in PERCEIVED})
+    recheck(case, alert_case, wc)
+    case["ai_agent"]["sop"] = sop.version()
+    return case["ai_agent"]
 
 
 def run_case(case, alert_case, wc, render, call=None, sleep=time.sleep):

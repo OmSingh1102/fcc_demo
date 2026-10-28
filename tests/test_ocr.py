@@ -163,7 +163,7 @@ class OcrCheckTestCase(unittest.TestCase):
 
     def test_an_unreadable_mrz_can_be_required(self):
         c = self.uploaded_case()
-        with mock.patch.object(ai_agent, "OCR_MRZ_REQUIRED", True):
+        with mock.patch.dict(fcc.SOP_SETTINGS["values"], {"ocr_mrz_required": True}):        # the SOP rules page
             rec = self.run_with(c, None)
         self.assertEqual(rec["decision"], "human")
         self.assertIn("OCR found no machine-readable zone on the passport", rec["reasons"])

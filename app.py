@@ -45,7 +45,7 @@ from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed
 from fincrime.data.state_store import StateStore
 from fincrime.documents import ocr, svg_cards, uploads
 from fincrime.engines import (ai_agent, ai_review, ai_screening, case_documents, investigation, qc, recommendation, routing, screening,
-                              segregation, sla, worldcheck, workflow)
+                              segregation, sla, sop, worldcheck, workflow)
 from fincrime.engines.errors import WorkflowError
 from fincrime.engines.wc_report_pdf import render_wc_export
 from fincrime.utils import dates
@@ -76,7 +76,7 @@ def _who(value):
 # does see globals, and the badge macros need the status colour map.
 app.jinja_env.globals.update(status_tone=vocab.STATUS_TONE, vocab=vocab,
                              icon=app.jinja_env.get_template("_icon.html").module.icon,
-                             ai_summary=ai_screening.summary, shown_workflow=ai_screening.shown_workflow)
+                             ai_summary=ai_screening.summary, shown_workflow=ai_screening.shown_workflow, sop=sop)
 app.jinja_env.filters.update(wc_date=dates.wc_date, wc_dt=dates.wc_datetime, who=_who, translit=translit)
 
 # ─── Sign-in, analysts and roles ───────────────────────────────────────────────
@@ -203,7 +203,7 @@ TOP_TABS = [
 _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"), ("wc_", "ns_queue"),
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
-              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"))
+              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"))
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -241,6 +241,7 @@ def _side_nav():
     screening = [
         {"label": "Name Screening", "icon": "search", "endpoint": "ns_queue", "active": owner == "ns_queue"},
         {"label": "AI Screening", "icon": "check-circle", "endpoint": "ai_screening_page", "active": owner == "ai_screening"},
+        {"label": "SOP rules", "icon": "sliders", "endpoint": "sop_page", "active": owner == "sop_page"},
     ]
     hub = [
         {"label": "Pipeline", "icon": "trending-up", "endpoint": "pipeline", "active": owner == "pipeline"},
@@ -270,6 +271,7 @@ STATE_VERSION = 0
 KYC_CASES, ALERT_CASES, WC_CASES = [], [], []
 KYC_BY_ID, ALERT_BY_ID, WC_BY_ID = {}, {}, {}
 AI_SETTINGS = {}         # the AI screening rules' switches; one stored record, kind "settings"
+SOP_SETTINGS = {}        # the SOP's parameters (engines/sop); one stored record, kind "settings", id "sop"
 
 
 def _bump_state():
@@ -307,6 +309,9 @@ def _load_seed():
     AI_SETTINGS.clear()
     AI_SETTINGS.update(ai_screening.default_settings())
     ai_screening.configure(AI_SETTINGS)
+    SOP_SETTINGS.clear()
+    SOP_SETTINGS.update(sop.default_settings())
+    sop.configure(SOP_SETTINGS)
 
     in_serving_process = (not DEBUG) or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
     stamp = f"{SEED_VERSION}/{CASE_BOOK}"
@@ -337,7 +342,7 @@ def _load_seed():
         skip.update(r["id"] for r in _linked(KYC_BY_ID[case_id]) if r)
     restored = (StateStore.restore("kyc", KYC_BY_ID, skip=skip) + StateStore.restore("alert", ALERT_BY_ID, skip=skip)
                 + StateStore.restore("wc", WC_BY_ID, skip=skip) + StateStore.restore("analyst", ANALYST_BY_KEY)
-                + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS}))
+                + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS, SOP_SETTINGS["id"]: SOP_SETTINGS}))
     if restored:
         app.logger.info("Restored %d stored record(s) onto the seed.", restored)
         relabelled = relabel(KYC_CASES, ALERT_CASES, WC_CASES, ANALYSTS)
@@ -683,10 +688,10 @@ def _linked(case):
     return alert, wc
 
 
-_POA_RESUBMIT = {
-    "Issued within the last 6 months": "The proof of address is older than 6 months",
-    "Accepted document type (internal library)": "The document type is not an accepted proof of address",
-    "Not from a sanctioned or prohibited country": "The proof of address is from a prohibited country",
+_POA_RESUBMIT = {          # a failed proof-of-address check (workflow.poa_checks key) -> the Resubmit POA reason
+    "poa_age": sop.poa_old_reason,
+    "poa_type": lambda: "The document type is not an accepted proof of address",
+    "poa_country": lambda: "The proof of address is from a prohibited country",
 }
 
 
@@ -713,7 +718,7 @@ def kyc_detail(case_id):
         analysts=ANALYSTS,
         poa_checks=checks, poa_failed=bool(failed),
         poa_sanction_fail=any(c["label"].startswith("Sanctioned-country") for c in failed),
-        poa_resubmit_reason=next((_POA_RESUBMIT[c["label"]] for c in failed if c["label"] in _POA_RESUBMIT), ""),
+        poa_resubmit_reason=next((_POA_RESUBMIT[c["key"]]() for c in failed if c.get("key") in _POA_RESUBMIT), ""),
         id_resubmit_reason=(case.get("ai_agent") or {}).get("resubmit", "") if case["status"] == "DataConfirming" else "",
         file_items=investigation.items(case, alert, wc) if case.get("investigation_file") else [],
         agent=_agent_view(case, actor, levels), upload_slots=uploads.SLOTS,
@@ -1372,6 +1377,58 @@ def ai_screening_page():
                                     agent=dict(AI_AGENT, workers=AI_AGENT_WORKERS))
     return render_template("ai_screening.html", vm=vm, can_edit="QC" in _levels(), agent_ready=ai_review.configured(),
                            agent_labels=AGENT_LABELS)
+
+
+# ─── SOP rules (the parameters the checks take from the SOP) ────────────────
+@app.route("/sop")
+def sop_page():
+    return render_template("sop.html", rules=sop.rows(), history=list(reversed(SOP_SETTINGS.get("history", [])))[:30],
+                           can_edit="QC" in _levels())
+
+
+@app.route("/sop/change", methods=["POST"])
+@role_required("QC")
+def sop_change():
+    """One SOP parameter changed by the team lead: saved, then the open cases
+    the AI Agent decided and nobody has touched since checked again on their
+    stored read under it (_sop_recheck)."""
+    ok, res = _run_action(sop.set_value, request.form.get("key", ""), request.form, _actor())
+    if not ok:
+        return redirect(url_for("sop_page"))
+    param, before, after = res
+    _save("settings", SOP_SETTINGS)
+    counts = _sop_recheck()
+    done = sum(counts.values())
+    flash(f"{param['label']}: {before} → {after}. It applies at once"
+          + (f"; {done} open case(s) the AI Agent decided were checked again: {counts['verified']} verified, "
+             f"{counts['screening']} to Data Screening, {counts['resubmit'] + counts['rfi']} waiting on the customer, "
+             f"{counts['human']} with a person." if done else "; no open case of the AI Agent's needed checking again."),
+          "success")
+    return redirect(url_for("sop_page"))
+
+
+def _sop_recheck():
+    """The open cases the agent decided under other SOP values, that nobody
+    has touched since (ai_agent.needs_sop_recheck), decided again on their
+    stored read (ai_agent.sop_recheck; no model call). Returns a Counter of
+    the decisions they end on."""
+    from collections import Counter
+    counts = Counter()
+    with AI_AGENT_LOCK:
+        for case in KYC_CASES:
+            if case["id"] in AI_AGENT["busy"] or not ai_agent.needs_sop_recheck(case):
+                continue
+            reviewer = case.get("current_reviewer", "")
+            alert, wc = _linked(case)
+            record = ai_agent.sop_recheck(case, alert, wc)
+            if reviewer and case["status"] == "Verified":
+                workflow.worklog.close_entry(case, "Verified by the AI Agent", email=reviewer)
+            _save("kyc", case)
+            if alert:
+                _save("alert", alert)
+                _save("wc", wc)
+            counts[record["decision"]] += 1
+    return counts
 
 
 @app.route("/ai-screening/rules", methods=["POST"])
