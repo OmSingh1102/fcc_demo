@@ -141,13 +141,13 @@ def _render(case, doc):
     return recon_book.render(case, doc) or svg_cards.render(case, doc)
 
 
-def _call_anthropic(model, content):
+def _call_anthropic(model, content, system=None, schema=None):
     import anthropic
     client = anthropic.Anthropic(base_url=llm.GATEWAY + "/anthropic", auth_token=llm.KEY, api_key=None,
                                  timeout=240.0, max_retries=3)
-    kwargs = {"model": model["id"], "max_tokens": 8000, "system": [{"type": "text", "text": ai_agent.SYSTEM}],
+    kwargs = {"model": model["id"], "max_tokens": 8000, "system": [{"type": "text", "text": system or ai_agent.SYSTEM}],
               "messages": [{"role": "user", "content": content}],
-              "output_config": {"format": {"type": "json_schema", "schema": ai_agent.SCHEMA}}}
+              "output_config": {"format": {"type": "json_schema", "schema": schema or ai_agent.SCHEMA}}}
     if not model.get("no_thinking"):
         kwargs["thinking"] = {"type": "adaptive"}
         kwargs["output_config"]["effort"] = "medium"
@@ -156,7 +156,7 @@ def _call_anthropic(model, content):
     return _json(text), r.usage.input_tokens, r.usage.output_tokens
 
 
-def _call_openai_like(model, content):
+def _call_openai_like(model, content, system=None, schema=None):
     route = "/openai/v1/chat/completions" if model["provider"] == "openai" else "/gemini/v1beta/openai/chat/completions"
     parts = []
     for b in content:
@@ -164,8 +164,8 @@ def _call_openai_like(model, content):
             parts.append({"type": "text", "text": b["text"]})
         else:
             parts.append({"type": "image_url", "image_url": {"url": f"data:{b['source']['media_type']};base64,{b['source']['data']}"}})
-    system = (ai_agent.SYSTEM + "\n\nAnswer with one JSON object only, no other text, that matches this JSON schema:\n"
-              + json.dumps(ai_agent.SCHEMA))
+    system = ((system or ai_agent.SYSTEM) + "\n\nAnswer with one JSON object only, no other text, that matches this JSON schema:\n"
+              + json.dumps(schema or ai_agent.SCHEMA))
     body = {"model": model["id"], "messages": [{"role": "system", "content": system}, {"role": "user", "content": parts}],
             "response_format": {"type": "json_object"}}
     body["max_completion_tokens" if model["provider"] == "openai" else "max_tokens"] = 16000
@@ -192,8 +192,11 @@ def _json(text):
     return json.loads(text)
 
 
-def call(model, content):
-    return (_call_anthropic if model["provider"] == "anthropic" else _call_openai_like)(model, content)
+def call(model, content, system=None, schema=None):
+    """One model's answer to `content` as (parsed JSON, input tokens, output
+    tokens). By default the AI Agent's document read (its SYSTEM and SCHEMA);
+    the decision model (fincrime/decision_model.py) passes its own."""
+    return (_call_anthropic if model["provider"] == "anthropic" else _call_openai_like)(model, content, system, schema)
 
 
 # ── scoring ──────────────────────────────────────────────────────────────────
@@ -395,6 +398,27 @@ def load():
             return json.load(fh)
     except (OSError, ValueError):
         return None
+
+
+def confusion(result):
+    """Each model's two confusion matrices on the run ([] without one): the
+    photo check (spoiled or clean, against flagged or not) and the decision
+    (pass or a person on the right read, against the same on its read).
+    The shape of decision_model's matrices, so the page draws both alike."""
+    if not result:
+        return []
+    out = []
+    for m in result["models"]:
+        rows = [r for r in result["per_case"].get(m["id"], []) if not r.get("error")]
+        photo = {t: {c: 0 for c in ("Flagged", "Accepted")} for t in ("Spoiled", "Clean")}
+        decision = {t: {c: 0 for c in ("Pass", "To a person")} for t in ("Pass", "To a person")}
+        for r in rows:
+            photo["Spoiled" if r["spoiled"] else "Clean"]["Flagged" if r["flagged"] else "Accepted"] += 1
+            decision["Pass" if r["expected_pass"] else "To a person"]["Pass" if r["model_pass"] else "To a person"] += 1
+        out.append({"label": m["label"], "current": m["current"], "cases": len(rows),
+                    "photo": {"rows": ["Spoiled", "Clean"], "cols": ["Flagged", "Accepted"], "cells": photo},
+                    "decision": {"rows": ["Pass", "To a person"], "cols": ["Pass", "To a person"], "cells": decision}})
+    return out
 
 
 if __name__ == "__main__":

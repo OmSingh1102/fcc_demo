@@ -1004,3 +1004,28 @@ body.console table.tbl span.cell-id { color: var(--primary-strong); font-weight:
 body.console .hbar .bar > i, body.console .cap-bar > i { background: linear-gradient(90deg, #ff8a4c, var(--primary)); }
 body.console .cap-bar.over > i { background: var(--danger); }
 body.console .thumb .lab { background: color-mix(in oklch, var(--primary) 90%, transparent); }
+
+/* Model evaluation: confusion matrices, shaded by each cell's share of its row */
+.cm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(410px, 1fr)); gap: 12px; }
+.cm-grid.small { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+#eval-table td:first-child { min-width: 300px; }
+#eval-tune td:first-child { min-width: 280px; }
+.cm-card { min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); overflow-x: auto; }
+.cm-card.best { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.cm-title { font-size: 13px; font-weight: 600; color: var(--foreground); }
+table.cm { border-collapse: separate; border-spacing: 2px; font-size: 12px; }
+table.cm th { padding: 3px 6px; font-weight: 500; color: var(--muted-foreground); text-align: center; white-space: nowrap; }
+table.cm tbody th { text-align: right; }
+table.cm th.cm-corner { font-size: 10.5px; text-align: left; }
+table.cm td { min-width: 38px; padding: 5px 6px; text-align: center; font-variant-numeric: tabular-nums; border-radius: 4px; background: var(--muted); }
+table.cm td.cm-zero { color: var(--muted-foreground); background: transparent; }
+table.cm td.cm-hit { background: rgba(16, 185, 129, var(--a)); font-weight: 600; }
+table.cm td.cm-miss { background: rgba(217, 119, 6, var(--a)); }
+table.cm td.cm-danger { background: rgba(225, 29, 72, var(--a)); font-weight: 700; }
+.cm-list { margin: 4px 0 0; padding-left: 18px; }
+.cm-list li { margin-bottom: 2px; }
+.cm-legend { columns: 2 260px; margin: 8px 0 0; padding-left: 22px; }
+.rose-text { color: #be123c; }
+.sop-text { margin: 6px 0; padding: 10px 12px; max-height: 420px; overflow: auto; background: var(--muted); border-radius: var(--radius); font-family: Consolas, 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; }
+details.card > summary.card-head { list-style: none; }
+details.card > summary.card-head::-webkit-details-marker { display: none; }

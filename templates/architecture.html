@@ -30,6 +30,7 @@
         <div class="arch-side">
             <div class="arch-step rule"><b>Beside step 3: OCR cross-check</b><span>Tesseract on this machine reads the passport's MRZ and its check digits{% if not ocr_ready %} <em>(not installed here)</em>{% endif %}. A stop-gap: in production a market OCR / ID API takes this place (below)</span></div>
             <div class="arch-step ai"><b>Beside step 6: second opinion</b><span>A text-only model call gives its own verdict for comparison; it never acts on the case</span></div>
+            <div class="arch-step ai"><b>Beside steps 5 and 6: decision model (evaluated)</b><span>A model decides the alert (clear, true match, ask the customer, escalate) and names the name and address discrepancies, from the SOP and the most similar resolved cases. Scored on 200 held-out sample cases on the <a href="{{ url_for('model_evaluation') }}">Model evaluation</a> page; not switched on in the console</span></div>
         </div>
     </div>
 </div>
@@ -46,6 +47,7 @@
         <tr><td class="strong">Verification checks and the SOP</td><td>Fixed checks with parameters a team lead changes on the SOP rules page, applied at once</td><td><span class="arch-key rule">Rules</span></td></tr>
         <tr><td class="strong">Watchlist screening</td><td>Date-of-birth and gender rules clear a hit that is plainly someone else; anything else goes to an analyst</td><td><span class="arch-key rule">Rules</span> <span class="arch-key sim">Simulated</span></td></tr>
         <tr><td class="strong">Watchlist finding on an open hit</td><td>The documents beside the World-Check record: likely match, possible, likely a different person. Informs the analyst</td><td><span class="arch-key rule">Rules</span></td></tr>
+        <tr><td class="strong">Deciding the alert and naming the discrepancies (evaluated)</td><td>A model given the SOP, the client's variance reference and similar resolved cases; scored against the analysts' outcomes with confusion matrices on the <a href="{{ url_for('model_evaluation') }}">Model evaluation</a> page</td><td><span class="arch-key ai">AI model</span></td></tr>
         <tr><td class="strong">Second opinion</td><td>A model's own verify / send-to-a-person verdict, counted against the rules' decision</td><td><span class="arch-key ai">AI model</span></td></tr>
         <tr><td class="strong">Everything left over</td><td>Analysts in the console, with the agent's reasons and reads in front of them</td><td><span class="arch-key person">People</span></td></tr>
         </tbody>

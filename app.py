@@ -39,7 +39,7 @@ from fincrime.analytics.queues import QueueConsole
 from fincrime.analytics.routing_console import RoutingConsole
 from fincrime.analytics.trackers import TrackerConsole, to_csv
 from fincrime.analytics.work import WorkConsole
-from fincrime import benchmark
+from fincrime import benchmark, decision_model
 from fincrime.data import vocab
 from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
@@ -204,7 +204,7 @@ TOP_TABS = [
 _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"), ("wc_", "ns_queue"),
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
-              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"))
+              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"), ("model_evaluation", "model_evaluation"))
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -261,7 +261,8 @@ def _side_nav():
         {"title": "Operations Hub", "items": hub},
         {"title": "Insights", "items": [
             {"label": "Analytics", "icon": "bar-chart", "endpoint": "analytics", "active": owner == "analytics"},
-            {"label": "Architecture", "icon": "layers", "endpoint": "architecture", "active": owner == "architecture"}]},
+            {"label": "Architecture", "icon": "layers", "endpoint": "architecture", "active": owner == "architecture"},
+            {"label": "Model evaluation", "icon": "activity", "endpoint": "model_evaluation", "active": owner == "model_evaluation"}]},
     ]
 
 
@@ -1785,6 +1786,17 @@ def architecture():
     bench = benchmark.load()
     return render_template("architecture.html", bench=bench, verdict=benchmark.verdict(bench), agent_model=ai_agent.MODEL,
                            llm_ready=ai_review.configured(), ocr_ready=ocr.available())
+
+
+# ─── Model evaluation: the decision model and the document read, on the sample cases ───
+@app.route("/model-evaluation")
+def model_evaluation():
+    ocr = [dict(m, photo=decision_model.matrix_view(m["photo"], danger=lambda t, c: t == "Spoiled" and c == "Accepted",
+                                                    right=lambda t, c: (t, c) in (("Spoiled", "Flagged"), ("Clean", "Accepted"))),
+                decision=decision_model.matrix_view(m["decision"], danger=lambda t, c: t == "To a person" and c == "Pass"))
+           for m in benchmark.confusion(benchmark.load())]
+    return render_template("model_evaluation.html", ev=decision_model.view(decision_model.load_cached()), ocr=ocr,
+                           llm_ready=ai_review.configured())
 
 
 # ─── Analytics ─────────────────────────────────────────────────────────────────

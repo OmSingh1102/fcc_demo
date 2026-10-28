@@ -248,6 +248,27 @@ seconds and cost a case (measured tokens at list price). Run it with
 about 160 calls); it writes `fincrime/data/benchmark.json`, which the page
 shows with a few plain lines on what the numbers say.
 
+**Model evaluation** (`/model-evaluation`, Insights; `fincrime/decision_model.py`).
+A decision model built from the client's 1,000 sample cases and scored
+against what the analysts decided, with confusion matrices. The model sees
+the case's facts only (CRM record, passport VIZ and MRZ, secondary ID, proof
+of address, World-Check record; never the disposition, notes, variance types
+or anything the file sets from them) and answers three things in one call:
+the outcome (clear, true match, ask the customer, escalate to L2), the name
+discrepancy and the address discrepancy, from the client's variance
+reference. The file is split once by case ID: 200 cases held out and only
+scored, 800 to learn from. The model's instructions are the SOP
+(`fincrime/data/decision_sop/v*.md`, each version revised on 60 of the 800
+training cases, with a change note at its top), the variance reference, and
+the most similar resolved training cases with the analysts' outcome and
+note. Beside the language models, two baselines need no call: the console's
+own rules (the date-of-birth rule; the hand-written name rules) and a
+decision tree learned from the 800 cases. The page also draws the document
+benchmark's confusion matrices (spoiled photos; decisions on the model's
+read). Run `python -m fincrime.decision_model --models gemini-2.5-flash,claude-sonnet-5-5` (the latest SOP; `--sop v1` for another)
+(`--set tune` for the tuning cases, `--baselines` for the baselines alone,
+`--retry-failed` for failed calls); it writes `fincrime/data/decision_eval.json`.
+
 The console's names and colours are client-neutral: the two onboarding
 lines are **Individuals** and **Businesses**, customer tiers are Tier 1–4,
 the top tabs are Monitoring / Reports / Administration and the accent is a
@@ -336,7 +357,7 @@ made by Pillow in memory: the slot replaced, the photo turned upright and
 its EXIF gone, served only to the case's tenant, read by the agent in
 place of the drawing, a resubmission back in Data Confirming, bad files and
 closed or held cases refused, kept through a restart, removed by the
-reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_architecture.py` (the Architecture page with and without a benchmark run, the benchmark's scoring: the right read scores full marks, a misread and a missed spoiled photo cost marks, cost at list price), `tests/test_ai_agent.py` (the AI Agent with the model call stood
+reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_architecture.py` (the Architecture page with and without a benchmark run, the benchmark's scoring: the right read scores full marks, a misread and a missed spoiled photo cost marks, cost at list price), `tests/test_decision_model.py` (the decision model: the analysts' answers never shown to it, the fixed stratified split, examples from the training cases and never the case itself, the SOP's change note kept out of the prompt, the rules and the learned tree, the scoring and its confusion matrices, the Model evaluation page with and without a run), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a
