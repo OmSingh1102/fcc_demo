@@ -12,6 +12,7 @@ Operations hub (My Work, Pipeline, Trackers, Investigation file, Audit log,
 QC, Routing) · Analytics · Demo affordances · Main.
 """
 import hmac
+import json
 import os
 import re
 import threading
@@ -44,7 +45,7 @@ from fincrime.data import vocab
 from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
 from fincrime.data.state_store import StateStore
-from fincrime.documents import ocr, svg_cards, uploads
+from fincrime.documents import id_scan, ocr, svg_cards, uploads
 from fincrime.engines import (ai_agent, ai_review, ai_screening, case_documents, investigation, qc, recommendation, routing, screening,
                               segregation, sla, sop, worldcheck, workflow)
 from fincrime.engines.errors import WorkflowError
@@ -204,7 +205,7 @@ TOP_TABS = [
 _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"), ("wc_", "ns_queue"),
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
-              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"), ("model_evaluation", "model_evaluation"))
+              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"), ("model_evaluation", "model_evaluation"), ("scan", "scan_id"))
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -236,6 +237,8 @@ def _side_nav():
          "active": owner == "kyc_list", "count": open_l1},
         {"label": "My Work", "icon": "clipboard", "endpoint": "work", "active": owner == "work",
          "count": routing.load(actor, KYC_CASES) if actor else 0},
+        {"label": "Scan ID", "title": "Scan an ID document (OCR)", "icon": "zoom-in", "endpoint": "scan_id",
+         "active": owner == "scan_id"},
     ]
     if levels & {"L2", "EDD", "QC"}:
         cases.append({"label": "L2 / EDD Queue", "icon": "layers", "endpoint": "queue_l2", "active": owner == "queue_l2", "count": open_l2})
@@ -1786,6 +1789,87 @@ def architecture():
     bench = benchmark.load()
     return render_template("architecture.html", bench=bench, verdict=benchmark.verdict(bench), agent_model=ai_agent.MODEL,
                            llm_ready=ai_review.configured(), ocr_ready=ocr.available())
+
+
+# ─── Scan an ID: one document read by OCR, with no case behind it ──────────────
+def _scans():
+    return sorted(StateStore.records("scan"), key=lambda r: r.get("at", ""), reverse=True)
+
+
+def _scan(scan_id):
+    return next((r for r in StateStore.records("scan") if r.get("id") == scan_id), None) or abort(404)
+
+
+@app.route("/scan", methods=["GET", "POST"])
+def scan_id():
+    """Upload one ID image: a vision model reads every field, Tesseract the
+    passport's MRZ beside it, and the checks run (documents/id_scan)."""
+    if request.method == "GET":
+        return render_template("scan.html", models=id_scan.models(), default_model=id_scan.DEFAULT_MODEL,
+                               model_ready=id_scan.model_ready(), ocr_ready=ocr.available(), scans=_scans()[:15])
+    f = request.files.get("image")
+    if not f or not f.filename:
+        flash("Choose a photo or scan of the ID document.", "error")
+        return redirect(url_for("scan_id"))
+    ok, res = _run_action(uploads.prepare, f.read(), "The ID image")
+    if not ok:
+        return redirect(url_for("scan_id"))
+    jpeg, info = res
+    result = id_scan.scan(jpeg, request.form.get("model"))
+    at = dates.now_str()
+    sid = "SCAN-" + "".join(ch for ch in at if ch.isdigit()) + "-" + info["sha256"][:6].upper()
+    record = dict(result, id=sid, at=at, by=_actor(), file=f.filename[:120], info=info,
+                  image=uploads.store("scans", sid, jpeg), verdict=id_scan.verdict(result))
+    _save("scan", record)
+    if result["error"]:
+        flash(result["error"], "error")
+    return redirect(url_for("scan_result", scan_id=sid))
+
+
+@app.route("/scan/<scan_id>")
+def scan_result(scan_id):
+    return render_template("scan_result.html", s=_scan(scan_id), fields=id_scan.FIELDS)
+
+
+@app.route("/scan/<scan_id>/image")
+def scan_image(scan_id):
+    """The scanned image (a real person's ID: never cached)."""
+    rec = _scan(scan_id)
+    try:
+        data = uploads.load(rec["image"])
+    except (OSError, WorkflowError):
+        abort(404)
+    return Response(data, mimetype="image/jpeg", headers={"Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff",
+                                                          "Content-Disposition": f'inline; filename="{scan_id}.jpg"'})
+
+
+@app.route("/scan/<scan_id>/data.json")
+def scan_json(scan_id):
+    """What the scan fetched, for another system: the document, its fields,
+    the MRZ, the checks."""
+    rec = _scan(scan_id)
+    read = rec.get("read") or {}
+    mrz = (rec.get("tesseract") or {}).get("mrz")
+    body = {"scan_id": rec["id"], "scanned_at": rec["at"], "verdict": rec["verdict"],
+            "document_type": read.get("document_type", ""), "issuing_country": read.get("issuing_country", ""),
+            "fields": read.get("fields", {}), "uncertain": read.get("uncertain", []), "mrz": read.get("mrz", []),
+            "ocr_mrz": mrz and {"lines": mrz["lines"], "valid": mrz["valid"], "fields": mrz["fields"]},
+            "checks": rec.get("checks", []), "model": rec.get("model")}
+    return Response(json.dumps(body, indent=2, ensure_ascii=False), mimetype="application/json",
+                    headers={"Cache-Control": "no-store, private", "Content-Disposition": f'attachment; filename="{scan_id}.json"'})
+
+
+@app.route("/scan/<scan_id>/delete", methods=["POST"])
+def scan_delete(scan_id):
+    rec = _scan(scan_id)
+    try:
+        os.remove(os.path.join(uploads.base(), rec["image"]))
+    except (OSError, KeyError):
+        pass
+    StateStore.delete("scan", [scan_id])
+    _bump_state()
+    flash(f"Scan {scan_id} and its image deleted.", "success")
+    return redirect(url_for("scan_id"))
 
 
 # ─── Model evaluation: the decision model and the document read, on the sample cases ───

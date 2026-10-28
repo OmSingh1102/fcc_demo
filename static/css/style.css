@@ -1029,3 +1029,24 @@ table.cm td.cm-danger { background: rgba(225, 29, 72, var(--a)); font-weight: 70
 .sop-text { margin: 6px 0; padding: 10px 12px; max-height: 420px; overflow: auto; background: var(--muted); border-radius: var(--radius); font-family: Consolas, 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; }
 details.card > summary.card-head { list-style: none; }
 details.card > summary.card-head::-webkit-details-marker { display: none; }
+
+/* Scan ID: the upload, the image beside what was read, the checks */
+.scan-upload { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.scan-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 150px; padding: 18px;
+             border: 2px dashed var(--border); border-radius: var(--radius-lg); background: var(--muted); cursor: pointer; text-align: center; }
+.scan-drop.over, .scan-drop:hover { border-color: var(--primary); background: var(--primary-tint); }
+.scan-drop .nav-ic { width: 26px; height: 26px; color: var(--muted-foreground); }
+.scan-drop input[type=file] { max-width: 100%; margin-top: 6px; font-size: 12px; }
+.scan-options { display: flex; flex-direction: column; gap: 6px; }
+.scan-options select { width: 100%; }
+.scan-layout { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 12px; align-items: start; }
+.scan-image { position: sticky; top: 70px; overflow: hidden; }
+.scan-image img { display: block; width: 100%; height: auto; max-height: 72vh; object-fit: contain; background: #2b2b2b; }
+.scan-check { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+.scan-check:last-child { border-bottom: 0; }
+.scan-check .dot { flex: none; width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; background: #94a3b8; }
+.scan-check.ok .dot { background: #10b981; }
+.scan-check.warn .dot { background: #d97706; }
+.scan-check.fail .dot { background: #e11d48; }
+.scan-check.fail b { color: #be123c; }
+@media (max-width: 900px) { .scan-upload, .scan-layout { grid-template-columns: minmax(0, 1fr); } .scan-image { position: static; } }

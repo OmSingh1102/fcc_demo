@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Scan {{ s.id }}{% endblock %}
+
+{% block content %}
+{% set r = s.read or {} %}{% set f = r.fields or {} %}{% set t = s.tesseract or {} %}
+<div class="page-head">
+    <div><h2>{{ r.document_type or 'ID document' }}{% if r.issuing_country %} · {{ r.issuing_country }}{% endif %} {% include "_scan_verdict.html" %}</h2>
+        <p>{{ s.id }} · scanned {{ s.at }} by {{ s.by|who }} · {{ s.file }}</p></div>
+    <div class="row" style="gap:8px">
+        <a class="btn btn-outline" href="{{ url_for('scan_id') }}">{{ icon('upload') }} Scan another</a>
+        <a class="btn btn-outline" href="{{ url_for('scan_json', scan_id=s.id) }}">{{ icon('download') }} Download data (JSON)</a>
+        <form method="post" action="{{ url_for('scan_delete', scan_id=s.id) }}" onsubmit="return confirm('Delete this scan and its image?');">
+            <button class="btn btn-outline" type="submit">{{ icon('x') }} Delete</button></form>
+    </div>
+</div>
+
+{% if s.error %}<div class="verdict-box differs mt-12 small">{{ s.error }}</div>{% endif %}
+
+<div class="scan-layout mt-12">
+    <div class="card scan-image" id="scan-image">
+        <a href="{{ url_for('scan_image', scan_id=s.id) }}" target="_blank" rel="noopener" title="Open the full image">
+            <img src="{{ url_for('scan_image', scan_id=s.id) }}" alt="The scanned document"></a>
+        <div class="tiny muted" style="padding:8px 12px">{{ s.info.width }} × {{ s.info.height }} px as read · uploaded as {{ s.info.format }} · EXIF removed</div>
+    </div>
+
+    <div>
+        <div class="card" id="scan-fields">
+            <div class="card-head"><div class="card-title">Information fetched</div>
+                <div class="card-sub">{% if s.model %}read by {{ s.model.label }}{% else %}no model read{% endif %}{% if r.uncertain %} · <span class="badge amber">check</span> marks what it was unsure of{% endif %}</div></div>
+            <div class="card-body fact-list">
+                {% set shown = namespace(n=0, missing=[]) %}
+                {% for key, label in fields %}
+                    {% if f[key] %}{% set shown.n = shown.n + 1 %}
+                    <div><span class="l">{{ label }}</span><span class="v strong">{{ f[key] }}{% if key in (r.uncertain or []) %} <span class="badge amber">check</span>{% endif %}</span></div>
+                    {% else %}{% set shown.missing = shown.missing + [label] %}{% endif %}
+                {% endfor %}
+                {% if not shown.n %}<div><span class="l">—</span><span class="v muted">No field was read.</span></div>{% endif %}
+                {% if r %}<div><span class="l">Not on the document</span><span class="v small muted">{{ shown.missing|join(', ') or '—' }}</span></div>{% endif %}
+                {% if r.note %}<div><span class="l">Note</span><span class="v">{{ r.note }}</span></div>{% endif %}
+            </div>
+        </div>
+
+        <div class="card mt-12" id="scan-checks">
+            <div class="card-head"><div class="card-title">Checks</div><div class="card-sub">computed by code on what was read, not the model's opinion</div></div>
+            <div class="card-body">
+                {% for c in s.checks %}
+                <div class="scan-check {{ c.state }}"><span class="dot"></span><div><b>{{ c.label }}</b><div class="small">{{ c.detail }}</div></div></div>
+                {% else %}<div class="small muted">No check could run.</div>{% endfor %}
+            </div>
+        </div>
+
+        <div class="card mt-12" id="scan-mrz">
+            <div class="card-head"><div class="card-title">Machine-readable zone</div></div>
+            <div class="card-body small">
+                <div class="tiny strong">As the model transcribed it</div>
+                {% if r.mrz %}<pre class="ocr-mrz">{{ r.mrz|join('\n') }}</pre>{% else %}<div class="muted" style="margin-bottom:8px">None on the document, or none read.</div>{% endif %}
+                <div class="tiny strong">As Tesseract read it on this machine</div>
+                {% if t.mrz %}<pre class="ocr-mrz">{{ t.mrz.lines|join('\n') }}</pre>
+                    <div class="tiny muted">Check digits: {% for k, v in t.mrz.checks.items() %}{{ k }} {{ '✓' if v else '✗' }}{{ ', ' if not loop.last }}{% endfor %}</div>
+                {% elif not t.available %}<div class="muted">Tesseract is not installed here.</div>
+                {% else %}<div class="muted">No passport MRZ found.</div>{% endif %}
+                {% if t.text %}
+                <details class="ocr-text mt-8"><summary><b>All the text Tesseract read</b></summary><pre>{{ t.text }}</pre></details>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="small muted mt-8" id="scan-cost">
+            {% if s.model %}{{ s.model.label }}: {{ s.model.seconds }} s, {{ s.model.tokens_in }} tokens in / {{ s.model.tokens_out }} out, ${{ '%.4f'|format(s.model.cost) }} at list price.{% endif %}
+            {% if t.available %} Tesseract: {{ t.seconds }} s, on this machine.{% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

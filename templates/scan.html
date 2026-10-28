@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Scan ID{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div><h2>Scan an ID document</h2>
+        <p>Upload a photo or scan of a passport, national ID card, driving licence, Aadhaar or PAN card. A vision model reads every printed field (OCR); on a passport, Tesseract reads the machine-readable zone on this machine as a cross-check; then the checks run on what they read: check digits, expiry, age, the two reads against each other.</p></div>
+</div>
+
+<div class="card mt-12" id="scan-form">
+    <div class="card-head"><div class="card-title">Upload</div>
+        <div class="card-sub">JPEG, PNG or WebP, up to 10 MB · the image is turned upright, resized, and its EXIF and GPS data removed before anything reads it</div></div>
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data" class="scan-upload" id="scan-upload">
+            <label class="scan-drop" for="scan-file">
+                {{ icon('upload') }}
+                <span class="strong" id="scan-file-name">Choose the ID image</span>
+                <span class="small muted">or drop it here</span>
+                <input type="file" id="scan-file" name="image" accept="image/jpeg,image/png,image/webp" required>
+            </label>
+            <div class="scan-options">
+                <label class="small strong" for="scan-model">Model that reads the document</label>
+                <select name="model" id="scan-model" class="input"{% if not model_ready %} disabled{% endif %}>
+                    {% for m in models %}<option value="{{ m.id }}"{% if m.id == default_model %} selected{% endif %}>{{ m.label }} · ${{ m.price[0] }} / ${{ m.price[1] }} per M tokens</option>{% endfor %}
+                </select>
+                <div class="tiny muted">{% if model_ready %}Through Straive's LLM Foundry gateway. The document benchmark on the <a href="{{ url_for('model_evaluation') }}#eval-ocr">Model evaluation</a> page compares them.{% else %}No model is configured (LLM_FOUNDRY_KEY): only Tesseract will read the image.{% endif %}</div>
+                <div class="tiny muted">Tesseract OCR: {% if ocr_ready %}installed on this machine{% else %}not installed here (the MRZ cross-check is skipped){% endif %}.</div>
+                <button type="submit" class="btn btn-primary mt-8" id="scan-submit">{{ icon('zoom-in') }} Scan</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card mt-12 pad-0" id="scan-recent">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Recent scans</div>
+        <div class="card-sub">kept until deleted · real ID images: delete them when the demo is done</div></div>
+    {% if scans %}
+    <div class="tbl-scroll">
+    <table class="tbl">
+        <thead><tr><th>Scanned</th><th>Document</th><th>Name</th><th>Number</th><th>Result</th><th>Read by</th><th></th></tr></thead>
+        <tbody>{% for s in scans %}{% set r = s.read or {} %}{% set f = r.fields or {} %}
+        <tr><td class="nowrap small">{{ s.at }}<div class="tiny muted">{{ s.file }}</div></td>
+            <td class="small">{{ r.document_type or '—' }}<div class="tiny muted">{{ r.issuing_country }}</div></td>
+            <td class="strong">{{ f.full_name or ((f.given_names ~ ' ' ~ f.surname)|trim) or '—' }}</td>
+            <td class="small nowrap">{{ f.document_number or '—' }}</td>
+            <td>{% include "_scan_verdict.html" %}</td>
+            <td class="small">{{ s.model.label if s.model else 'Tesseract only' }}</td>
+            <td><a class="btn btn-outline btn-sm" href="{{ url_for('scan_result', scan_id=s.id) }}">Open</a></td></tr>
+        {% endfor %}</tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="card-body small muted">No scan yet.</div>
+    {% endif %}
+</div>
+
+<script>
+(function () {
+    var input = document.getElementById('scan-file'), drop = input.closest('.scan-drop'), name = document.getElementById('scan-file-name');
+    input.addEventListener('change', function () { if (input.files.length) name.textContent = input.files[0].name; });
+    ['dragover', 'dragenter'].forEach(function (e) { drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.add('over'); }); });
+    ['dragleave', 'drop'].forEach(function (e) { drop.addEventListener(e, function () { drop.classList.remove('over'); }); });
+    drop.addEventListener('drop', function (ev) {
+        ev.preventDefault();
+        if (ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; name.textContent = input.files[0].name; }
+    });
+    document.getElementById('scan-upload').addEventListener('submit', function () {
+        var b = document.getElementById('scan-submit');
+        b.disabled = true; b.textContent = 'Reading the document…';
+    });
+})();
+</script>
+{% endblock %}

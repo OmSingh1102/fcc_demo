@@ -248,6 +248,23 @@ seconds and cost a case (measured tokens at list price). Run it with
 about 160 calls); it writes `fincrime/data/benchmark.json`, which the page
 shows with a few plain lines on what the numbers say.
 
+**Scan ID** (`/scan`, Cases in the left menu; `fincrime/documents/id_scan.py`).
+Start from an ID document, with no CSV and no case: upload a photo or scan
+of a passport, national ID card, driving licence, Aadhaar or PAN card. The
+image is checked and cleaned (upright, resized, EXIF and GPS removed), then
+read two ways at once: a vision model picked on the page (Claude Opus 4.8 by
+default; Sonnet 5.5, Gemini 2.5 Pro and Flash, GPT-5 and GPT-5 mini, through
+the LLM Foundry gateway) transcribes every printed field, the MRZ lines and
+what spoils the photo; Tesseract on this machine reads the page's text and
+a passport's MRZ. The page shows the information fetched beside the image,
+and checks computed by code: photo quality, the main fields, expiry, age,
+the MRZ check digits of the model's transcription (its runs of < counted out
+to 44) and of Tesseract's read, the printed fields against the zone, the
+model's read against Tesseract's (names only when Tesseract's first line is
+in step), a document that is not an ID. Each scan keeps its model, tokens,
+cost and seconds; Download data gives it as JSON for another system; Delete
+removes the record and the image (real IDs: `uploads/scans/`, gitignored).
+
 **Model evaluation** (`/model-evaluation`, Insights; `fincrime/decision_model.py`).
 A decision model built from the client's 1,000 sample cases and scored
 against what the analysts decided, with confusion matrices. The model sees
@@ -357,7 +374,7 @@ made by Pillow in memory: the slot replaced, the photo turned upright and
 its EXIF gone, served only to the case's tenant, read by the agent in
 place of the drawing, a resubmission back in Data Confirming, bad files and
 closed or held cases refused, kept through a restart, removed by the
-reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_architecture.py` (the Architecture page with and without a benchmark run, the benchmark's scoring: the right read scores full marks, a misread and a missed spoiled photo cost marks, cost at list price), `tests/test_decision_model.py` (the decision model: the analysts' answers never shown to it, the fixed stratified split, examples from the training cases and never the case itself, the SOP's change note kept out of the prompt, the rules and the learned tree, the scoring and its confusion matrices, the Model evaluation page with and without a run), `tests/test_ai_agent.py` (the AI Agent with the model call stood
+reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_architecture.py` (the Architecture page with and without a benchmark run, the benchmark's scoring: the right read scores full marks, a misread and a missed spoiled photo cost marks, cost at list price), `tests/test_id_scan.py` (Scan ID: a good passport passes, an expired one, a misread number and a minor are caught, a miscounted MRZ filler run counted out, an out-of-step OCR line kept off the names, a document that is not an ID; the upload, result, image, JSON and delete pages with the model stood in for, a file that is not an image refused), `tests/test_decision_model.py` (the decision model: the analysts' answers never shown to it, the fixed stratified split, examples from the training cases and never the case itself, the SOP's change note kept out of the prompt, the rules and the learned tree, the scoring and its confusion matrices, the Model evaluation page with and without a run), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a
