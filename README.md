@@ -161,6 +161,29 @@ they stay on this machine, but the AI Agent sends them to Straive's LLM
 Foundry to be read, so use this only with the client's approval. A
 Render deploy's disk is wiped on every deploy and restart.
 
+**OCR on uploaded images** (`fincrime/documents/ocr.py`). When the agent
+reads a case with uploaded images, Tesseract, an OCR engine running on this
+machine (no image leaves it for this step), reads them too: each image's
+printed text, and the passport's machine-readable zone (MRZ). The MRZ is
+parsed under ICAO 9303 (document number, nationality, date of birth, sex,
+expiry, names) with every check digit tested, after the lower part of the
+page is straightened (a photo is rarely level) and read a few ways, each
+check-digit field taken from a reading its own check digit confirms. Once
+the check digits add up, the check **Passport MRZ read by OCR** holds
+Claude's read to it: a different number, date of birth, expiry or
+nationality sends the case to a person (one of the two misread the page,
+or the page disagrees with itself); a difference only in characters OCR
+mistakes for one another (O and 0, S and 5) is shown, not failed; an MRZ OCR
+cannot read is information only. The AI Agent tab shows the MRZ lines, each
+field with its check digit, and the text OCR read. Drawn documents are not
+OCR'd, and the decided cases are not read again. Install Tesseract with
+`winget install UB-Mannheim.TesseractOCR` (or unpack that installer into
+`%LOCALAPPDATA%\Programs\Tesseract-OCR`, which needs no admin rights; on
+Linux `apt install tesseract-ocr`); `TESSERACT_CMD` points at it anywhere
+else. Without it the check says OCR is not available and blocks nothing.
+The ID vendor pop-up's extracted values are labelled "(vendor)": they are
+the mock vendor's, not this OCR.
+
 The console's names and colours are client-neutral: the two onboarding
 lines are **Individuals** and **Businesses**, customer tiers are Tier 1–4,
 the top tabs are Monitoring / Reports / Administration and the accent is a
@@ -242,14 +265,14 @@ analyst uploads real document images (see **Real document images**).
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-169 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+180 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_documents.py` (real document images on a case, all
 made by Pillow in memory: the slot replaced, the photo turned upright and
 its EXIF gone, served only to the case's tenant, read by the agent in
 place of the drawing, a resubmission back in Data Confirming, bad files and
 closed or held cases refused, kept through a restart, removed by the
-reset), `tests/test_ai_agent.py` (the AI Agent with the model call stood
+reset), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a

@@ -659,6 +659,10 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 .fact-list .v.strong { font-weight: 600; }
 .fact-list > .fact-actions { display: flex; gap: 6px; padding-top: 10px; }
 
+.ocr-panel { padding: 10px 16px 14px; border-top: 1px solid var(--border); }
+.ocr-mrz, .ocr-text pre { margin: 0 0 8px; padding: 8px 10px; overflow-x: auto; background: var(--muted); border-radius: var(--radius); font-family: Consolas, 'Courier New', monospace; font-size: 12px; white-space: pre; }
+.ocr-text pre { white-space: pre-wrap; max-height: 240px; overflow-y: auto; }
+.ocr-text summary { cursor: pointer; margin: 4px 0; }
 .doc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .doc-card { display: flex; flex-direction: column; overflow: hidden; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); }

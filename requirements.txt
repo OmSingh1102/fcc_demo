@@ -11,6 +11,10 @@ anthropic>=1.8
 # The AI Agent sends the document images to Claude as PNG; resvg draws the SVGs
 # (blur, glare and crop included) with no native library to install.
 resvg-py>=0.5
+# OCR of uploaded ID images (the passport's MRZ) beside Claude's read: the
+# wrapper for Tesseract, which is installed separately (winget install
+# UB-Mannheim.TesseractOCR on Windows, apt install tesseract-ocr on Linux).
+pytesseract>=0.3.10
 # Production servers: waitress on Windows (a public tunnel from a laptop),
 # gunicorn on a Linux host (Render, Railway — see render.yaml / Procfile).
 waitress>=3.0

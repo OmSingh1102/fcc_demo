@@ -1409,7 +1409,8 @@ def _agent_view(case, actor, levels):
     """What the case page shows: the agent's read and checks, once it has
     worked the case, and Claude's own verdict beside them."""
     return {"show": bool(case.get("ai_agent")), "labels": AGENT_LABELS, "verdict_labels": ai_agent.VERDICT_LABELS,
-            "watch_labels": ai_agent.WATCH_LABELS, "verdict_watch": ai_agent.VERDICT_WATCHLIST}
+            "watch_labels": ai_agent.WATCH_LABELS, "verdict_watch": ai_agent.VERDICT_WATCHLIST,
+            "slot_labels": uploads.SLOT_LABELS}
 
 
 def _agent_finish(case, perceived):

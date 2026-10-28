@@ -250,6 +250,35 @@
     {% if r.problems or r.note %}<div class="small muted" style="padding:6px 16px">{{ label }}: {{ (r.problems|join(', ')).replace('_', ' ') }}{% if r.problems and r.note %} — {% endif %}{{ r.note }}</div>{% endif %}
     {% endfor %}
     {% endif %}
+    {% if ag.ocr %}{% set o = ag.ocr %}
+    <div class="ocr-panel" id="ai-agent-ocr">
+        <div class="row" style="gap:8px;margin-bottom:6px">
+            <b class="small">OCR (Tesseract, on this machine)</b>
+            <span class="tiny muted">{% if o.available %}Run on the uploaded images{% if o.seconds is defined %} · {{ o.seconds }} s{% endif %}: an independent reading beside Claude's.{% else %}Tesseract is not installed here, so no image was read by OCR.{% endif %}</span>
+        </div>
+        {% if o.available %}
+        {% set m = o.mrz %}
+        {% if m %}
+        <div class="small mb-8"><b>Passport MRZ</b> {% if m.valid %}<span class="badge emerald">{{ icon('check') }} Check digits add up</span>{% else %}<span class="badge amber">{{ icon('x') }} Check digits do not add up</span>{% endif %}</div>
+        <pre class="ocr-mrz" id="ai-agent-mrz">{{ m.lines|join('\n') }}</pre>
+        <table class="tbl dense">
+            <thead><tr><th>Field</th><th>OCR</th><th>Check digit</th></tr></thead>
+            <tbody>
+            {% for key, label, cd in (('number', 'Document number', 'number'), ('nationality', 'Nationality', ''), ('dob', 'Date of birth', 'dob'), ('sex', 'Sex', ''), ('expiry', 'Expiry', 'expiry'), ('surname', 'Surname', ''), ('given_names', 'Given names', '')) %}
+            <tr><td class="strong nowrap">{{ label }}</td><td class="mono">{{ m.fields[key] or '—' }}</td>
+                <td>{% if cd %}{% if m.checks[cd] %}<span class="badge emerald">{{ icon('check') }}</span>{% else %}<span class="badge amber">{{ icon('x') }}</span>{% endif %}{% else %}<span class="tiny muted">none</span>{% endif %}</td></tr>
+            {% endfor %}
+            <tr><td class="strong nowrap">Whole line (composite)</td><td></td><td>{% if m.checks.composite %}<span class="badge emerald">{{ icon('check') }}</span>{% else %}<span class="badge amber">{{ icon('x') }}</span>{% endif %}</td></tr>
+            </tbody>
+        </table>
+        {% elif 'passport' in o.text %}<div class="small muted mb-8">OCR found no machine-readable zone on the passport image.</div>{% endif %}
+        {% for slot, words in o.text.items() %}
+        <details class="ocr-text"><summary class="small">Text OCR read on the {{ agent.slot_labels[slot]|lower }}</summary><pre>{{ words or '(no text found)' }}</pre></details>
+        {% endfor %}
+        {% for slot, err in o.errors.items() %}<div class="small muted">{{ agent.slot_labels[slot] }}: {{ err }}</div>{% endfor %}
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 

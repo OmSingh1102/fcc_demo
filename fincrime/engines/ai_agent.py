@@ -8,7 +8,10 @@ and hands the case to a person whenever it cannot be sure.
 2. Fixed checks - code, not the model - compare that read with the case:
    readable, name, date of birth, nationality, ID number, expiry, the
    vendor's result, the passport's endorsements, the secondary ID (its name
-   and date of birth), the proof of address and its address.
+   and date of birth), the proof of address and its address. On images
+   uploaded in the console (not drawn ones), Tesseract's OCR of the
+   passport's MRZ, read on this machine, is held against Claude's read too
+   (read_ocr, _mrz_check).
 3. Every check passes: the agent confirms the data through the analysts'
    own path (workflow.confirm_data) and the AI screening rules re-run. A
    case they leave nothing on verifies itself; one with a watchlist alert
@@ -51,7 +54,7 @@ import time
 from fincrime.data import vocab
 from fincrime.documents.raster import svg_to_png
 from fincrime.documents.svg_cards import ISO3
-from fincrime.documents import uploads
+from fincrime.documents import ocr, uploads
 from fincrime.engines import ai_screening, case_documents, workflow
 from fincrime.engines.errors import WorkflowError
 from fincrime.filebook import addresses, llm, names, similarity
@@ -211,7 +214,7 @@ NAME_RULES = 13
 ADDRESS_RULES = 11
 # What perceive() returns: a stored read decided again keeps it (redecide
 # leaves out Claude's verdict, which is asked again).
-PERCEIVED = ("at", "model", "read", "usage", "seconds", "error", "verdict", "read_version")
+PERCEIVED = ("at", "model", "read", "usage", "seconds", "error", "verdict", "read_version", "ocr")
 # What a read covers. 1: the passport's data page and the proof of address.
 # 2: every document on the case. A case read under 1 that no person has
 # touched starts again and is read again (read_before_all_documents).
@@ -863,9 +866,10 @@ def _other_documents(case, got, out, printed):
                info=True)
 
 
-def checks(case, got, now=None):
+def checks(case, got, now=None, scanned=None):
     """Every check the agent makes on Claude's read, in order; each says why
-    it failed. Also returns the values to confirm when they all pass."""
+    it failed. Also returns the values to confirm when they all pass.
+    `scanned` is read_ocr()'s result, when images were uploaded."""
     now = now or dates.now()
     client = case["client"]
     idr, poa = got.get("id") or {}, got.get("poa") or {}
@@ -912,6 +916,7 @@ def checks(case, got, now=None):
     ok = vc.get("result") != "Declined"
     _check(out, "Vendor check", "", vc.get("result", ""), ok,
            "" if ok else "ID declined by the vendor" + (f": {vc['vendor_reason']}" if vc.get("vendor_reason") else ""))
+    _mrz_check(out, idr, scanned)
     _other_documents(case, got, out, printed)
 
     if case.get("poa_required"):
@@ -946,6 +951,75 @@ def checks(case, got, now=None):
     return out, values
 
 
+# ── OCR beside the read ──────────────────────────────────────────────────────
+# Tesseract (documents/ocr) reads the images uploaded for a case, on this
+# machine. The passport's MRZ, once its check digits add up, is held against
+# Claude's read: number, date of birth, expiry, nationality. A difference
+# only in characters OCR mistakes for one another is shown, not failed.
+MRZ_CHECK = "Passport MRZ read by OCR"
+OCR_MRZ_REQUIRED = False            # an unreadable MRZ is information only
+_LOOKALIKE = (set("0OQD"), set("1ILT7"), set("2Z"), set("5S"), set("6G"), set("8B3"), set("4A"))
+
+
+def read_ocr(case):
+    """Tesseract on the images uploaded for the case: the passport's MRZ and
+    each image's text. None when no image was uploaded (a drawn document is
+    not OCR'd); {"available": False} on a machine without Tesseract."""
+    rows = [(slot, case_documents.slot_row(case, slot)) for slot, _ in uploads.SLOTS]
+    rows = [(slot, row) for slot, row in rows if row and row.get("upload")]
+    if not rows:
+        return None
+    if not ocr.available():
+        return {"available": False}
+    started = time.monotonic()
+    out = {"available": True, "engine": "Tesseract", "mrz": None, "text": {}, "errors": {}}
+    for slot, row in rows:
+        try:
+            data = uploads.load(row["upload"]["path"])
+            if slot == "passport":
+                out["mrz"] = ocr.mrz(data)
+            out["text"][slot] = ocr.text(data)[:4000]
+        except (ocr.OcrError, OSError, WorkflowError) as exc:
+            out["errors"][slot] = str(exc)
+    out["seconds"] = round(time.monotonic() - started, 1)
+    return out
+
+
+def _lookalike(a, b):
+    return len(a) == len(b) and all(x == y or any(x in g and y in g for g in _LOOKALIKE) for x, y in zip(a, b))
+
+
+def _mrz_check(out, idr, scanned):
+    """The OCR'd MRZ against Claude's read of the data page (no row without
+    uploaded images)."""
+    if not scanned:
+        return
+    if not scanned.get("available"):
+        _check(out, MRZ_CHECK, "", "not read", True, "OCR is not installed on this machine", info=True)
+        return
+    m = scanned.get("mrz")
+    if not (m and m.get("valid")):
+        why = ("OCR found no machine-readable zone on the passport" if not m
+               else "OCR's reading of the MRZ does not add up (its check digits)")
+        _check(out, MRZ_CHECK, "", "not readable", not OCR_MRZ_REQUIRED, why, info=not OCR_MRZ_REQUIRED)
+        return
+    f = m["fields"]
+    number = similarity.squash(similarity.fold(idr.get("document_number", ""))).upper()
+    pairs = (("document number", f["number"], number), ("date of birth", f["dob"], idr.get("dob", "")),
+             ("expiry", f["expiry"], idr.get("expiry", "")),
+             ("nationality", f["nationality"], (idr.get("nationality_code") or "").upper()))
+    differ = [(label, mrz_value, read_value) for label, mrz_value, read_value in pairs if mrz_value != read_value]
+    hard = [d for d in differ if not _lookalike(d[1], d[2])]
+    said = "; ".join(f"{label}: MRZ {mrz_value}, read {read_value or '—'}" for label, mrz_value, read_value in (hard or differ))
+    shown = f"MRZ {f['number']} · born {f['dob']} · expires {f['expiry']} · {f['nationality']}"
+    if hard:
+        _check(out, MRZ_CHECK, "", shown, False, f"The MRZ read by OCR differs from the read ({said})")
+    elif differ:
+        _check(out, MRZ_CHECK, "", shown, True, f"OCR and the read differ only in look-alike characters ({said})", info=True)
+    else:
+        _check(out, MRZ_CHECK, "", shown, True)
+
+
 # ── one case ─────────────────────────────────────────────────────────────────
 
 def perceive(case, render, call=None, sleep=time.sleep, wc=None):
@@ -962,6 +1036,9 @@ def perceive(case, render, call=None, sleep=time.sleep, wc=None):
     out["seconds"] = out["seconds"] or round(time.monotonic() - started, 1)
     if not out["error"]:
         out["verdict"] = opinion(case, out["read"], call=call, sleep=sleep, wc=wc)
+    scanned = read_ocr(case)
+    if scanned is not None:
+        out["ocr"] = scanned
     return out
 
 
@@ -978,7 +1055,7 @@ def decide(case, alert_case, wc, perceived):
         record["reasons"] = [f"AI Agent could not read the documents: {record['error']}"]
     else:
         case_documents.date_from_read(case, record["read"])
-        record["checks"], values = checks(case, record["read"])
+        record["checks"], values = checks(case, record["read"], scanned=record.get("ocr"))
         watch = watchlist_findings(case, wc, record["read"])
         if watch:
             record["watchlist"] = watch
@@ -987,7 +1064,7 @@ def decide(case, alert_case, wc, perceived):
         fixes = record_fixes(case, alert_case, record)
         if fixes:
             correct_record(case, record, fixes)
-            record["checks"], values = checks(case, record["read"])         # against the corrected record
+            record["checks"], values = checks(case, record["read"], scanned=record.get("ocr"))   # against the corrected record
         record["reasons"] = [c["note"] for c in record["checks"] if not c["ok"]]
     if not record["reasons"]:
         workflow._audit(case, ACTOR, "Documents read", f"{MODEL} read {DOCUMENTS_READ}; every check passed.")
@@ -1413,7 +1490,7 @@ def recheck(case, alert_case, wc):
     A case that now passes them is confirmed as decide() confirms one; a case
     that still fails stays with a person, its reasons brought up to date."""
     old = case["ai_agent"]
-    found, _ = checks(case, old["read"])
+    found, _ = checks(case, old["read"], scanned=old.get("ocr"))
     failing = any(not c["ok"] for c in found)
     if failing and not record_fixes(case, alert_case, dict(old, checks=found)):
         old.update(checks=found, reasons=[c["note"] for c in found if not c["ok"]], rules=RULES_VERSION,

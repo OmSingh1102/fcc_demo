@@ -1,5 +1,7 @@
 """Mock identity-verification vendor payload — the "Details" behind a vendor
-row. The names are text labels; nothing here calls a vendor."""
+row. The names are text labels; nothing here calls a vendor. The values are
+what the vendor is said to have extracted, marked "(vendor)" so nobody takes
+them for the console's own OCR (documents/ocr, on uploaded images)."""
 
 
 def details(case):
@@ -12,10 +14,10 @@ def details(case):
         "checks": [
             ("Document type", ex.get("id_type", "")),
             ("Document number", ex.get("id_number", "")),
-            ("Name (OCR)", ex.get("name", "")),
-            ("Date of birth (OCR)", ex.get("dob", "")),
-            ("Nationality (OCR)", ex.get("nationality", "")),
-            ("Expiry (OCR)", ex.get("expiry", "")),
+            ("Name (vendor)", ex.get("name", "")),
+            ("Date of birth (vendor)", ex.get("dob", "")),
+            ("Nationality (vendor)", ex.get("nationality", "")),
+            ("Expiry (vendor)", ex.get("expiry", "")),
             ("Face match", "Pass" if vc["result"] == "Approved" else "Not assessed"),
             ("Liveness", "Pass" if vc["result"] == "Approved" else "Not assessed"),
             ("Tamper check", "Pass" if vc["result"] == "Approved" else "Review"),
