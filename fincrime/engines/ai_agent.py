@@ -311,7 +311,13 @@ def _picture(case, doc, render):
 
 def read(case, render, call=None, sleep=time.sleep):
     """Claude's read of every document on the case: (read, usage, seconds)."""
-    call = call or llm.call
+    return _ask(call or llm.call, SYSTEM, read_content(case, render), SCHEMA, 4000, sleep)
+
+
+def read_content(case, render):
+    """What the read sends with SYSTEM and SCHEMA: each document's image,
+    after a line saying which document it is (also what the model benchmark
+    sends every model it compares, fincrime/benchmark.py)."""
     content, n = [], 0
 
     def add(doc, key, intro, missing):
@@ -332,7 +338,7 @@ def read(case, render, call=None, sleep=time.sleep):
     add(poa[0] if poa else None, "poa", "the customer's proof of address. Read it into `poa`, with the holder's (account "
                                         "holder's, cardholder's) full name as printed in `surname`. An S/O, D/O, W/O or C/O "
                                         "line in an address names a relative, not the holder.", "There is no proof of address.")
-    return _ask(call, SYSTEM, content, SCHEMA, 4000, sleep)
+    return content
 
 
 def _ask(call, system, content, schema, max_tokens, sleep):

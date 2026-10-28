@@ -39,6 +39,7 @@ from fincrime.analytics.queues import QueueConsole
 from fincrime.analytics.routing_console import RoutingConsole
 from fincrime.analytics.trackers import TrackerConsole, to_csv
 from fincrime.analytics.work import WorkConsole
+from fincrime import benchmark
 from fincrime.data import vocab
 from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
@@ -203,7 +204,7 @@ TOP_TABS = [
 _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"), ("wc_", "ns_queue"),
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
-              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"))
+              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"))
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -259,7 +260,8 @@ def _side_nav():
         {"title": "Screening", "items": screening},
         {"title": "Operations Hub", "items": hub},
         {"title": "Insights", "items": [
-            {"label": "Analytics", "icon": "bar-chart", "endpoint": "analytics", "active": owner == "analytics"}]},
+            {"label": "Analytics", "icon": "bar-chart", "endpoint": "analytics", "active": owner == "analytics"},
+            {"label": "Architecture", "icon": "layers", "endpoint": "architecture", "active": owner == "architecture"}]},
     ]
 
 
@@ -1775,6 +1777,14 @@ def routing_capacity():
         _save("analyst", a)
         flash(f"{a['name']}: capacity {res[0]} → {res[1]}.", "success")
     return redirect(url_for("routing_console"))
+
+
+# ─── Architecture: what the console is built of, and the models evaluated ───
+@app.route("/architecture")
+def architecture():
+    bench = benchmark.load()
+    return render_template("architecture.html", bench=bench, verdict=benchmark.verdict(bench), agent_model=ai_agent.MODEL,
+                           llm_ready=ai_review.configured(), ocr_ready=ocr.available())
 
 
 # ─── Analytics ─────────────────────────────────────────────────────────────────

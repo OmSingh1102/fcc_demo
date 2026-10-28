@@ -227,6 +227,27 @@ one with a person is confirmed when it passes or has its reasons brought
 up to date. Closed cases stay closed. At the shipped values every label and
 text reads as before ("Issued within the last 6 months").
 
+**Architecture and the models evaluated** (`/architecture`, Insights in
+the left menu; `fincrime/benchmark.py`). One page for the presentation:
+the pipeline step by step (intake, image preparation, the model's read of
+the documents, the fixed checks and their SOP parameters, screening, the
+decision), which steps are a model's judgement, which are auditable rules
+and which are people, the services each step stands in for and the
+existing solution that takes it over by API (an OCR / ID-document API, an
+ID-verification provider, World-Check One, the sanctions lists, the
+client's CRM), and the models evaluated for the one step that needs a
+model. The benchmark sends the AI Agent's own request (its instructions,
+the four document images, the answer schema) to every model the LLM
+Foundry gateway serves (Claude Opus 4.8 in use, Sonnet 5.5, Sonnet 4.6,
+Haiku 4.5; GPT-5, GPT-5 mini, GPT-4.1, GPT-4.1 mini; Gemini 2.5 Pro and
+Flash) and scores each against what the drawn documents print: ten
+printed fields read right, spoiled photos caught and false alarms, the
+console's decision on its read against the decision on the right read,
+seconds and cost a case (measured tokens at list price). Run it with
+`python -m fincrime.benchmark` (it needs `LLM_FOUNDRY_KEY`; a full run is
+about 160 calls); it writes `fincrime/data/benchmark.json`, which the page
+shows with a few plain lines on what the numbers say.
+
 The console's names and colours are client-neutral: the two onboarding
 lines are **Individuals** and **Businesses**, customer tiers are Tier 1–4,
 the top tabs are Monitoring / Reports / Administration and the accent is a
@@ -308,14 +329,14 @@ analyst uploads real document images (see **Real document images**).
 .venv\Scripts\python.exe -W error::ResourceWarning -m unittest -v
 ```
 
-188 tests: `tests/test_upload.py` (the sample, an upload through intake, the
+191 tests: `tests/test_upload.py` (the sample, an upload through intake, the
 agent started, duplicates and a wrong file refused, uploads surviving a
 restart), `tests/test_documents.py` (real document images on a case, all
 made by Pillow in memory: the slot replaced, the photo turned upright and
 its EXIF gone, served only to the case's tenant, read by the agent in
 place of the drawing, a resubmission back in Data Confirming, bad files and
 closed or held cases refused, kept through a restart, removed by the
-reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_ai_agent.py` (the AI Agent with the model call stood
+reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_architecture.py` (the Architecture page with and without a benchmark run, the benchmark's scoring: the right read scores full marks, a misread and a missed spoiled photo cost marks, cost at list price), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a
