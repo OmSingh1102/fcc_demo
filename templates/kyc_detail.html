@@ -273,7 +273,7 @@
         </table>
         {% elif 'passport' in o.text %}<div class="small muted mb-8">OCR found no machine-readable zone on the passport image.</div>{% endif %}
         {% for slot, words in o.text.items() %}
-        <details class="ocr-text"><summary class="small">Text OCR read on the {{ agent.slot_labels[slot]|lower }}</summary><pre>{{ words or '(no text found)' }}</pre></details>
+        <details class="ocr-text"><summary class="small">Text OCR read: {{ agent.slot_labels[slot] }}</summary><pre>{{ words or '(no text found)' }}</pre></details>
         {% endfor %}
         {% for slot, err in o.errors.items() %}<div class="small muted">{{ agent.slot_labels[slot] }}: {{ err }}</div>{% endfor %}
         {% endif %}

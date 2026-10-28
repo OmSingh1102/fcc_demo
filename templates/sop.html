@@ -28,9 +28,7 @@
                     {% elif p.type == 'poa_types' %}
                     <div class="sop-picks">{% for k, label in vocab.ACCEPTED_POA_TYPES.items() %}<label class="check small"><input type="checkbox" name="value" value="{{ k }}" {% if k in p.value %}checked{% endif %}> {{ label }}</label>{% endfor %}</div>
                     {% else %}
-                    <select class="input" name="value" multiple size="6" style="min-width:220px" aria-label="{{ p.label }}">
-                        {% for code, cname in vocab.COUNTRY_NAMES.items()|sort(attribute='1') %}<option value="{{ code }}" {% if code in p.value %}selected{% endif %}>{{ cname }}</option>{% endfor %}
-                    </select>
+                    <div class="sop-picks scroll">{% for code, cname in vocab.COUNTRY_NAMES.items()|sort(attribute='1') %}<label class="check small"><input type="checkbox" name="value" value="{{ code }}" {% if code in p.value %}checked{% endif %}> {{ cname }}</label>{% endfor %}</div>
                     {% endif %}
                     <button type="submit" class="btn btn-primary btn-sm">Save</button>
                 </form>

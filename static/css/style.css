@@ -659,6 +659,9 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 .fact-list .v.strong { font-weight: 600; }
 .fact-list > .fact-actions { display: flex; gap: 6px; padding-top: 10px; }
 
+.sop-picks { display: flex; flex-wrap: wrap; gap: 4px 16px; max-width: 520px; }
+.sop-picks .check { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.sop-picks.scroll { max-height: 150px; overflow-y: auto; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); }
 .ocr-panel { padding: 10px 16px 14px; border-top: 1px solid var(--border); }
 .ocr-mrz, .ocr-text pre { margin: 0 0 8px; padding: 8px 10px; overflow-x: auto; background: var(--muted); border-radius: var(--radius); font-family: Consolas, 'Courier New', monospace; font-size: 12px; white-space: pre; }
 .ocr-text pre { white-space: pre-wrap; max-height: 240px; overflow-y: auto; }
