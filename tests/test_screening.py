@@ -276,6 +276,34 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertEqual((data["outcome"], data["screening"]["hits"][0]["resolution"]["status"]), ("True match", "True match"))
         self.assertIn("Closed", c.get("/scan?status=closed").data.decode("utf-8"))
 
+    def test_the_world_check_console_shows_and_resolves_the_case(self):
+        c = self.client()
+        sid = self.upload(c, a_read())
+        uid = fcc._scan(sid)["screening"]["hits"][0]["uid"]
+        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        self.assertIn(f'href="/wc/{sid}" target="_blank"', page)
+        self.assertIn(f'href="/wc/{sid}/match/{uid}" target="_blank"', page)
+        page = c.get(f"/wc/{sid}").data.decode("utf-8")
+        for needle in ("World-Check console", "UPADHYAY, Ashish", "UNRESOLVED", "Stand-in (reconciliation log)"):
+            self.assertIn(needle, page)
+        page = c.get(f"/wc/{sid}/match/{uid}").data.decode("utf-8")
+        for needle in ("Comparison data", "Potential match", "Patna", "ponzi"):
+            self.assertIn(needle, page)
+        self.assertNotIn('value="Unspecified"', page)              # the three verdicts a hit can take
+        bad = c.post(f"/wc/{sid}/match/{uid}/resolve", data={"status": "True positive", "risk": "High", "reason": "", "comment": "x"},
+                     follow_redirects=True)
+        self.assertIn("Select a reason", bad.data.decode("utf-8"))
+        c.post(f"/wc/{sid}/match/{uid}/resolve", data={"status": "True positive", "risk": "High",
+                                                        "reason": "Confirmed by identification", "comment": "Same date and city"})
+        rec = fcc._scan(sid)
+        res = rec["screening"]["hits"][0]["resolution"]
+        self.assertEqual((res["status"], res["risk"], res["reason"], rec["status"], rec["closed"]["outcome"]),
+                         ("True match", "High", "Confirmed by identification", "closed", "True match"))
+        self.assertIn("Match resolved: True positive", c.get(f"/wc/{sid}?tab=audit").data.decode("utf-8"))
+        self.assertEqual(c.post(f"/wc/{sid}/export").status_code, 302)
+        self.assertTrue(c.get(f"/wc/{sid}/export.pdf").data.startswith(b"%PDF"))
+        self.assertTrue(fcc._scan(sid)["wc_exports"])
+
     def test_no_hit_is_confirmed_and_closed(self):
         c = self.client()
         sid = self.upload(c, a_read(name="ZEBEDIAH QUARTERMAINE", surname="QUARTERMAINE", given="ZEBEDIAH"))

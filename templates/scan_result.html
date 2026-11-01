@@ -24,9 +24,14 @@
     <div class="card-head">
         <div><div class="card-title">World-Check screening</div>
             <div class="card-sub">{% if s.screening %}{{ sc.source_label }} · searched {{ sc.at }} for <b>{{ sc.searched.name }}</b>{% if sc.searched.dob %}, born {{ sc.searched.dob }}{% endif %}{% if sc.searched.nationality %}, {{ sc.searched.nationality }}{% endif %}{% else %}not searched{% endif %}</div></div>
-        {% if s.screening and s.status != 'closed' %}
-        <form method="post" action="{{ url_for('scan_screen', scan_id=s.id) }}"><button class="btn btn-outline btn-sm" type="submit">{{ icon('refresh-cw') }} Search again</button></form>
-        {% endif %}
+        <div class="row" style="gap:8px">
+            {% if s.screening and not sc.error %}
+            <a class="btn btn-outline btn-sm" id="open-wc" href="{{ url_for('wc_case', wc_case_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ icon('globe') }} Open in World-Check<span class="ext-ic">{{ icon('external-link') }}</span></a>
+            {% endif %}
+            {% if s.screening and s.status != 'closed' %}
+            <form method="post" action="{{ url_for('scan_screen', scan_id=s.id) }}"><button class="btn btn-outline btn-sm" type="submit">{{ icon('refresh-cw') }} Search again</button></form>
+            {% endif %}
+        </div>
     </div>
     <div class="card-body">
         {% if not s.screening %}
@@ -52,7 +57,10 @@
                     <div><b>{{ h.name }}</b> <span class="tiny muted">{{ h.uid }}</span>
                         <span class="badge {{ {'Exact': 'rose', 'Strong': 'orange', 'Medium': 'amber'}.get(h.strength, 'slate') }}">{{ h.strength }} name match · {{ h.score }}%</span>
                         <span class="badge violet">{{ h.category }}</span></div>
-                    {% if res %}<span class="badge {{ tone[res.status] }}">Confirmed: {{ res.status }}</span>{% endif %}
+                    <div class="row" style="gap:8px">
+                        {% if res %}<span class="badge {{ tone[res.status] }}">Confirmed: {{ res.status }}</span>{% endif %}
+                        <a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=s.id, match_id=h.uid) }}" target="_blank" rel="noopener" title="The full record, in a new tab">Open in WC<span class="ext-ic">{{ icon('external-link') }}</span></a>
+                    </div>
                 </div>
                 <table class="tbl screen-compare">
                     <thead><tr><th></th><th>On the ID</th><th>World-Check record</th><th></th></tr></thead>

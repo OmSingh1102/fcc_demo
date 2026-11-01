@@ -290,6 +290,14 @@ Start from an ID document, with no CSV: every uploaded ID becomes a case.
    whether they agreed is kept). The case closes when every hit is confirmed
    (true match, possible match or cleared), or with no hit when the analyst
    confirms there is none.
+   **Open in World-Check** (the case, or *Open in WC* on a hit, in a new tab)
+   shows the case in the simulated World-Check console the 1,000-case book
+   uses: the matches list with its status and type filters, each record's
+   comparison data, key data, biography, aliases and sources (a stand-in hit
+   is the file's record, built as that book builds it), the audit and the
+   export PDF. Resolving a match there (true positive, potential match, false
+   positive, with risk, reason and comment) confirms the hit on the case, and
+   a hit confirmed on the case shows as resolved there.
 Saving a new SOP version (the QC lead) sends every open case's unconfirmed
 hits to the model again under it. Settings (the QC lead) holds the models,
 the examples per hit, the stand-in's name-score floor and the hits kept, and

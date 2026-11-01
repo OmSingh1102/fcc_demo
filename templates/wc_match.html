@@ -74,12 +74,12 @@
                 <form method="post" action="{{ url_for('wc_resolve', wc_case_id=wc.id, match_id=m.id) }}">
                     <input type="hidden" name="status_filter" value="{{ status }}"><input type="hidden" name="type_filter" value="{{ mtype }}">
                     <div class="opts">
-                        <div><h5>Status</h5>{% for s in vocab.WC_STATUSES %}<label><input type="radio" name="status" value="{{ s }}" {% if r.status == s %}checked{% endif %} required>{{ s }}</label>{% endfor %}</div>
+                        <div><h5>Status</h5>{% for s in (wc_statuses or vocab.WC_STATUSES) %}<label><input type="radio" name="status" value="{{ s }}" {% if r.status == s %}checked{% endif %} required>{{ s }}</label>{% endfor %}</div>
                         <div><h5>Risk level</h5>{% for s in vocab.WC_RISKS %}<label><input type="radio" name="risk" value="{{ s }}" {% if r.risk == s %}checked{% endif %}>{{ s }}</label>{% endfor %}</div>
                         <div><h5>Reason</h5>
                             <select class="input input-sm" name="reason"><option value="">Select a Reason</option>{% for s in vocab.WC_REASONS %}<option {% if r.reason == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
                             <textarea class="textarea mt-8" name="comment" rows="3" placeholder="Review comment (required)" required>{{ r.comment if r.by != vocab.SYSTEM_USER else '' }}</textarea>
-                            <button type="submit" class="btn btn-sm mt-8" style="background:#3a3f4a;color:#fff;border:1px solid #4a5060" {% if not can_resolve %}disabled title="Handle the screening case first"{% endif %}>Resolve</button>
+                            <button type="submit" class="btn btn-sm mt-8" style="background:#3a3f4a;color:#fff;border:1px solid #4a5060" {% if not can_resolve %}disabled title="{{ resolve_hint or 'Handle the screening case first' }}"{% endif %}>Resolve</button>
                         </div>
                     </div>
                 </form>

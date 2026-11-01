@@ -1216,33 +1216,75 @@ def _wc_context(wc):
             "can_resolve": bool(alert) and alert["status"] == "Handling" and alert["assigned_to"] == _actor()}
 
 
+def _wc_page(wc_case_id):
+    """(wc, context, screening case or None). A screening case (SCAN-…) is
+    shown in the console from its hits (id_screening.wc_view); resolving a
+    match there confirms the hit, the console's three verdicts only."""
+    if not wc_case_id.startswith("SCAN-"):
+        wc = _wc(wc_case_id)
+        return wc, _wc_context(wc), None
+    rec = _scan(wc_case_id)
+    wc = id_screening.wc_view(rec)
+    is_open = rec.get("status") != "closed"
+    return wc, {"wc": wc, "alert": None, "back_url": url_for("scan_result", scan_id=rec["id"]),
+                "can_resolve": is_open and bool(_levels() & {"L1", "L2"}), "wc_statuses": list(id_screening.FROM_WC_STATUS),
+                "resolve_hint": "The case is closed" if not is_open else "An L1 or L2 analyst resolves matches"}, rec
+
+
 @app.route("/wc/<wc_case_id>")
 def wc_case(wc_case_id):
-    wc = _wc(wc_case_id)
+    wc, ctx, _ = _wc_page(wc_case_id)
     status, mtype = request.args.get("status", ""), request.args.get("type", "")
     filtered = worldcheck.filter_matches(wc["matches"], status, mtype)
     page = worldcheck.paginate(filtered, int(request.args.get("page", "1") or 1))
     return render_template("wc_case.html", tab=request.args.get("tab", "worldcheck"), status=status, mtype=mtype,
-                           facets=worldcheck.facets(wc["matches"]), page=page, **_wc_context(wc))
+                           facets=worldcheck.facets(wc["matches"]), page=page, **ctx)
 
 
 @app.route("/wc/<wc_case_id>/match/<match_id>")
 def wc_match(wc_case_id, match_id):
-    wc = _wc(wc_case_id)
+    wc, ctx, rec = _wc_page(wc_case_id)
     m = worldcheck.find_match(wc, match_id) or abort(404)
     status, mtype = request.args.get("status", ""), request.args.get("type", "")
+    if rec:
+        who = rec["screening"]["person"]
+        client = {"country": who.get("issuing_country", ""), "nationality": who.get("nationality", "")}
+    else:
+        client = (KYC_BY_ID.get(wc["kyc_case_id"]) or {}).get("client")
     return render_template("wc_match.html", m=m, status=status, mtype=mtype,
                            nav=worldcheck.match_nav(wc, match_id, status, mtype),
-                           comparison=worldcheck.comparison_rows(wc, m, (KYC_BY_ID.get(wc["kyc_case_id"]) or {}).get("client")),
-                           unresolved=worldcheck.facets(wc["matches"])["status"]["Unresolved"], **_wc_context(wc))
+                           comparison=worldcheck.comparison_rows(wc, m, client),
+                           unresolved=worldcheck.facets(wc["matches"])["status"]["Unresolved"], **ctx)
 
 
 @app.route("/wc/<wc_case_id>/match/<match_id>/resolve", methods=["POST"])
 @role_required("L1", "L2")
 def wc_resolve(wc_case_id, match_id):
-    wc = _wc(wc_case_id)
-    ctx = _wc_context(wc)
+    wc, ctx, rec = _wc_page(wc_case_id)
     f = request.form
+    back = redirect(url_for("wc_match", wc_case_id=wc_case_id, match_id=match_id, status=f.get("status_filter", ""),
+                            type=f.get("type_filter", "")))
+    if rec:
+        status, risk, reason, comment = f.get("status", ""), f.get("risk", ""), f.get("reason", ""), f.get("comment", "").strip()
+        problem = ("The case is closed." if not ctx["can_resolve"] else "Pick a status." if status not in id_screening.FROM_WC_STATUS
+                   else "Pick a risk level." if risk not in vocab.WC_RISKS else "Select a reason." if reason not in vocab.WC_REASONS
+                   else "A review comment is required." if not comment else "")
+        err = [problem] if problem else []
+
+        def apply(r):
+            try:
+                id_screening.resolve(r, match_id, id_screening.FROM_WC_STATUS[status], comment, _actor(), risk, reason)
+            except ValueError as exc:
+                err.append(str(exc))
+        if not err:
+            rec = _screen_update(wc_case_id, apply)
+        if err:
+            flash(err[0], "error")
+        elif rec.get("status") == "closed":
+            flash(f"Match resolved. Every match is resolved: the case is closed as {rec['closed']['outcome']}.", "success")
+        else:
+            flash("Match resolved; the screening case shows it.", "success")
+        return back
     if not ctx["can_resolve"]:
         flash("Handle the screening case first — only its handler can resolve matches.", "error")
     else:
@@ -1251,24 +1293,28 @@ def wc_resolve(wc_case_id, match_id):
         if ok:
             _save("wc", wc)
             flash("Match resolved. Record the matching alert outcome on the screening case.", "success")
-    return redirect(url_for("wc_match", wc_case_id=wc_case_id, match_id=match_id, status=f.get("status_filter", ""),
-                            type=f.get("type_filter", "")))
+    return back
 
 
 @app.route("/wc/<wc_case_id>/export", methods=["POST"])
 def wc_export(wc_case_id):
-    wc = _wc(wc_case_id)
-    export = worldcheck.record_export(wc, _actor())
-    _save("wc", wc)
-    flash(f"Exported {export['filename']} — it is now available to attach in the EDD Review.", "success")
+    wc, _, rec = _wc_page(wc_case_id)
+    if rec:
+        export = {}
+        _screen_update(wc_case_id, lambda r: export.update(id_screening.wc_export(r, _actor())))
+        flash(f"Exported {export['filename']}.", "success")
+    else:
+        export = worldcheck.record_export(wc, _actor())
+        _save("wc", wc)
+        flash(f"Exported {export['filename']} — it is now available to attach in the EDD Review.", "success")
     return redirect(url_for("wc_case", wc_case_id=wc_case_id, tab="summary"))
 
 
 @app.route("/wc/<wc_case_id>/export.pdf")
 def wc_export_pdf(wc_case_id):
-    wc = _wc(wc_case_id)
-    alert = ALERT_BY_ID.get(wc["alert_case_id"])
-    pdf = render_wc_export(wc, alert, KYC_BY_ID.get(wc["kyc_case_id"]), _actor())
+    wc, _, rec = _wc_page(wc_case_id)
+    alert = None if rec else ALERT_BY_ID.get(wc["alert_case_id"])
+    pdf = render_wc_export(wc, alert, None if rec else KYC_BY_ID.get(wc["kyc_case_id"]), _actor())
     name = (wc["exports"][-1]["filename"] if wc["exports"] else f"WorldCheck_{wc['id'][:8]}.pdf")
     return Response(pdf, mimetype="application/pdf", headers={"Content-Disposition": f'inline; filename="{name}"'})
 

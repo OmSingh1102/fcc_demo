@@ -252,8 +252,9 @@ def outcome(case):
     return "True match" if "True match" in states else "Possible match" if "Possible match" in states else "Cleared"
 
 
-def resolve(case, uid, status, note, actor):
-    """An analyst's answer on one hit; closes the case when it was the last."""
+def resolve(case, uid, status, note, actor, risk="", reason=""):
+    """An analyst's answer on one hit (from the case page, or the World-Check
+    console with its risk and reason); closes the case when it was the last."""
     if case.get("status") == "closed":
         raise ValueError("The case is closed.")
     if status not in RESOLUTIONS:
@@ -263,6 +264,7 @@ def resolve(case, uid, status, note, actor):
         raise ValueError("No such hit on this case.")
     ai = hit.get("ai") or {}
     hit["resolution"] = {"status": status, "note": (note or "").strip()[:2000], "by": actor, "at": dates.now_str(),
+                         "risk": risk, "reason": reason,
                          "ai_suggested": ai.get("suggested", "") if ai.get("status") == "done" else "",
                          "agreed": ai.get("status") == "done" and ai.get("suggested") == status}
     if not open_hits(case):
@@ -279,3 +281,80 @@ def close(case, actor, note=""):
 
 def is_id(read):
     return bool(read) and read.get("document_type") != "Not an identity document" and bool(person(read)["name"])
+
+
+# ── the World-Check console view ─────────────────────────────────────────────
+# A screening case shown in the simulated World-Check console (wc_case.html,
+# wc_match.html), as the 1,000-case book shows its watchlist cases: the case
+# is the person on the ID, its matches are the hits. A stand-in hit is the
+# file's record built the way that book builds it (recon_book._match: key
+# data, places, biography, aliases, dates); a World-Check One hit from what
+# the API returned. Built from the case each time, never stored: the hit's
+# confirmation is the match's resolution, in the console's words.
+
+WC_STATUS = {"True match": "True positive", "Possible match": "Potential match", "False positive": "False positive"}
+FROM_WC_STATUS = {v: k for k, v in WC_STATUS.items()}
+
+
+def _wc_resolution(hit):
+    res = hit.get("resolution")
+    if not res:
+        return {"status": "Unresolved", "risk": "", "reason": "", "remark": "", "comment": "", "by": "", "at": ""}
+    return {"status": WC_STATUS[res["status"]], "risk": res.get("risk", ""), "reason": res.get("reason", ""),
+            "remark": res.get("reason", ""), "comment": res.get("note", ""), "by": res["by"], "at": res["at"]}
+
+
+def _wc_match(hit, key, matched_at):
+    from fincrime.data import recon_book, seed      # lazy: the data builders are heavy and import the engines
+    row = watchlist.row_of(hit["uid"]) if hit.get("source") == "stand-in" else None
+    if row:
+        m = recon_book._match(loader.build_case(row, 0), key)
+    else:
+        listed = hit["dob_text"].split(" (")[0]
+        m = seed.wc_match(key=key, wc_id=hit["uid"], name=hit["name"], types=("SIC",), gender="",
+                          dobs=[listed] if listed and listed != "Not listed" else [],
+                          citizenship=hit["places"].split(";")[0].split(" (")[0], country=hit["places"],
+                          category=(hit["category"] or "").upper(), bio=hit["narrative"], aliases=hit.get("aka") or [])
+    m.update(id=hit["uid"], strength=hit["score"] / 100, matched=matched_at, resolution=_wc_resolution(hit))
+    return m
+
+
+def wc_view(case):
+    """The case as the World-Check console's case and match pages read it."""
+    sc = case.get("screening") or {}
+    who = sc.get("person") or person(case.get("read"))
+    at = sc.get("at") or case["at"]
+    hits = sc.get("hits") or []
+    audit = [{"at": at, "actor": "screening", "action": "Case screened",
+              "detail": f"{len(hits)} record(s) matched on {sc.get('source_label') or 'World-Check'}."}]
+    for h in hits:
+        res = h.get("resolution")
+        if res:
+            how = ", ".join(x for x in (f"{res['risk']} risk" if res.get("risk") else "", res.get("reason", "")) if x)
+            audit.append({"at": res["at"], "actor": res["by"], "action": f"Match resolved: {WC_STATUS[res['status']]}",
+                          "detail": f"{h['name']} (WC {h['uid']}){' — ' + how if how else ''}. {res.get('note', '')}".strip()})
+    for e in case.get("wc_exports") or []:
+        audit.append({"at": e["at"], "actor": e["by"], "action": "Case exported", "detail": e["filename"]})
+    audit.sort(key=lambda e: e["at"])
+    dob = who.get("dob", "") if len(who.get("dob", "")) == 10 and who["dob"][4] == "-" else ""
+    return {"id": case["id"], "key": case["id"], "alert_case_id": "", "kyc_case_id": "",
+            "primary_name": who.get("name", ""), "gender": {"M": "Male", "F": "Female"}.get((who.get("sex") or "").upper()[:1], ""),
+            "dob": dob, "group": "ID screening", "assignee": "Case Unassigned", "rating": "Not Rated", "ongoing_screening": "Off",
+            "last_updated": max([at] + [h["resolution"]["at"] for h in hits if h.get("resolution")]),
+            "case_details": {"Source": "World-Check One" if sc.get("source") == "World-Check One" else "Stand-in (reconciliation log)",
+                             "DocumentType": who.get("document_type", ""), "DocumentNo": who.get("document_number", ""),
+                             "Nationality": who.get("nationality", ""), "IssuingCountry": who.get("issuing_country", ""),
+                             "UploadedBy": case.get("by", ""), "CaseStatus": "Closed" if case.get("status") == "closed" else "Open"},
+            "matches": [_wc_match(h, f"{case['id']}-{h['uid']}", at) for h in hits],
+            "exports": case.get("wc_exports") or [], "audit": audit}
+
+
+def wc_export(case, actor):
+    """A World-Check export of the case, kept with it (the console's Export)."""
+    now = dates.now_str()
+    name = "".join(ch for ch in (person(case.get("read"))["name"] or case["id"]).title() if ch.isalnum())
+    exports = case.setdefault("wc_exports", [])
+    export = {"id": f"exp-{len(exports) + 1}", "filename": f"WorldCheck_{name}_{now.replace('-', '').replace(':', '').replace(' ', '_')}.pdf",
+              "at": now, "by": actor}
+    exports.append(export)
+    return export
