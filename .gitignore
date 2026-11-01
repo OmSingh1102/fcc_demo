@@ -9,6 +9,7 @@ __pycache__/
 # Runtime state the app writes and re-seeds on its own: every action an analyst
 # takes on a case. The wildcard covers SQLite's -wal and -shm sidecars.
 fincrime_state.db*
+fincrime_screening.db*
 
 # Deployment settings: session signing key, real passwords. The example file is
 # the documented template and is the one exception, hence the negation.

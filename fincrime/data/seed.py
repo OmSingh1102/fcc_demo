@@ -683,7 +683,10 @@ def assemble(book="demo"):
 
     `book` picks the case book: "demo" is the nineteen scripted scenarios
     plus the filler rows; "file" is the 1,000 cases of the reconciliation
-    log (fincrime/data/recon_book.py). The analysts are the same for both."""
+    log (fincrime/data/recon_book.py); "screening" has no case at all (they
+    come from uploaded IDs). The analysts are the same for every book."""
+    if book == "screening":
+        return copy.deepcopy(ANALYSTS), [], [], []
     if book == "file":
         from fincrime.data import recon_book   # lazy: it imports the builders above
         kyc, alerts, wc = recon_book.build()

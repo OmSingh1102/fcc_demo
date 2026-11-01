@@ -373,12 +373,18 @@ def sop_changes(version):
 
 
 def system(version):
-    """The model's instructions: the SOP, the client's variance reference
-    as its playbook, and how to answer."""
+    """The model's instructions under one SOP version of the files."""
+    return instructions(sop_text(version))
+
+
+def instructions(sop_body):
+    """The model's instructions: the SOP (a version's text, or one edited in
+    the console), the client's variance reference as its playbook, and how
+    to answer."""
     ref = reference()
     playbook = "\n".join(f"- {r['Passport Country']} · {r['Field']} · {r['Variance Type']}: {r['What happens']} "
                          f"Control: {r['Recommended control']}" for r in ref["rows"])
-    return (sop_text(version) + "\n\n## Variance reference (the client's playbook)\n" + playbook
+    return (sop_body.strip() + "\n\n## Variance reference (the client's playbook)\n" + playbook
             + "\n\n## Answer\nname_variance and address_variance: one type each, exactly as the reference names it, or "
               f"\"{NONE}\". dob_finding: one short sentence. outcome: clear, true_match, request_documents or escalate. "
               "confidence: 0-100 for the outcome. reasons: at most three short facts. request: the document to ask the "

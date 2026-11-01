@@ -5,8 +5,11 @@ book. Bump it whenever a builder's output shape changes — a stored record
 from an older shape would be missing keys the templates read, and clearing
 the store is the honest answer.
 
-Two case books (CONSOLE_CASES in the environment picks one; app.py reads it):
-"file", the default, is the 1,000 cases of the reconciliation log
+Three case books (CONSOLE_CASES in the environment picks one; app.py reads it):
+"screening", the default, starts with no case: each ID uploaded on Scan ID
+becomes one, screened against the World-Check records of the reconciliation
+log (fincrime/watchlist.py) or World-Check One itself once a key is entered;
+"file" is the 1,000 cases of the reconciliation log
 (fincrime/data/recon_book.py); "demo" is the nineteen scripted scenarios and
 the filler rows the test suite and the original walkthrough use.
 """
@@ -14,8 +17,8 @@ from fincrime.data import vocab
 from fincrime.data.seed import assemble
 
 SEED_VERSION = "2026-10-11.1"
-BOOKS = ("file", "demo")
-DEFAULT_BOOK = "file"
+BOOKS = ("screening", "file", "demo")
+DEFAULT_BOOK = "screening"
 
 
 def book_from(value):

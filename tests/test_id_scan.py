@@ -1,7 +1,6 @@
 """Scan an ID (fincrime/documents/id_scan.py and /scan): the checks on a
-read, the MRZ transcription counted out to 44, the out-of-step OCR line,
-and the pages (upload, result, JSON, delete). No network: the model call
-and Tesseract are stood in for.
+read, the MRZ transcription counted out to 44, and the pages (upload,
+result, JSON, delete). No network: the model call is stood in for.
 
 Run:  .venv\\Scripts\\python.exe -m unittest -v tests.test_id_scan
 """
@@ -46,7 +45,7 @@ class CheckTests(unittest.TestCase):
     today = date(2026, 10, 28)
 
     def test_a_good_passport_passes(self):
-        cs = id_scan.checks(a_read(), {"available": False}, self.today)
+        cs = id_scan.checks(a_read(), self.today)
         s = states(cs)
         for label in ("Photo", "Main fields", "Expiry", "Age", "MRZ check digits (the model's transcription)",
                       "Printed fields against the MRZ"):
@@ -54,10 +53,10 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(id_scan.verdict({"read": a_read(), "checks": cs}), "Check" if "warn" in s.values() else "Pass")
 
     def test_expired_misread_and_minor(self):
-        s = states(id_scan.checks(a_read(date_of_expiry="2020-01-01", document_number="S3321057"), {"available": False}, self.today))
+        s = states(id_scan.checks(a_read(date_of_expiry="2020-01-01", document_number="S3321057"), self.today))
         self.assertEqual(s["Expiry"], "fail")
         self.assertEqual(s["Printed fields against the MRZ"], "fail")      # the printed number is not the zone's
-        s = states(id_scan.checks(a_read(date_of_birth="2012-01-01"), {"available": False}, self.today))
+        s = states(id_scan.checks(a_read(date_of_birth="2012-01-01"), self.today))
         self.assertEqual(s["Age"], "warn")
 
     def test_a_miscounted_filler_run_is_counted_out(self):
@@ -65,15 +64,18 @@ class CheckTests(unittest.TestCase):
         self.assertEqual((len(one), len(two)), (44, 44))
         self.assertTrue(ocr.parse(one, two)["valid"])
 
-    def test_an_out_of_step_ocr_line_is_not_held_against_the_names(self):
-        tess = {"available": True, "text": "", "mrz": ocr.parse("PLTINDUPADHYAY<<ASHISH<<<<<<<<<<<<<<<<<<<<<<", LINE2)}
-        s = states(id_scan.checks(a_read(), tess, self.today))
-        self.assertEqual(s["OCR's first MRZ line"], "info")
-        self.assertEqual(s["Model's read against OCR"], "ok")
+    def test_no_ocr_engine_runs(self):
+        """The read is the model's alone: no Tesseract call, no OCR check."""
+        with mock.patch.object(id_scan, "model_ready", lambda: False):
+            out = id_scan.scan(b"jpeg")
+        self.assertIsNone(out["read"])
+        self.assertNotIn("tesseract", out)
+        self.assertIn("LLM_FOUNDRY_KEY", out["error"])
+        self.assertFalse([c for c in id_scan.checks(a_read(), self.today) if "OCR" in c["label"] or "Tesseract" in c["detail"]])
 
     def test_a_document_that_is_not_an_id(self):
         read = dict(a_read(), document_type="Not an identity document", fields={k: "" for k, _ in id_scan.FIELDS}, mrz=[])
-        cs = id_scan.checks(read, {"available": False}, self.today)
+        cs = id_scan.checks(read, self.today)
         self.assertEqual(states(cs)["Identity document"], "fail")
         self.assertEqual(id_scan.verdict({"read": read, "checks": cs}), "Fail")
 
@@ -105,9 +107,10 @@ class PageTests(unittest.TestCase):
         self.assertIn("Scan ID", page)                         # the menu entry
         result = {"read": a_read(), "model": {"model": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "tokens_in": 1100,
                                               "tokens_out": 300, "cost": 0.001, "seconds": 5.0},
-                  "tesseract": {"available": False, "text": "", "mrz": None}, "error": ""}
-        result["checks"] = id_scan.checks(result["read"], result["tesseract"])
-        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None: dict(result)):
+                  "error": ""}
+        result["checks"] = id_scan.checks(result["read"])
+        no_call = lambda case_id, who, hit, sop, settings: {"status": "failed", "error": "no call in the suite", "sop": sop["version"]}
+        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None: dict(result)),                 mock.patch.object(fcc.id_screening, "decide", no_call):
             r = c.post("/scan", data={"image": (io.BytesIO(self.png()), "id.png"), "model": "gemini-2.5-flash"},
                        content_type="multipart/form-data")
         self.assertEqual(r.status_code, 302)

@@ -14,7 +14,9 @@ QC, Routing) · Analytics · Demo affordances · Main.
 import hmac
 import json
 import os
+import queue
 import re
+import secrets
 import threading
 import time
 from functools import wraps
@@ -30,7 +32,7 @@ except ImportError:  # pragma: no cover
     pass
 
 # ─── Modular imports ───────────────────────────────────────────────────────────
-from fincrime.adapters import idv_vendor
+from fincrime.adapters import idv_vendor, world_check
 from fincrime.analytics.audit_log import AuditLogConsole
 from fincrime.analytics.case_list import PAGE_SIZES, PER_PAGE, CaseListConsole, read_query as read_case_query
 from fincrime.analytics.ai_console import AiScreeningConsole
@@ -40,7 +42,7 @@ from fincrime.analytics.queues import QueueConsole
 from fincrime.analytics.routing_console import RoutingConsole
 from fincrime.analytics.trackers import TrackerConsole, to_csv
 from fincrime.analytics.work import WorkConsole
-from fincrime import benchmark, decision_model
+from fincrime import benchmark, decision_model, id_screening, watchlist
 from fincrime.data import vocab
 from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
@@ -87,12 +89,26 @@ app.jinja_env.filters.update(wc_date=dates.wc_date, wc_dt=dates.wc_datetime, who
 # as the actor — it is not a security control.
 DEMO_PASSWORD = os.environ.get("STRAIVE_DEMO_PASSWORD", "1234")
 DEMO_MODE = os.environ.get("DEMO_MODE", "1") == "1"
-# The console's case book: "file" (the default) is the 1,000 cases of the
+# The console's case book: "screening" (the default) starts with no case and
+# makes one of every ID uploaded on Scan ID, screened against World-Check
+# (the World-Check records of the reconciliation log until a World-Check One
+# key is entered on Settings); "file" is the 1,000 cases of the
 # reconciliation log the client sent; "demo" is the nineteen scripted
 # scenarios and their filler, which the test suite and the original
 # walkthrough use. Read once; /reset reloads the same book.
 CASE_BOOK = book_from(os.environ.get("CONSOLE_CASES"))
-CASE_BOOK_LABEL = {"file": "reconciliation log (1,000 cases)", "demo": "scripted demo (19 scenarios + filler)"}
+CASE_BOOK_LABEL = {"screening": "ID screening (no case until an ID is uploaded)",
+                   "file": "reconciliation log (1,000 cases)", "demo": "scripted demo (19 scenarios + filler)"}
+# The screening book keeps its own database, so its empty start never
+# touches the work stored on the 1,000 cases (switching books clears the
+# console's records of the database it opens).
+SCREENING_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fincrime_screening.db")
+if CASE_BOOK == "screening" and not os.environ.get("FCC_STATE_DB"):
+    StateStore.path = SCREENING_DB
+
+
+def _home_endpoint():
+    return "scan_id" if CASE_BOOK == "screening" else "kyc_list"
 # The records the console owns in the state store; a new seed stamp clears
 # only these.
 CONSOLE_KINDS = ("kyc", "alert", "wc", "analyst", "settings", "upload")
@@ -136,7 +152,7 @@ def _safe_next(target: str, fallback=None) -> str:
     """Only follow same-site paths. Rejects absolute and protocol-relative URLs."""
     if target and target.startswith("/") and target[1:2] not in ("/", "\\"):
         return target
-    return fallback or url_for("kyc_list")
+    return fallback or url_for(_home_endpoint())
 
 
 def _back(fallback=None) -> str:
@@ -205,7 +221,8 @@ TOP_TABS = [
 _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"), ("wc_", "ns_queue"),
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
-              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"), ("model_evaluation", "model_evaluation"), ("scan", "scan_id"))
+              ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"), ("model_evaluation", "model_evaluation"), ("scan", "scan_id"),
+              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"))
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -226,10 +243,27 @@ def _side_nav():
     """The left menu in sections: the cases an analyst works, the screening,
     the hub SOP 5.2 asks for on top of the as-is screens, the reports."""
     owner = _nav_owner(request.endpoint)
+    setup = [
+        {"label": "Screening SOP", "title": "The SOP the AI decides World-Check hits by", "icon": "book",
+         "endpoint": "screening_sop", "active": owner == "screening_sop"},
+        {"label": "Settings", "title": "World-Check connection, models, search", "icon": "sliders",
+         "endpoint": "screening_settings", "active": owner == "screening_settings"},
+    ]
+    insights = [
+        {"label": "Architecture", "icon": "layers", "endpoint": "architecture", "active": owner == "architecture"},
+        {"label": "Model evaluation", "icon": "activity", "endpoint": "model_evaluation", "active": owner == "model_evaluation"}]
+    if CASE_BOOK == "screening":
+        return [
+            {"title": "Screening", "items": [
+                {"label": "Cases", "title": "Upload an ID, screen it on World-Check", "icon": "user-check", "endpoint": "scan_id",
+                 "active": owner == "scan_id", "count": sum(1 for s in _scans() if s.get("status") == "open")}]},
+            {"title": "Setup", "items": setup},
+            {"title": "Insights", "items": insights},
+        ]
     levels = _levels()
     tenant = _tenant()
     actor = _actor()
-    open_l1 = sum(1 for c in KYC_CASES if c["tenant"] == tenant and c["status"] in ("DataConfirming", "DataScreening"))
+    open_l1 =sum(1 for c in KYC_CASES if c["tenant"] == tenant and c["status"] in ("DataConfirming", "DataScreening"))
     open_l2 = sum(1 for c in KYC_CASES if c["tenant"] == tenant and c["status"] == "DataEscalatingL2"
                   and not segregation.hidden_from(c, actor, "L2"))
     cases = [
@@ -246,7 +280,7 @@ def _side_nav():
         {"label": "Name Screening", "icon": "search", "endpoint": "ns_queue", "active": owner == "ns_queue"},
         {"label": "AI Screening", "icon": "check-circle", "endpoint": "ai_screening_page", "active": owner == "ai_screening"},
         {"label": "SOP rules", "icon": "sliders", "endpoint": "sop_page", "active": owner == "sop_page"},
-    ]
+    ] + setup
     hub = [
         {"label": "Pipeline", "icon": "trending-up", "endpoint": "pipeline", "active": owner == "pipeline"},
         {"label": "Trackers", "icon": "list", "endpoint": "trackers", "active": owner == "trackers"},
@@ -263,9 +297,7 @@ def _side_nav():
         {"title": "Screening", "items": screening},
         {"title": "Operations Hub", "items": hub},
         {"title": "Insights", "items": [
-            {"label": "Analytics", "icon": "bar-chart", "endpoint": "analytics", "active": owner == "analytics"},
-            {"label": "Architecture", "icon": "layers", "endpoint": "architecture", "active": owner == "architecture"},
-            {"label": "Model evaluation", "icon": "activity", "endpoint": "model_evaluation", "active": owner == "model_evaluation"}]},
+            {"label": "Analytics", "icon": "bar-chart", "endpoint": "analytics", "active": owner == "analytics"}] + insights},
     ]
 
 
@@ -278,6 +310,7 @@ KYC_CASES, ALERT_CASES, WC_CASES = [], [], []
 KYC_BY_ID, ALERT_BY_ID, WC_BY_ID = {}, {}, {}
 AI_SETTINGS = {}         # the AI screening rules' switches; one stored record, kind "settings"
 SOP_SETTINGS = {}        # the SOP's parameters (engines/sop); one stored record, kind "settings", id "sop"
+SCREEN_SETTINGS = {}     # ID screening: models, search, World-Check account (id_screening); kind "settings", id "screening"
 
 
 def _bump_state():
@@ -349,6 +382,9 @@ def _load_seed():
     restored = (StateStore.restore("kyc", KYC_BY_ID, skip=skip) + StateStore.restore("alert", ALERT_BY_ID, skip=skip)
                 + StateStore.restore("wc", WC_BY_ID, skip=skip) + StateStore.restore("analyst", ANALYST_BY_KEY)
                 + StateStore.restore("settings", {AI_SETTINGS["id"]: AI_SETTINGS, SOP_SETTINGS["id"]: SOP_SETTINGS}))
+    SCREEN_SETTINGS.clear()
+    SCREEN_SETTINGS.update(id_screening.settings_from(
+        next((r for r in StateStore.records("settings") if r.get("id") == id_screening.SETTINGS_ID), None)))
     if restored:
         app.logger.info("Restored %d stored record(s) onto the seed.", restored)
         relabelled = relabel(KYC_CASES, ALERT_CASES, WC_CASES, ANALYSTS)
@@ -554,11 +590,11 @@ def _inject_nav():
         "tenants": vocab.TENANTS,
         "tenant": _tenant() if signed_in else "ttlive",
         "analyst_tenants": a.get("tenants") or ["ttlive"],
-        "top_tabs": [dict(t, active=(t.get("endpoint") == "kyc_list")) for t in TOP_TABS],
+        "top_tabs": [dict(t, endpoint=_home_endpoint(), active=True) for t in TOP_TABS],
         "side_nav": _side_nav() if signed_in else [],
         "role_label": " / ".join(a.get("roles", [])),
         "user_initials": initials(a.get("name", "")),
-        "home_url": url_for("kyc_list") if signed_in else url_for("portal"),
+        "home_url": url_for(_home_endpoint()) if signed_in else url_for("portal"),
         "demo_mode": DEMO_MODE,
         "switch_users": ANALYSTS if (DEMO_MODE and signed_in) else [],
         "all_analysts": ANALYSTS,
@@ -581,7 +617,7 @@ def state_version():
 @app.route("/")
 def portal():
     """The console's front door: the case list when signed in, else sign-in."""
-    return redirect(url_for("kyc_list" if session.get("user") in ANALYST_BY_KEY else "login"))
+    return redirect(url_for(_home_endpoint() if session.get("user") in ANALYST_BY_KEY else "login"))
 
 
 def _login_page(error="", selected="", next_url="", status=200):
@@ -1598,7 +1634,8 @@ def _agent_autostart():
     if AI_AGENT["autostarted"] or app.testing:
         return
     AI_AGENT["autostarted"] = True
-    if ai_review.configured():
+    _screen_resume()
+    if ai_review.configured() and CASE_BOOK != "screening":
         _agent_start("System")
 
 
@@ -1791,22 +1828,140 @@ def architecture():
                            llm_ready=ai_review.configured(), ocr_ready=ocr.available())
 
 
-# ─── Scan an ID: one document read by OCR, with no case behind it ──────────────
+# ─── Scan ID: an uploaded ID read, screened on World-Check, decided by the AI ──
+# Each upload is a case (StateStore kind "scan"): the read (documents/id_scan),
+# the World-Check hits (id_screening.search: World-Check One once a key is on
+# Settings, else the stand-in watchlist), the model's decision on each hit
+# under the current SOP, and the analyst's confirmation. The model calls run
+# on worker threads so the upload returns at once; a record is only changed
+# under _SCREEN_LOCK, read fresh from the store, so a decision landing while an
+# analyst confirms another hit loses neither.
+_SCREEN_LOCK = threading.Lock()
+_SCREEN_JOBS = queue.Queue()
+_SCREEN_WORKERS = []
+SCREEN_WORKERS = 3
+
+
 def _scans():
     return sorted(StateStore.records("scan"), key=lambda r: r.get("at", ""), reverse=True)
 
 
+def _scan_or_none(scan_id):
+    return next((r for r in StateStore.records("scan") if r.get("id") == scan_id), None)
+
+
 def _scan(scan_id):
-    return next((r for r in StateStore.records("scan") if r.get("id") == scan_id), None) or abort(404)
+    return _scan_or_none(scan_id) or abort(404)
+
+
+def _sop_stored():
+    return StateStore.records(id_screening.SOP_KIND)
+
+
+def _screen_update(scan_id, change):
+    """Apply `change` to the stored record and save it; the record, or None."""
+    with _SCREEN_LOCK:
+        rec = _scan_or_none(scan_id)
+        if rec is None:
+            return None
+        change(rec)
+        _save("scan", rec)
+        return rec
+
+
+def _hit(rec, uid):
+    return next((h for h in (rec.get("screening") or {}).get("hits") or [] if h["uid"] == uid), None)
+
+
+def _screen_job(job):
+    """One hit decided by the model; dropped if the hit was queued again
+    (a newer SOP) or confirmed meanwhile."""
+    scan_id, uid, token = job
+    rec = _scan_or_none(scan_id)
+    hit = rec and _hit(rec, uid)
+    if not hit or (hit.get("ai") or {}).get("job") != token or hit.get("resolution"):
+        return
+    ai = id_screening.decide(scan_id, rec["screening"]["person"], hit, id_screening.sop_current(_sop_stored()),
+                             dict(SCREEN_SETTINGS))
+
+    def land(r):
+        h = _hit(r, uid)
+        if h and (h.get("ai") or {}).get("job") == token and not h.get("resolution"):
+            h["ai"] = dict(ai, job=token)
+    _screen_update(scan_id, land)
+
+
+def _screen_worker():
+    while True:
+        job = _SCREEN_JOBS.get()
+        try:
+            _screen_job(job)
+        except Exception:                   # one failed job never stops the worker
+            app.logger.exception("Screening decision %s failed", job)
+        finally:
+            _SCREEN_JOBS.task_done()
+
+
+def _screen_queue(scan_id, uids=None, why=""):
+    """Send the unconfirmed hits (or those of `uids`) of an open case to the
+    model. Returns how many were sent."""
+    jobs = []
+
+    def mark(rec):
+        for h in id_screening.open_hits(rec):
+            if uids is None or h["uid"] in uids:
+                h["ai"] = {"status": "pending", "job": secrets.token_hex(6), "queued_at": dates.now_str(), "why": why}
+                jobs.append((scan_id, h["uid"], h["ai"]["job"]))
+    _screen_update(scan_id, mark)
+    if app.testing:                         # the suite wants the answer before the next line
+        for j in jobs:
+            _screen_job(j)
+        return len(jobs)
+    while len(_SCREEN_WORKERS) < SCREEN_WORKERS:
+        t = threading.Thread(target=_screen_worker, name=f"screening-{len(_SCREEN_WORKERS) + 1}", daemon=True)
+        _SCREEN_WORKERS.append(t)
+        t.start()
+    for j in jobs:
+        _SCREEN_JOBS.put(j)
+    return len(jobs)
+
+
+def _screen_resume():
+    """After a restart: hits that were waiting on the model are sent again."""
+    for rec in _scans():
+        waiting = [h["uid"] for h in id_screening.open_hits(rec) if (h.get("ai") or {}).get("status") == "pending"]
+        if waiting:
+            _screen_queue(rec["id"], waiting, why="restart")
+
+
+def _screen_search(rec):
+    """The World-Check search for the person the ID names (hits confirmed
+    before keep their confirmation)."""
+    who = id_screening.person(rec.get("read"))
+    hits, source, error, csid = id_screening.search(who, SCREEN_SETTINGS)
+    before = {h["uid"]: h for h in (rec.get("screening") or {}).get("hits") or []}
+    for h in hits:
+        if before.get(h["uid"], {}).get("resolution"):
+            h.update(ai=before[h["uid"]].get("ai"), resolution=before[h["uid"]]["resolution"])
+    rec["screening"] = {"person": who, "source": source, "source_label": id_screening.source_label(SCREEN_SETTINGS),
+                        "at": dates.now_str(), "hits": hits, "error": error, "case_system_id": csid,
+                        "searched": {k: who[k] for k in ("name", "dob", "sex", "nationality")}}
 
 
 @app.route("/scan", methods=["GET", "POST"])
 def scan_id():
-    """Upload one ID image: a vision model reads every field, Tesseract the
-    passport's MRZ beside it, and the checks run (documents/id_scan)."""
+    """The cases, and the upload: a vision model reads the ID
+    (documents/id_scan), the person is searched on World-Check, and the
+    model decides each hit under the SOP (id_screening)."""
     if request.method == "GET":
-        return render_template("scan.html", models=id_scan.models(), default_model=id_scan.DEFAULT_MODEL,
-                               model_ready=id_scan.model_ready(), ocr_ready=ocr.available(), scans=_scans()[:15])
+        scans = _scans()
+        status = request.args.get("status", "")
+        shown = [s for s in scans if not status or s.get("status", "open") == status]
+        return render_template("scan.html", models=id_scan.models(), default_model=SCREEN_SETTINGS["reader_model"],
+                               model_ready=id_scan.model_ready(), scans=shown, status=status,
+                               counts={"open": sum(1 for s in scans if s.get("status", "open") == "open"),
+                                       "closed": sum(1 for s in scans if s.get("status") == "closed"), "all": len(scans)},
+                               source=id_screening.source_label(SCREEN_SETTINGS), outcome=id_screening.outcome)
     f = request.files.get("image")
     if not f or not f.filename:
         flash("Choose a photo or scan of the ID document.", "error")
@@ -1815,20 +1970,88 @@ def scan_id():
     if not ok:
         return redirect(url_for("scan_id"))
     jpeg, info = res
-    result = id_scan.scan(jpeg, request.form.get("model"))
+    result = id_scan.scan(jpeg, request.form.get("model") or SCREEN_SETTINGS["reader_model"])
     at = dates.now_str()
     sid = "SCAN-" + "".join(ch for ch in at if ch.isdigit()) + "-" + info["sha256"][:6].upper()
-    record = dict(result, id=sid, at=at, by=_actor(), file=f.filename[:120], info=info,
+    record = dict(result, id=sid, at=at, by=_actor(), file=f.filename[:120], info=info, status="open",
                   image=uploads.store("scans", sid, jpeg), verdict=id_scan.verdict(result))
+    if id_screening.is_id(result["read"]):
+        _screen_search(record)
     _save("scan", record)
     if result["error"]:
         flash(result["error"], "error")
+    elif (record.get("screening") or {}).get("error"):
+        flash(record["screening"]["error"], "error")
+    _screen_queue(sid, why="upload")
     return redirect(url_for("scan_result", scan_id=sid))
 
 
 @app.route("/scan/<scan_id>")
 def scan_result(scan_id):
-    return render_template("scan_result.html", s=_scan(scan_id), fields=id_scan.FIELDS)
+    rec = _scan(scan_id)
+    waiting = any((h.get("ai") or {}).get("status") == "pending" for h in id_screening.open_hits(rec))
+    return render_template("scan_result.html", s=rec, fields=id_scan.FIELDS, resolutions=id_screening.RESOLUTIONS,
+                           waiting=waiting, outcome=id_screening.outcome(rec), sop=id_screening.sop_current(_sop_stored()),
+                           live=id_screening.live(SCREEN_SETTINGS))
+
+
+@app.route("/scan/<scan_id>/screen", methods=["POST"])
+def scan_screen(scan_id):
+    """Search World-Check again (after a failed call, or a change on Settings)."""
+    rec = _scan(scan_id)
+    if rec.get("status") == "closed" or not id_screening.is_id(rec.get("read")):
+        flash("Only an open case with a read ID can be searched again.", "error")
+        return redirect(url_for("scan_result", scan_id=scan_id))
+    rec = _screen_update(scan_id, _screen_search)
+    n = _screen_queue(scan_id, why="searched again")
+    flash(rec["screening"]["error"] or f"Searched again on {rec['screening']['source_label']}: "
+          f"{len(rec['screening']['hits'])} hit(s); {n} sent to the AI.", "error" if rec["screening"]["error"] else "success")
+    return redirect(url_for("scan_result", scan_id=scan_id))
+
+
+@app.route("/scan/<scan_id>/hits/<uid>/ai", methods=["POST"])
+def scan_hit_ai(scan_id, uid):
+    _scan(scan_id)
+    n = _screen_queue(scan_id, [uid], why="asked again")
+    flash("Sent to the AI again." if n else "That hit is confirmed already, or the case is closed.", "success" if n else "error")
+    return redirect(url_for("scan_result", scan_id=scan_id) + f"#hit-{uid}")
+
+
+@app.route("/scan/<scan_id>/hits/<uid>/resolve", methods=["POST"])
+def scan_hit_resolve(scan_id, uid):
+    """The analyst confirms one hit: true match, possible match, false positive."""
+    _scan(scan_id)
+    err = []
+
+    def apply(rec):
+        try:
+            id_screening.resolve(rec, uid, request.form.get("status", ""), request.form.get("note", ""), _actor())
+        except ValueError as exc:
+            err.append(str(exc))
+    rec = _screen_update(scan_id, apply)
+    if err:
+        flash(err[0], "error")
+    elif rec.get("status") == "closed":
+        flash(f"Hit confirmed. Every hit is confirmed: case closed as {rec['closed']['outcome']}.", "success")
+    else:
+        flash("Hit confirmed.", "success")
+    return redirect(url_for("scan_result", scan_id=scan_id) + ("" if err or rec.get("status") == "closed" else f"#hit-{uid}"))
+
+
+@app.route("/scan/<scan_id>/close", methods=["POST"])
+def scan_close(scan_id):
+    """Close a case with no hit (the analyst confirms there is none)."""
+    _scan(scan_id)
+    err = []
+
+    def apply(rec):
+        try:
+            id_screening.close(rec, _actor(), request.form.get("note", ""))
+        except ValueError as exc:
+            err.append(str(exc))
+    rec = _screen_update(scan_id, apply)
+    flash(err[0] if err else f"Case closed as {rec['closed']['outcome']}.", "error" if err else "success")
+    return redirect(url_for("scan_result", scan_id=scan_id))
 
 
 @app.route("/scan/<scan_id>/image")
@@ -1845,16 +2068,21 @@ def scan_image(scan_id):
 
 @app.route("/scan/<scan_id>/data.json")
 def scan_json(scan_id):
-    """What the scan fetched, for another system: the document, its fields,
-    the MRZ, the checks."""
+    """The case for another system: the document, its fields, the checks,
+    the World-Check hits with the AI's decision and the analyst's."""
     rec = _scan(scan_id)
     read = rec.get("read") or {}
-    mrz = (rec.get("tesseract") or {}).get("mrz")
-    body = {"scan_id": rec["id"], "scanned_at": rec["at"], "verdict": rec["verdict"],
+    sc = rec.get("screening") or {}
+    body = {"scan_id": rec["id"], "scanned_at": rec["at"], "verdict": rec["verdict"], "status": rec.get("status", "open"),
+            "outcome": id_screening.outcome(rec) if rec.get("status") == "closed" else None,
             "document_type": read.get("document_type", ""), "issuing_country": read.get("issuing_country", ""),
             "fields": read.get("fields", {}), "uncertain": read.get("uncertain", []), "mrz": read.get("mrz", []),
-            "ocr_mrz": mrz and {"lines": mrz["lines"], "valid": mrz["valid"], "fields": mrz["fields"]},
-            "checks": rec.get("checks", []), "model": rec.get("model")}
+            "checks": rec.get("checks", []), "model": rec.get("model"),
+            "screening": sc and {"source": sc.get("source"), "searched": sc.get("searched"), "at": sc.get("at"), "error": sc.get("error"),
+                                 "hits": [{k: h.get(k) for k in ("uid", "name", "aka", "dob_text", "places", "category", "score",
+                                                                  "strength", "dob_result", "country_result", "ai", "resolution")}
+                                          for h in sc.get("hits") or []]},
+            "closed": rec.get("closed")}
     return Response(json.dumps(body, indent=2, ensure_ascii=False), mimetype="application/json",
                     headers={"Cache-Control": "no-store, private", "Content-Disposition": f'attachment; filename="{scan_id}.json"'})
 
@@ -1866,10 +2094,100 @@ def scan_delete(scan_id):
         os.remove(os.path.join(uploads.base(), rec["image"]))
     except (OSError, KeyError):
         pass
-    StateStore.delete("scan", [scan_id])
+    with _SCREEN_LOCK:
+        StateStore.delete("scan", [scan_id])
     _bump_state()
-    flash(f"Scan {scan_id} and its image deleted.", "success")
+    flash(f"Case {scan_id} and its image deleted.", "success")
     return redirect(url_for("scan_id"))
+
+
+# ─── The screening SOP and settings ─────────────────────────────────────────────
+@app.route("/screening/sop", methods=["GET", "POST"])
+def screening_sop():
+    """The SOP the AI decides hits by: read it, or (the QC lead) save a new
+    version, which sends every open case's unconfirmed hits to the AI again."""
+    stored = _sop_stored()
+    if request.method == "POST":
+        if "QC" not in _levels():
+            flash("Only the QC lead saves a new SOP version.", "error")
+            return redirect(url_for("screening_sop"))
+        try:
+            rec = id_screening.sop_new(stored, request.form.get("text", ""), request.form.get("note", ""), _actor())
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("screening_sop"))
+        _save(id_screening.SOP_KIND, rec)
+        sent = sum(_screen_queue(s["id"], why=f"SOP {rec['version']}") for s in _scans() if id_screening.open_hits(s))
+        flash(f"SOP {rec['version']} saved and in force. "
+              + (f"{sent} unconfirmed hit(s) on open cases sent to the AI again under it." if sent else "No open case has an unconfirmed hit."),
+              "success")
+        return redirect(url_for("screening_sop"))
+    versions = id_screening.sop_versions(stored)
+    return render_template("screening_sop.html", current=versions[-1], versions=list(reversed(versions)),
+                           can_edit="QC" in _levels())
+
+
+def _masked(value):
+    return ("•" * 8 + value[-4:]) if value and len(value) > 4 else ("•" * len(value or ""))
+
+
+@app.route("/screening/settings", methods=["GET", "POST"])
+def screening_settings():
+    """The models, the search, the World-Check One account (QC lead edits)."""
+    s = SCREEN_SETTINGS
+    if request.method == "POST":
+        if "QC" not in _levels():
+            flash("Only the QC lead changes the settings.", "error")
+            return redirect(url_for("screening_settings"))
+        f = request.form
+        reader_ids = {m["id"] for m in id_scan.models()}
+        decision_ids = {m["id"] for m in id_screening.decision_models()}
+        try:
+            examples = int(f.get("examples", s["examples"]))
+            threshold = int(f.get("name_threshold", s["name_threshold"]))
+            max_hits = int(f.get("max_hits", s["max_hits"]))
+        except ValueError:
+            flash("Examples, name score and hits are whole numbers.", "error")
+            return redirect(url_for("screening_settings"))
+        if not (0 <= examples <= 12 and 50 <= threshold <= 100 and 1 <= max_hits <= 20):
+            flash("Examples 0-12, name score 50-100, hits 1-20.", "error")
+            return redirect(url_for("screening_settings"))
+        s.update(reader_model=f.get("reader_model") if f.get("reader_model") in reader_ids else s["reader_model"],
+                 decision_model=f.get("decision_model") if f.get("decision_model") in decision_ids else s["decision_model"],
+                 examples=examples, name_threshold=threshold, max_hits=max_hits)
+        wc = s["world_check"]
+        for key in ("api_key", "group_id", "host", "base_path", "screen_path", "groups_path", "profile_path"):
+            if key in f:
+                wc[key] = f.get(key, "").strip() or (world_check.DEFAULTS[key] if key not in ("api_key", "group_id") else "")
+        if f.get("api_secret", "").strip():         # blank keeps the stored secret
+            wc["api_secret"] = f["api_secret"].strip()
+        if f.get("forget_secret"):
+            wc["api_secret"] = ""
+        _save("settings", s)
+        flash("Settings saved. World-Check: " + id_screening.source_label(s) + ".", "success")
+        return redirect(url_for("screening_settings"))
+    return render_template("screening_settings.html", s=s, wc=s["world_check"], secret_shown=_masked(s["world_check"]["api_secret"]),
+                           readers=id_scan.models(), deciders=id_screening.decision_models(), live=id_screening.live(s),
+                           source=id_screening.source_label(s), can_edit="QC" in _levels(), model_ready=id_scan.model_ready(),
+                           watchlist_size=len(watchlist.profiles()))
+
+
+@app.route("/screening/settings/test", methods=["POST"])
+def screening_settings_test():
+    """Call World-Check One's groups list with the saved key and secret."""
+    wc = SCREEN_SETTINGS["world_check"]
+    if not world_check.configured(wc):
+        flash("Enter and save the World-Check One API key and secret first.", "error")
+        return redirect(url_for("screening_settings"))
+    try:
+        found = world_check.groups(wc)
+    except world_check.WorldCheckError as exc:
+        flash(f"Connection failed: {exc}", "error")
+        return redirect(url_for("screening_settings"))
+    names = ", ".join(f"{n} ({i})" for i, n in found[:8]) or "no group"
+    flash(f"Connected to World-Check One. Groups: {names}." + ("" if wc.get("group_id") else " Enter the group ID to screen in."),
+          "success")
+    return redirect(url_for("screening_settings"))
 
 
 # ─── Model evaluation: the decision model and the document read, on the sample cases ───
@@ -1896,6 +2214,18 @@ def reset_demo():
     """Back to the seeded case book: drop every stored action and reload."""
     if not DEMO_MODE:
         abort(404)
+    if CASE_BOOK == "screening":            # its cases and their images; the SOP versions and settings stay
+        scans = _scans()
+        for rec in scans:
+            try:
+                os.remove(os.path.join(uploads.base(), rec["image"]))
+            except (OSError, KeyError):
+                pass
+        with _SCREEN_LOCK:
+            StateStore.delete("scan", [r["id"] for r in scans])
+        _bump_state()
+        flash(f"Demo reset: {len(scans)} case(s) and their images deleted. The SOP versions and the settings stay.", "success")
+        return redirect(url_for("scan_id"))
     cleared = StateStore.clear()
     uploads.remove_all()                # every case is back on its seed, drawn documents and all
     _load_seed()
@@ -1910,5 +2240,5 @@ _load_seed()
 
 if __name__ == "__main__":
     print(f" * FinCrime Operations Hub on http://{HOST}:{PORT}  (demo password: {DEMO_PASSWORD})")
-    print(f" * Console case book: {CASE_BOOK_LABEL[CASE_BOOK]}  (CONSOLE_CASES=file|demo)")
+    print(f" * Console case book: {CASE_BOOK_LABEL[CASE_BOOK]}  (CONSOLE_CASES=screening|file|demo)")
     app.run(debug=DEBUG, host=HOST, port=PORT)

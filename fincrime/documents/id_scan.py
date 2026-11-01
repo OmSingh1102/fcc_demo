@@ -1,27 +1,24 @@
-"""Scan an ID: one uploaded identity document, read and checked, with no
-case behind it.
+"""Scan an ID: one uploaded identity document, read and checked.
 
 The image is checked and cleaned first (uploads.prepare: a real image,
-turned upright, resized, EXIF and GPS removed). Then two readers work on it
-at once:
-  - a vision model through Straive's LLM Foundry gateway (the one picked on
-    the page: Claude, Gemini or GPT, the models the document benchmark
-    measured) transcribes every printed field, the MRZ lines, and what
-    spoils the photo;
-  - Tesseract on this machine reads the page's text and, on a passport,
-    the MRZ with its check digits (documents/ocr).
-The checks are code, not the model's opinion: the check digits of the MRZ
-the model transcribed and of the one Tesseract read, the two reads held to
-each other field by field, the expiry, the age, the fields an ID must carry.
+turned upright, resized, EXIF and GPS removed). Then a vision model reads
+it through Straive's LLM Foundry gateway (the one picked on the page or the
+Settings page: Claude, Gemini or GPT, the models the document benchmark
+measured): every printed field, the MRZ lines, what spoils the photo. No
+OCR engine of our own runs: reading documents is the model's job (or, later,
+a specialist provider's by its API).
+
+The checks are code on what was read, not the model's opinion: the check
+digits of the MRZ the model transcribed, the printed fields held to that
+zone, the expiry, the age, the fields an ID must carry.
 
 A scan is kept (StateStore kind "scan", the image under uploads/scans/)
-until someone deletes it: its record has the read, the OCR, the checks, the
-model, its tokens and cost. Without LLM_FOUNDRY_KEY only Tesseract runs.
+until someone deletes it: its record has the read, the checks, the model,
+its tokens and cost, and the screening of the person (fincrime/id_screening).
 """
 import base64
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from fincrime import benchmark
@@ -95,32 +92,20 @@ def _model_read(jpeg, model):
                   "seconds": round(time.monotonic() - started, 1)}
 
 
-def _tesseract(jpeg):
-    if not ocr.available():
-        return {"available": False, "text": "", "mrz": None}
-    started = time.monotonic()
-    found = ocr.mrz(jpeg)
-    return {"available": True, "text": ocr.text(jpeg), "mrz": found, "seconds": round(time.monotonic() - started, 1)}
-
-
 def scan(jpeg, model_id=None):
-    """Both readers on one prepared image (at once), and the checks.
-    Returns {read, model, tesseract, checks, error}: read is None when no
-    model ran (no key) or its call failed (error says why)."""
+    """The model's read of one prepared image, and the checks.
+    Returns {read, model, checks, error}: read is None when no model ran
+    (no key) or its call failed (error says why)."""
     model = next((m for m in models() if m["id"] == (model_id or DEFAULT_MODEL)), models()[0])
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        tess = pool.submit(_tesseract, jpeg)
-        job = pool.submit(_model_read, jpeg, model) if model_ready() else None
-        read, used, error = None, None, ""
-        if job is not None:
-            try:
-                read, used = job.result()
-            except Exception as exc:            # the page shows the reason; Tesseract's read still stands
-                error = f"{model['label']} could not read the image: {type(exc).__name__}: {str(exc)[:200]}"
-        else:
-            error = "No model is configured (LLM_FOUNDRY_KEY): only Tesseract read the image."
-        tesseract = tess.result()
-    return {"read": read, "model": used, "tesseract": tesseract, "checks": checks(read, tesseract), "error": error}
+    read, used, error = None, None, ""
+    if not model_ready():
+        error = "No model is configured (LLM_FOUNDRY_KEY): the image was not read."
+    else:
+        try:
+            read, used = _model_read(jpeg, model)
+        except Exception as exc:            # the page shows the reason
+            error = f"{model['label']} could not read the image: {type(exc).__name__}: {str(exc)[:200]}"
+    return {"read": read, "model": used, "checks": checks(read), "error": error}
 
 
 # ── the checks ───────────────────────────────────────────────────────────────
@@ -188,15 +173,7 @@ def _td3(lines):
     return tuple(_fillers_to(x) for x in lines)
 
 
-def _in_step(parsed):
-    """An OCR'd zone whose first line is in step: the issuing state on line
-    1 is the nationality on line 2 (true of a passport). Line 1 has no check
-    digit, so a character OCR adds or drops there shifts the names unseen."""
-    f = parsed["fields"]
-    return bool(f["issuer"]) and f["issuer"] == f["nationality"]
-
-
-def checks(read, tesseract, today=None):
+def checks(read, today=None):
     """[{label, state: ok | warn | fail | info, detail}] for a scan."""
     today = today or date.today()
     out = []
@@ -246,25 +223,6 @@ def checks(read, tesseract, today=None):
                     add("Printed fields against the MRZ", "ok", f"{len(agree)} agree: {', '.join(agree)}.")
         elif len(printed) == 3:
             add("MRZ", "info", "An ID-card zone (three lines): transcribed below; its check digits are not tested here.")
-    mrz = (tesseract or {}).get("mrz")
-    if tesseract and not tesseract.get("available"):
-        add("OCR cross-check (Tesseract)", "info", "Tesseract is not installed on this machine.")
-    elif mrz:
-        add("OCR cross-check (Tesseract)", "ok" if mrz["valid"] else "warn",
-            "Tesseract read the passport MRZ and its check digits add up." if mrz["valid"]
-            else "Tesseract found an MRZ but its check digits do not all add up (the photo, or the zone).")
-        if read is not None and mrz["valid"]:
-            if not _in_step(mrz):
-                mrz = dict(mrz, fields=dict(mrz["fields"], surname="", given_names=""))
-                add("OCR's first MRZ line", "info", "Out of step (a character added or dropped; that line has no check digit): "
-                    "the names are not compared with it.")
-            agree, differ = _mrz_vs(read, mrz, "OCR")
-            if differ:
-                add("Model's read against OCR", "fail", "; ".join(differ) + ".")
-            elif agree:
-                add("Model's read against OCR", "ok", f"{len(agree)} fields agree: {', '.join(agree)}.")
-    elif tesseract:
-        add("OCR cross-check (Tesseract)", "info", "No passport MRZ found by OCR (an ID card, a licence, or the zone not in the picture).")
     return out
 
 

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div><h2>Settings</h2>
+        <p>Where the console screens, and with which models. Nothing here is in the code: the QC lead changes it, and it applies to the next upload (and to "Search again" on an open case).</p></div>
+</div>
+
+<form method="post" id="settings-form">
+<div class="card mt-12" id="settings-wc">
+    <div class="card-head"><div><div class="card-title">World-Check connection</div>
+        <div class="card-sub">Screening now: <b>{{ source }}</b></div></div>
+        <span class="badge {{ 'emerald' if live else 'amber' }}">{{ 'Live World-Check One' if live else 'Stand-in: no key entered' }}</span></div>
+    <div class="card-body">
+        <p class="small muted" style="margin-top:0">With no key, the console searches the stand-in watchlist: the {{ watchlist_size }} World-Check records of the reconciliation log's cases. Enter the World-Check One API key and secret from the licence, and the group to screen in, and it screens on World-Check One itself. The calls are written from LSEG's public description of the API and have not run against the service yet: check the host and paths against the documentation that comes with the licence, then press <b>Test connection</b>.</p>
+        <div class="settings-grid">
+            <label>API key<input class="input" name="api_key" value="{{ wc.api_key }}" autocomplete="off"{% if not can_edit %} disabled{% endif %}></label>
+            <label>API secret<input class="input" name="api_secret" type="password" value="" placeholder="{{ secret_shown or 'not entered' }}" autocomplete="new-password"{% if not can_edit %} disabled{% endif %}>
+                <span class="tiny muted">{% if wc.api_secret %}Stored. Leave blank to keep it. <label class="tiny"><input type="checkbox" name="forget_secret" value="1"> forget it</label>{% else %}Never shown again once saved.{% endif %}</span></label>
+            <label>Group ID<input class="input" name="group_id" value="{{ wc.group_id }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>Host<input class="input" name="host" value="{{ wc.host }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>Base path<input class="input" name="base_path" value="{{ wc.base_path }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>Screening path<input class="input" name="screen_path" value="{{ wc.screen_path }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>Groups path<input class="input" name="groups_path" value="{{ wc.groups_path }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>Profile path<input class="input" name="profile_path" value="{{ wc.profile_path }}"{% if not can_edit %} disabled{% endif %}></label>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-12" id="settings-models">
+    <div class="card-head"><div class="card-title">Models and search</div>
+        <div class="card-sub">{% if model_ready %}through Straive's LLM Foundry gateway{% else %}no model is configured (LLM_FOUNDRY_KEY){% endif %} · the <a href="{{ url_for('model_evaluation') }}">Model evaluation</a> compares them</div></div>
+    <div class="card-body settings-grid">
+        <label>Model that reads the ID
+            <select class="input" name="reader_model"{% if not can_edit %} disabled{% endif %}>{% for m in readers %}<option value="{{ m.id }}"{% if m.id == s.reader_model %} selected{% endif %}>{{ m.label }}</option>{% endfor %}</select></label>
+        <label>Model that decides each hit
+            <select class="input" name="decision_model"{% if not can_edit %} disabled{% endif %}>{% for m in deciders %}<option value="{{ m.id }}"{% if m.id == s.decision_model %} selected{% endif %}>{{ m.label }} · ${{ m.price[0] }} / ${{ m.price[1] }} per M tokens</option>{% endfor %}</select></label>
+        <label>Resolved example cases per hit
+            <input class="input" type="number" name="examples" min="0" max="12" value="{{ s.examples }}"{% if not can_edit %} disabled{% endif %}>
+            <span class="tiny muted">0 = the SOP alone</span></label>
+        <label>Name score a stand-in hit needs (50-100)
+            <input class="input" type="number" name="name_threshold" min="50" max="100" value="{{ s.name_threshold }}"{% if not can_edit %} disabled{% endif %}>
+            <span class="tiny muted">the stand-in's search floor; World-Check One applies its own</span></label>
+        <label>Most hits kept per search
+            <input class="input" type="number" name="max_hits" min="1" max="20" value="{{ s.max_hits }}"{% if not can_edit %} disabled{% endif %}></label>
+    </div>
+</div>
+
+{% if can_edit %}
+<div class="row mt-12">
+    <button class="btn btn-primary" type="submit">{{ icon('check') }} Save settings</button>
+    <button class="btn btn-outline" type="submit" form="settings-test"{% if not live %} disabled title="Save a key and secret first"{% endif %}>{{ icon('activity') }} Test connection</button>
+</div>
+{% else %}
+<div class="small muted mt-12">Only the QC lead changes the settings: sign in as the QC lead to edit.</div>
+{% endif %}
+</form>
+<form method="post" action="{{ url_for('screening_settings_test') }}" id="settings-test"></form>
+{% endblock %}

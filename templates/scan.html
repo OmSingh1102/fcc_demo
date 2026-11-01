@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Scan ID{% endblock %}
+{% block title %}Screening cases{% endblock %}
 
 {% block content %}
 <div class="page-head">
-    <div><h2>Scan an ID document</h2>
-        <p>Upload a photo or scan of a passport, national ID card, driving licence, Aadhaar or PAN card. A vision model reads every printed field (OCR); on a passport, Tesseract reads the machine-readable zone on this machine as a cross-check; then the checks run on what they read: check digits, expiry, age, the two reads against each other.</p></div>
+    <div><h2>Screening cases</h2>
+        <p>Upload an ID. The AI reads it; the person is searched on World-Check; the AI decides each hit under the <a href="{{ url_for('screening_sop') }}">screening SOP</a>, from similar resolved cases; an analyst confirms. Every upload is a case.</p></div>
 </div>
 
 <div class="card mt-12" id="scan-form">
-    <div class="card-head"><div class="card-title">Upload</div>
-        <div class="card-sub">JPEG, PNG or WebP, up to 10 MB · the image is turned upright, resized, and its EXIF and GPS data removed before anything reads it</div></div>
+    <div class="card-head"><div class="card-title">Upload an ID</div>
+        <div class="card-sub">JPEG, PNG or WebP, up to 10 MB · turned upright, resized, EXIF and GPS removed before anything reads it</div></div>
     <div class="card-body">
         <form method="post" enctype="multipart/form-data" class="scan-upload" id="scan-upload">
             <label class="scan-drop" for="scan-file">
@@ -19,38 +19,50 @@
                 <input type="file" id="scan-file" name="image" accept="image/jpeg,image/png,image/webp" required>
             </label>
             <div class="scan-options">
-                <label class="small strong" for="scan-model">Model that reads the document</label>
+                <label class="small strong" for="scan-model">AI model that reads the document</label>
                 <select name="model" id="scan-model" class="input"{% if not model_ready %} disabled{% endif %}>
                     {% for m in models %}<option value="{{ m.id }}"{% if m.id == default_model %} selected{% endif %}>{{ m.label }} · ${{ m.price[0] }} / ${{ m.price[1] }} per M tokens</option>{% endfor %}
                 </select>
-                <div class="tiny muted">{% if model_ready %}Through Straive's LLM Foundry gateway. The document benchmark on the <a href="{{ url_for('model_evaluation') }}#eval-ocr">Model evaluation</a> page compares them.{% else %}No model is configured (LLM_FOUNDRY_KEY): only Tesseract will read the image.{% endif %}</div>
-                <div class="tiny muted">Tesseract OCR: {% if ocr_ready %}installed on this machine{% else %}not installed here (the MRZ cross-check is skipped){% endif %}.</div>
-                <button type="submit" class="btn btn-primary mt-8" id="scan-submit">{{ icon('zoom-in') }} Scan</button>
+                <div class="tiny muted">{% if model_ready %}Through Straive's LLM Foundry gateway; the default is set on <a href="{{ url_for('screening_settings') }}">Settings</a>.{% else %}No model is configured (LLM_FOUNDRY_KEY): the image cannot be read.{% endif %}</div>
+                <div class="tiny muted" id="scan-source">Screened on: <b>{{ source }}</b> (<a href="{{ url_for('screening_settings') }}">change</a>).</div>
+                <button type="submit" class="btn btn-primary mt-8" id="scan-submit"{% if not model_ready %} disabled{% endif %}>{{ icon('zoom-in') }} Read and screen</button>
             </div>
         </form>
     </div>
 </div>
 
-<div class="card mt-12 pad-0" id="scan-recent">
-    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Recent scans</div>
-        <div class="card-sub">kept until deleted · real ID images: delete them when the demo is done</div></div>
+<div class="card mt-12 pad-0" id="scan-cases">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Cases</div>
+        <div class="card-sub">real ID images are kept until the case is deleted</div></div>
+    <div class="tabs chips" style="padding:0 16px">
+        <a class="tab chip {% if not status %}active{% endif %}" href="{{ url_for('scan_id') }}">All <span class="n">{{ counts.all }}</span></a>
+        <a class="tab chip {% if status == 'open' %}active{% endif %}" href="{{ url_for('scan_id', status='open') }}">Open <span class="n">{{ counts.open }}</span></a>
+        <a class="tab chip {% if status == 'closed' %}active{% endif %}" href="{{ url_for('scan_id', status='closed') }}">Closed <span class="n">{{ counts.closed }}</span></a>
+    </div>
     {% if scans %}
     <div class="tbl-scroll">
     <table class="tbl">
-        <thead><tr><th>Scanned</th><th>Document</th><th>Name</th><th>Number</th><th>Result</th><th>Read by</th><th></th></tr></thead>
-        <tbody>{% for s in scans %}{% set r = s.read or {} %}{% set f = r.fields or {} %}
-        <tr><td class="nowrap small">{{ s.at }}<div class="tiny muted">{{ s.file }}</div></td>
-            <td class="small">{{ r.document_type or '—' }}<div class="tiny muted">{{ r.issuing_country }}</div></td>
-            <td class="strong">{{ f.full_name or ((f.given_names ~ ' ' ~ f.surname)|trim) or '—' }}</td>
-            <td class="small nowrap">{{ f.document_number or '—' }}</td>
-            <td>{% include "_scan_verdict.html" %}</td>
-            <td class="small">{{ s.model.label if s.model else 'Tesseract only' }}</td>
+        <thead><tr><th>Uploaded</th><th>Name on the ID</th><th>Document</th><th>World-Check</th><th>AI</th><th>Case</th><th></th></tr></thead>
+        <tbody>{% for s in scans %}{% set r = s.read or {} %}{% set f = r.fields or {} %}{% set sc = s.screening or {} %}{% set hits = sc.hits or [] %}
+        <tr><td class="nowrap small">{{ s.at }}<div class="tiny muted">{{ s.by|who }}</div></td>
+            <td class="strong">{{ f.full_name or ((f.given_names ~ ' ' ~ f.surname)|trim) or '—' }}<div class="tiny muted">{{ f.date_of_birth }}</div></td>
+            <td class="small">{{ r.document_type or '—' }}<div class="tiny muted">{{ r.issuing_country }}{% if f.document_number %} · {{ f.document_number }}{% endif %}</div></td>
+            <td class="small">{% if not s.screening %}<span class="muted">Not searched</span>
+                {% elif sc.error %}<span class="badge rose">Search failed</span>
+                {% elif hits %}<b>{{ hits|length }} hit{{ 's' if hits|length > 1 }}</b><div class="tiny muted">{{ hits[0].name }} · {{ hits[0].strength }}</div>
+                {% else %}<span class="badge emerald">No hit</span>{% endif %}</td>
+            <td class="small">{% set ns = namespace(wait=0, done=[]) %}{% for h in hits %}{% if (h.ai or {}).status == 'pending' %}{% set ns.wait = ns.wait + 1 %}{% elif (h.ai or {}).status == 'done' %}{% set ns.done = ns.done + [h.ai.suggested] %}{% endif %}{% endfor %}
+                {% if ns.wait %}<span class="badge blue">Reviewing {{ ns.wait }}</span>{% endif %}
+                {% for d in ns.done|unique %}<span class="badge {{ {'True match': 'rose', 'Possible match': 'amber', 'False positive': 'emerald'}[d] }}">{{ d }}</span> {% endfor %}
+                {% if not hits %}<span class="muted">—</span>{% endif %}</td>
+            <td>{% if s.status == 'closed' %}{% set o = s.closed.outcome %}<span class="badge {{ {'True match': 'solid-rose', 'Possible match': 'amber', 'Cleared': 'emerald', 'No match': 'emerald'}.get(o, 'slate') }}">{{ o }}</span><div class="tiny muted">{{ s.closed.by|who }}</div>
+                {% else %}<span class="badge slate">Open</span>{% endif %}</td>
             <td><a class="btn btn-outline btn-sm" href="{{ url_for('scan_result', scan_id=s.id) }}">Open</a></td></tr>
         {% endfor %}</tbody>
     </table>
     </div>
     {% else %}
-    <div class="card-body small muted">No scan yet.</div>
+    <div class="card-body small muted" id="scan-empty">No case{% if status %} {{ status }}{% endif %} yet. Upload an ID above: it becomes the first.</div>
     {% endif %}
 </div>
 
@@ -66,7 +78,7 @@
     });
     document.getElementById('scan-upload').addEventListener('submit', function () {
         var b = document.getElementById('scan-submit');
-        b.disabled = true; b.textContent = 'Reading the document…';
+        b.disabled = true; b.textContent = 'Reading the document and searching World-Check…';
     });
 })();
 </script>

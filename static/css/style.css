@@ -1050,3 +1050,33 @@ details.card > summary.card-head::-webkit-details-marker { display: none; }
 .scan-check.fail .dot { background: #e11d48; }
 .scan-check.fail b { color: #be123c; }
 @media (max-width: 900px) { .scan-upload, .scan-layout { grid-template-columns: minmax(0, 1fr); } .scan-image { position: static; } }
+
+/* Screening an uploaded ID: the World-Check hits, the AI's decision, the analyst's */
+.screen-none { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px;
+    border: 1px solid #a7f3d0; border-radius: var(--radius-md); background: #f0fdf7; }
+.screen-hit { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); margin-bottom: 12px; }
+.screen-hit-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.screen-hit-head b { font-size: 14px; }
+table.screen-compare { font-size: 12.5px; }
+table.screen-compare td:first-child { width: 130px; }
+table.screen-compare td:last-child { width: 110px; text-align: right; }
+.screen-ai { position: relative; padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--muted); font-size: 13px; }
+.screen-ai.done { background: var(--primary-tint); border-color: color-mix(in oklch, var(--primary) 30%, transparent); }
+.screen-ai.failed { background: #fff5f6; border-color: #fecdd3; }
+.screen-ai.pending { background: #eff6ff; border-color: #bfdbfe; }
+.screen-ask { margin-top: 6px; }
+.screen-reasons { margin: 6px 0 4px 18px; padding: 0; }
+.screen-confirm { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.screen-opt { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; }
+.screen-res { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #93c5fd; border-top-color: #1d4ed8; border-radius: 50%;
+    vertical-align: -2px; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.sop-editor { width: 100%; height: auto; min-height: 420px; padding: 10px 12px; font-family: Consolas, 'Courier New', monospace; font-size: 12.5px;
+    line-height: 1.5; resize: vertical; }
+.sop-version { padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+.sop-version summary { cursor: pointer; }
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 16px; }
+.settings-grid > label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; }
+.settings-grid > label .input { font-weight: 400; }
+@media (max-width: 700px) { table.screen-compare td:first-child { width: auto; } }

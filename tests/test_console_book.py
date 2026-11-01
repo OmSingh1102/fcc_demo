@@ -106,7 +106,7 @@ class ConsoleBookTestCase(unittest.TestCase):
             if a["capacity"]:
                 self.assertLess(fcc.routing.load(a["email"]), a["capacity"], a["key"])
         self.assertEqual(loader.load_seed("demo")[1].__len__(), 59)
-        self.assertEqual((loader.book_from("DEMO"), loader.book_from("nonsense"), loader.book_from(None)), ("demo", "file", "file"))
+        self.assertEqual((loader.book_from("DEMO"), loader.book_from("nonsense"), loader.book_from(None)), ("demo", "screening", "screening"))
 
     def test_rules_at_intake_against_the_file(self):
         """The rules clear only what the file's analysts also cleared; every

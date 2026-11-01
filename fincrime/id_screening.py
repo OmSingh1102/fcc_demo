@@ -1,0 +1,281 @@
+"""Screening an uploaded ID: the person the ID names, searched on World-Check,
+and each hit decided by a language model that follows the SOP. No screening
+rule is written in code.
+
+  1. Read. A vision model reads the ID (documents/id_scan).
+  2. Search. The name, with the date of birth, sex and nationality, goes to
+     World-Check One by its API once a key and secret are entered on the
+     Settings page (adapters/world_check); until then to the stand-in
+     watchlist, the World-Check records of the reconciliation log's 1,000
+     cases (fincrime/watchlist). Either way the search only finds candidates.
+  3. Decide. For each hit a model gets the SOP (the current version of the
+     SOP page: the files' v1 to v3, then any version saved in the console),
+     the client's variance reference, and the resolved cases of the log most
+     like this one with what the analysts decided, and answers as the
+     decision model of the Model evaluation page does: clear, true match, ask
+     the customer, escalate; with the name and address discrepancy and its
+     reasons. The resolved case behind the very record that was hit is never
+     one of the examples (it would hand the model the analysts' answer).
+  4. An analyst confirms each hit (true match, possible match, false
+     positive). The case closes when every hit is confirmed, or, with no hit,
+     when the analyst confirms there is none.
+
+Saving a new SOP version sends every open case's unconfirmed hits to the
+model again under it (app.py). The models, the number of examples, the name
+score below which a name is not a candidate, and the World-Check account are
+settings (kind "settings", id "screening"), not code.
+"""
+import hashlib
+import time
+
+from fincrime import benchmark, decision_model, watchlist
+from fincrime.adapters import world_check
+from fincrime.documents import id_scan
+from fincrime.filebook import llm, loader
+from fincrime.utils import dates
+
+SETTINGS_ID = "screening"
+SOP_KIND = "screen_sop"
+RESOLUTIONS = ("True match", "Possible match", "False positive")
+SUGGESTION = {"clear": "False positive", "true_match": "True match", "request_documents": "Possible match",
+              "escalate": "Possible match"}
+DECISION_MODELS = ("claude-opus-4-8", "claude-sonnet-5-5", "gpt-5", "gemini-2.5-pro", "gemini-2.5-flash", "claude-haiku-4-5",
+                   "gpt-5-mini")
+
+
+# ── settings ─────────────────────────────────────────────────────────────────
+
+def default_settings():
+    return {"id": SETTINGS_ID, "reader_model": id_scan.DEFAULT_MODEL, "decision_model": "claude-opus-4-8", "examples": 6,
+            "name_threshold": 65, "max_hits": 5, "world_check": dict(world_check.DEFAULTS)}
+
+
+def settings_from(stored):
+    """The defaults with the stored record laid on top."""
+    s = default_settings()
+    stored = stored or {}
+    s.update({k: v for k, v in stored.items() if k != "world_check"})
+    s["world_check"].update(stored.get("world_check") or {})
+    return s
+
+
+def decision_models():
+    by_id = {m["id"]: m for m in benchmark.MODELS}
+    return [by_id[i] for i in DECISION_MODELS if i in by_id]
+
+
+def live(settings):
+    return world_check.configured(settings["world_check"])
+
+
+def source_label(settings):
+    return ("World-Check One (live, by its API)" if live(settings)
+            else "Stand-in World-Check: the World-Check records of the reconciliation log's 1,000 cases")
+
+
+# ── the person on the ID ─────────────────────────────────────────────────────
+
+def person(read):
+    f = (read or {}).get("fields") or {}
+    name = f.get("full_name") or " ".join(x for x in (f.get("given_names"), f.get("surname")) if x)
+    mrz = (read or {}).get("mrz") or []
+    return {"name": name.strip(), "surname": f.get("surname", ""), "given_names": f.get("given_names", ""),
+            "dob": f.get("date_of_birth", ""), "sex": f.get("sex", ""), "nationality": f.get("nationality", ""),
+            "issuing_country": (read or {}).get("issuing_country", ""), "place_of_birth": f.get("place_of_birth", ""),
+            "address": f.get("address", ""), "father_or_spouse_name": f.get("father_or_spouse_name", ""),
+            "document_type": (read or {}).get("document_type", ""), "document_number": f.get("document_number", ""),
+            "mrz1": mrz[0] if mrz else ""}
+
+
+def search(who, settings):
+    """(hits, source, error, case_system_id): the candidates for the person."""
+    if live(settings):
+        try:
+            hits, csid = world_check.screen(settings["world_check"], who, int(settings["max_hits"]))
+            return hits, "World-Check One", "", csid
+        except world_check.WorldCheckError as exc:
+            return [], "World-Check One", str(exc), ""
+    return (watchlist.search(who, int(settings["name_threshold"]), int(settings["max_hits"])), "stand-in", "", "")
+
+
+# ── the SOP ──────────────────────────────────────────────────────────────────
+
+def sop_versions(stored):
+    """Every SOP version, oldest first: the files', then those saved in the
+    console (StateStore kind "screen_sop")."""
+    out = [{"version": v, "text": decision_model.sop_text(v), "changes": decision_model.sop_changes(v), "by": "",
+            "at": "", "source": "file"} for v in decision_model.sop_versions()]
+    out += sorted((dict(r, source="console") for r in stored or []), key=lambda r: int(r["version"][1:]))
+    return out
+
+
+def sop_current(stored):
+    return sop_versions(stored)[-1]
+
+
+def sop_new(stored, text, note, actor):
+    """A new version record, numbered after the last one."""
+    text = (text or "").strip()
+    if len(text) < 200:
+        raise ValueError("The SOP is too short to decide a case from: keep the whole procedure.")
+    current = sop_current(stored)
+    if text == current["text"].strip():
+        raise ValueError("Nothing changed: the text is the current version's.")
+    number = max(int(v["version"][1:]) for v in sop_versions(stored)) + 1
+    return {"id": f"v{number}", "version": f"v{number}", "text": text, "changes": [note.strip()] if note.strip() else [],
+            "by": actor, "at": dates.now_str(), "from": current["version"]}
+
+
+# ── what the model sees ──────────────────────────────────────────────────────
+
+def facts(who, hit):
+    """The case as the model starts it: the uploaded ID and the hit."""
+    lines = [
+        f"Customer, screened from an uploaded ID (no CRM record and no other document): {who['name']} (Individual)",
+        f"  date of birth: {who['dob'] or 'not on the document'}",
+        f"  sex: {who['sex'] or 'not printed'}; nationality: {who['nationality'] or 'not printed'}; "
+        f"place of birth: {who['place_of_birth'] or 'not printed'}",
+        f"  address on the ID: {who['address'] or 'none printed'}",
+    ]
+    if who.get("father_or_spouse_name"):
+        lines.append(f"  father's / spouse's name: {who['father_or_spouse_name']}")
+    lines += [
+        f"{who['document_type'] or 'ID document'} ({who['issuing_country'] or 'country not read'}, no. {who['document_number'] or 'not read'})",
+        f"  name as printed: surname {who['surname'] or '-'} | given names {who['given_names'] or '-'}",
+        f"  MRZ line 1: {who['mrz1'] or 'none'}",
+        "Secondary ID: not provided",
+        "Proof of address: not provided",
+        f"World-Check record {hit['uid']}: {hit['name']}" + (f" (AKA: {', '.join(hit['aka'])})" if hit.get("aka") else ""),
+        f"  listed date of birth: {hit['dob_text']}",
+        f"  listed places: {hit['places']}",
+        f"  category: {hit['category']}; name match {hit['strength']} ({hit['score']}%)",
+        f"  trigger: {hit['narrative']}",
+    ]
+    return "\n".join(lines)
+
+
+_FILE_COUNTRY = {"INDIA": "India", "VIETNAM": "Vietnam", "UNITED STATES": "United States"}
+
+
+def _pseudo_row(key, who, hit):
+    """The scanned case in the log's columns, so the examples can be chosen
+    the way the decision model chooses them (decision_model.signals)."""
+    src = watchlist.row_of(hit["uid"]) if hit.get("source") == "stand-in" else None
+    country = watchlist._country_key(who["issuing_country"]) or watchlist._country_key(who["nationality"])
+    row = {k: "" for k in loader.read_rows()[0]}
+    row.update({"kyc_case_id": key, "customer_name": who["name"], "customer_type": "Individual",
+                "customer_provided_dob": who["dob"], "customer_registered_address": who["address"],
+                "address_passport": who["address"], "passport_issuing_country": _FILE_COUNTRY.get(country, who["issuing_country"]),
+                "match_score": f"{hit['score']}%"})
+    if src:
+        row.update({k: src[k] for k in src if k.startswith("world_check_") or k == "watchlist_category"})
+    else:
+        row.update({"world_check_uid": hit["uid"], "world_check_entity_subject_name": hit["name"],
+                    "world_check_listed_dob": hit["dob_text"], "world_check_listed_address_jurisdiction": hit["places"],
+                    "watchlist_category": hit["category"], "world_check_narrative_trigger_details": hit["narrative"]})
+    return row
+
+
+def examples(case_id, who, hit, k):
+    """The k resolved cases of the log most like this one (same weighting as
+    the decision model's, without its name rules), never the case whose
+    World-Check record this hit is."""
+    if k <= 0:
+        return []
+    me = decision_model.signals(_pseudo_row(f"{case_id}:{hit['uid']}", who, hit))
+    scored = []
+    for other in decision_model.rows().values():
+        if other["world_check_uid"] == hit["uid"]:
+            continue
+        o = decision_model.signals(other)
+        w = (3 * (o["date of birth"] == me["date of birth"]) + 3 * (o["country"] == me["country"])
+             + (o["place"] == me["place"]) + (o["list"] == me["list"]) + (o["customer"] == me["customer"]))
+        tie = hashlib.sha1((case_id + hit["uid"] + other["kyc_case_id"]).encode("utf-8")).hexdigest()
+        scored.append((-w, tie, other))
+    return [o for _, _, o in sorted(scored, key=lambda t: t[:2])[:k]]
+
+
+def prompt(case_id, who, hit, k):
+    rows = examples(case_id, who, hit, k)
+    parts = []
+    if rows:
+        parts.append("Resolved cases like this one, with what the analysts decided:\n\n"
+                     + "\n\n".join(f"### Example {i}\n{decision_model.example(o)}" for i, o in enumerate(rows, 1)))
+    parts.append("### The case to decide\n" + facts(who, hit))
+    return "\n\n".join(parts), [o["kyc_case_id"] for o in rows]
+
+
+def decide(case_id, who, hit, sop, settings):
+    """The model's answer on one hit under one SOP version (an "ai" record);
+    status "failed" with the reason when there is no answer."""
+    model = next((m for m in decision_models() if m["id"] == settings["decision_model"]), decision_models()[0])
+    base = {"model": model["id"], "model_label": model["label"], "sop": sop["version"], "at": dates.now_str()}
+    if not llm.KEY:
+        return dict(base, status="failed", error="No model is configured (LLM_FOUNDRY_KEY): decide this hit yourself.")
+    text, used = prompt(case_id, who, hit, int(settings["examples"]))
+    started = time.monotonic()
+    try:
+        ans, t_in, t_out = benchmark.call(model, [{"type": "text", "text": text}], decision_model.instructions(sop["text"]),
+                                          decision_model.schema())
+    except Exception as exc:                        # the page offers "Ask the AI again"
+        return dict(base, status="failed", error=f"{type(exc).__name__}: {str(exc)[:200]}",
+                    seconds=round(time.monotonic() - started, 1))
+    ref = decision_model.reference()
+    outcome = decision_model._closest(ans.get("outcome"), decision_model.OUTCOME_KEYS)
+    if outcome not in decision_model.OUTCOME_KEYS:
+        return dict(base, status="failed", error=f"The model answered {outcome!r}, not one of the four outcomes.")
+    price_in, price_out = model["price"]
+    return dict(base, status="done", outcome=outcome, label=decision_model.OUTCOME_LABEL[outcome], suggested=SUGGESTION[outcome],
+                confidence=ans.get("confidence"), reasons=[str(x)[:300] for x in (ans.get("reasons") or [])][:4],
+                dob_finding=str(ans.get("dob_finding", ""))[:300], request=str(ans.get("request", ""))[:300],
+                name_variance=decision_model._closest(ans.get("name_variance"), ref["name"]),
+                address_variance=decision_model._closest(ans.get("address_variance"), ref["address"]),
+                examples=used, tokens_in=t_in, tokens_out=t_out, cost=round((t_in * price_in + t_out * price_out) / 1e6, 4),
+                seconds=round(time.monotonic() - started, 1))
+
+
+# ── the case ─────────────────────────────────────────────────────────────────
+
+def open_hits(case):
+    """The hits of an open case that no analyst has confirmed yet."""
+    if case.get("status") == "closed":
+        return []
+    return [h for h in ((case.get("screening") or {}).get("hits") or []) if not h.get("resolution")]
+
+
+def outcome(case):
+    """The case's outcome from its confirmed hits."""
+    hits = (case.get("screening") or {}).get("hits") or []
+    if not hits:
+        return "No match"
+    states = {(h.get("resolution") or {}).get("status") for h in hits}
+    return "True match" if "True match" in states else "Possible match" if "Possible match" in states else "Cleared"
+
+
+def resolve(case, uid, status, note, actor):
+    """An analyst's answer on one hit; closes the case when it was the last."""
+    if case.get("status") == "closed":
+        raise ValueError("The case is closed.")
+    if status not in RESOLUTIONS:
+        raise ValueError("Choose true match, possible match or false positive.")
+    hit = next((h for h in (case.get("screening") or {}).get("hits") or [] if h["uid"] == uid), None)
+    if hit is None:
+        raise ValueError("No such hit on this case.")
+    ai = hit.get("ai") or {}
+    hit["resolution"] = {"status": status, "note": (note or "").strip()[:2000], "by": actor, "at": dates.now_str(),
+                         "ai_suggested": ai.get("suggested", "") if ai.get("status") == "done" else "",
+                         "agreed": ai.get("status") == "done" and ai.get("suggested") == status}
+    if not open_hits(case):
+        close(case, actor)
+    return hit
+
+
+def close(case, actor, note=""):
+    if open_hits(case):
+        raise ValueError("Confirm every hit first.")
+    case["status"] = "closed"
+    case["closed"] = {"outcome": outcome(case), "by": actor, "at": dates.now_str(), "note": (note or "").strip()[:2000]}
+
+
+def is_id(read):
+    return bool(read) and read.get("document_type") != "Not an identity document" and bool(person(read)["name"])
