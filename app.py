@@ -2207,7 +2207,8 @@ def api_case(scan_id):
 def scan_result(scan_id):
     rec = _scan(scan_id)
     return render_template("scan_result.html", s=rec, fields=id_scan.FIELDS, points=id_screening.progress(rec),
-                           didit_ready=didit.configured(SCREEN_SETTINGS["didit"]),
+                           didit_ready=didit.configured(SCREEN_SETTINGS["didit"]), idv_sandbox=didit.is_sandbox(rec.get("idv") or {}),
+                           idv_diffs=id_screening.idv_differences(rec),
                            outcomes=id_screening.ALERT_OUTCOME, sop=id_screening.sop_current(_sop_stored()))
 
 
@@ -2347,7 +2348,11 @@ def _scan_export(rec):
                                           for h in sc.get("hits") or []]},
             "closed": rec.get("closed"), "reference": rec.get("reference", ""), "uploaded_by": rec.get("by", ""),
             "auto_verified": bool((rec.get("closed") or {}).get("auto")), "qc_sample": bool(rec.get("qc_sample")),
-            "id_verification": rec.get("idv"), "reader_fallback": rec.get("fallback", "")}
+            "id_verification": rec.get("idv") and dict(rec["idv"], sandbox=didit.is_sandbox(rec["idv"]),
+                                                       approved=id_screening.idv_approved(rec)[0],
+                                                       differs=[{"field": w, "verification": a, "id": b}
+                                                                for w, a, b in id_screening.idv_differences(rec)]),
+            "reader_fallback": rec.get("fallback", "")}
     return body
 
 

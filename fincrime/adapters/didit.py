@@ -7,7 +7,9 @@ without a key no case is sent to Didit.
 Written from Didit's public API reference (POST /v3/id-verification/, a
 multipart upload with the x-api-key header) and NOT YET RUN against the
 service (no account so far): the base URL and the path are settings. A
-sandbox key answers every call with a fixed "Approved" sample. Face match
+sandbox key answers every call with a fixed "Approved" sample ("Sandbox
+User", SANDBOX-0001) without looking at the image: it is kept as a sandbox
+answer, free, and never counts as an approval. Face match
 and liveness need a selfie, which an uploaded ID does not bring: they are
 not called.
 
@@ -84,15 +86,22 @@ def verify(cfg, jpeg, reference=""):
     return summary(json.loads(raw), float(cfg.get("price_per_call") or 0), round(time.monotonic() - started, 1))
 
 
+def is_sandbox(v):
+    """Is this the sandbox's fixed sample ("Sandbox User", SANDBOX-0001) rather
+    than a check of the image? (Didit's answer, or the summary kept of it.)"""
+    return "sandbox" in f"{v.get('full_name') or ''} {v.get('document_number') or ''}".lower()
+
+
 def summary(answer, price=0.0, seconds=0.0):
     """The parts of Didit's answer kept with the case."""
     v = answer.get("id_verification") or {}
     q = v.get("front_image_quality_score") or {}
-    return {"provider": "Didit", "status": v.get("status") or "Unknown", "request_id": answer.get("request_id", ""),
+    sandbox = is_sandbox(v)
+    return {"provider": "Didit", "status": v.get("status") or "Unknown", "request_id": answer.get("request_id", ""), "sandbox": sandbox,
             "document_type": v.get("document_type") or "", "full_name": v.get("full_name") or "",
             "date_of_birth": v.get("date_of_birth") or "", "document_number": v.get("document_number") or "",
             "expiration_date": v.get("expiration_date") or "", "issuing_state": v.get("issuing_state_name") or v.get("issuing_state") or "",
             "warnings": [{"risk": w.get("risk", ""), "declines": w.get("log_type") == "error",
                           "text": w.get("short_description") or w.get("risk", "")} for w in v.get("warnings") or []],
             "quality": {k: q.get(k) for k in ("overall_score", "focus_score", "brightness_issue", "is_document_fully_visible")} if q else {},
-            "cost": round(price, 4) if v.get("status") in ("Approved", "Declined") else 0.0, "seconds": seconds}
+            "cost": round(price, 4) if v.get("status") in ("Approved", "Declined") and not sandbox else 0.0, "seconds": seconds}

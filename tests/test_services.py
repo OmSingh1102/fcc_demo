@@ -94,6 +94,12 @@ class DiditTests(unittest.TestCase):
         self.assertEqual((v["status"], v["warnings"][0]["declines"], v["cost"], v["quality"]["overall_score"]),
                          ("Declined", True, 0.2, 81.0))
 
+    def test_a_sandbox_answer_is_kept_as_one(self):
+        v = didit.summary({"request_id": "R", "id_verification": {"status": "Approved", "full_name": "Sandbox User",
+                                                                 "document_number": "SANDBOX-0001"}}, 0.2)
+        self.assertEqual((v["sandbox"], v["cost"]), (True, 0.0))                 # free, and marked
+        self.assertFalse(didit.summary(self.answer(), 0.2)["sandbox"])
+
     def test_refusals_are_said_plainly(self):
         for code, words in ((403, "refused the call"), (401, "expired"), (400, "could not use the image")):
             with mock.patch.object(didit, "_send", lambda req, code=code: (code, b'{"error": "x"}')):

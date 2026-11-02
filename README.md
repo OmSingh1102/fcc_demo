@@ -331,7 +331,12 @@ Settings, nothing of it in the code):
   document Didit does not approve (or could not check) is never closed by
   auto-verify. Face match and liveness need a selfie and are not called.
   Written from Didit's API reference (`/v3/id-verification/`); not yet run
-  against the service (a sandbox key answers with a fixed Approved sample).
+  against the service. A sandbox key answers with a fixed Approved sample
+  ("Sandbox User", SANDBOX-0001) without looking at the image: the case says
+  *Sandbox: not a real check*, shows it free, and nothing closes on it. Nor
+  does an approval whose name, date of birth or document number differs from
+  the ID's (`id_screening.idv_differences`; a middle name left out is the
+  same name): the case lists the differences and stays with an analyst.
 **Auto-verify** (`id_screening.auto_verify`; *Auto-verify* on Settings, on by
 default). Once the AI has answered on every hit, the AI screening rule
 closes the safe cases and leaves the rest for an analyst: a case with no

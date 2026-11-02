@@ -127,16 +127,21 @@
             {% if v or didit_ready %}
             <div class="card" id="id-vendor">
                 <div class="card-head"><div class="card-title">ID vendor check</div>
-                    {% if v %}<span class="badge {{ {'Approved': 'emerald', 'Declined': 'rose', 'pending': 'blue'}.get(v.status, 'amber') }}">{{ {'pending': 'Checking…', 'error': 'Not checked'}.get(v.status, v.status) }}</span>{% endif %}</div>
+                    {% if v and idv_sandbox %}<span class="badge amber" title="Didit's sandbox answers every call with the same sample">Sandbox: not a real check</span>
+                    {% elif v and v.status == 'Approved' and idv_diffs %}<span class="badge amber">Approved a different document</span>
+                    {% elif v %}<span class="badge {{ {'Approved': 'emerald', 'Declined': 'rose', 'pending': 'blue'}.get(v.status, 'amber') }}">{{ {'pending': 'Checking…', 'error': 'Not checked'}.get(v.status, v.status) }}</span>{% endif %}</div>
                 <div class="card-body fact-list">
                     <div><span class="l">Vendor</span><span class="v">Didit</span></div>
                     {% if v and v.status == 'error' %}<div><span class="l">Reason</span><span class="v">{{ v.error }}</span></div>
                     {% elif v and v.status != 'pending' %}
+                    {% if idv_sandbox %}<div class="note warn small" id="idv-sandbox">The key is a Didit <b>sandbox</b> key: Didit answered "{{ v.status }}" with its fixed sample without looking at this ID. Nothing is closed on it; a live key from the Didit console checks the document.</div>
+                    {% elif idv_diffs %}<div class="note warn small" id="idv-differs">Didit's read is not this ID's, so its "{{ v.status }}" does not count: the case stays with an analyst.</div>{% endif %}
                     <div><span class="l">Document</span><span class="v">{{ v.document_type or '-' }}{% if v.issuing_state %} · {{ v.issuing_state }}{% endif %}</span></div>
                     <div><span class="l">Read by Didit</span><span class="v">{{ v.full_name or '-' }}{% if v.date_of_birth %} · {{ v.date_of_birth }}{% endif %}{% if v.document_number %} · <span class="mono">{{ v.document_number }}</span>{% endif %}</span></div>
+                    {% for what, theirs, ours in idv_diffs %}<div><span class="l">{{ what }} differs</span><span class="v">Didit {{ theirs }} · the ID {{ ours }}</span></div>{% endfor %}
                     <div><span class="l">Warnings</span><span class="v">{% for w in v.warnings %}<span class="badge {{ 'rose' if w.declines else 'slate' }}" title="{{ w.risk }}">{{ w.text }}</span> {% else %}none{% endfor %}</span></div>
                     {% if v.quality %}<div><span class="l">Photo quality</span><span class="v">{{ v.quality.overall_score }}/100{% if v.quality.is_document_fully_visible == false %} · not fully visible{% endif %}</span></div>{% endif %}
-                    <div><span class="l">Checked</span><span class="v">{{ v.at }}{% if v.cost %} · ${{ '%.2f'|format(v.cost) }}{% endif %}</span></div>
+                    <div><span class="l">Checked</span><span class="v">{{ v.at }}{% if idv_sandbox %} · free (sandbox){% elif v.cost %} · ${{ '%.2f'|format(v.cost) }}{% endif %}</span></div>
                     {% elif v %}<div><span class="l">Status</span><span class="v">Sent to Didit; this page refreshes when it answers.</span></div>
                     {% else %}<div><span class="l">Status</span><span class="v">Not checked yet.</span></div>{% endif %}
                     {% if didit_ready and not closed and (not v or v.status != 'pending') %}

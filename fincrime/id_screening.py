@@ -31,7 +31,7 @@ import time
 from fincrime import benchmark, decision_model, watchlist
 from fincrime.adapters import azure_docintel, didit, world_check
 from fincrime.documents import id_scan
-from fincrime.filebook import llm, loader
+from fincrime.filebook import llm, loader, similarity
 from fincrime.utils import dates
 
 SETTINGS_ID = "screening"
@@ -328,6 +328,44 @@ def _person_lists(settings):
     return [x.strip() for x in str(settings.get("auto_person_lists", "")).split(",") if x.strip()]
 
 
+def _name_words(text):
+    return {similarity.squash(p) for t in similarity.tokens(text or "") for p in t.split("-")} - {""}
+
+
+def idv_differences(case):
+    """[(what, the ID verification's, the ID's)]: where the ID verification read
+    the document differently from the ID (a different document, or the
+    sandbox's sample). A name with a word fewer (a middle name left out) is the
+    same name; a value missing on either side is not compared."""
+    idv, f = case.get("idv") or {}, (case.get("read") or {}).get("fields") or {}
+    out = []
+    theirs, ours = _name_words(idv.get("full_name")), _name_words(f.get("full_name"))
+    if theirs and ours and not (theirs <= ours or ours <= theirs):
+        out.append(("Name", idv["full_name"], f["full_name"]))
+    for what, key in (("Date of birth", "date_of_birth"), ("Document number", "document_number")):
+        a, b = (similarity.squash(str(x or "").upper()) for x in (idv.get(key), f.get(key)))
+        if a and b and a != b:
+            out.append((what, idv[key], f[key]))
+    return out
+
+
+def idv_approved(case):
+    """(approved, why not): did the ID verification approve this very document?
+    None set up (no result kept) counts as approved."""
+    idv = case.get("idv") or {}
+    if not idv:
+        return True, ""
+    who = idv.get("provider", "The ID verification")
+    if idv.get("status") != "Approved":
+        return False, f"{who} did not approve the document"
+    if didit.is_sandbox(idv):
+        return False, f"{who}'s sandbox answered with its sample, not a check of the document"
+    diff = idv_differences(case)
+    if diff:
+        return False, f"{who} read a different " + ", ".join(d[0].lower() for d in diff) + " from the ID's"
+    return True, ""
+
+
 def hit_is_safe(case, hit, settings):
     """(safe, why): may the rule clear this hit as a false positive?"""
     ai = hit.get("ai") or {}
@@ -336,8 +374,9 @@ def hit_is_safe(case, hit, settings):
     if case.get("verdict") != "Pass":
         return False, "an ID check did not pass"
     idv = case.get("idv") or {}
-    if idv and idv.get("status") != "Approved":
-        return False, f"{idv.get('provider', 'The ID verification')} did not approve the document"
+    approved, why = idv_approved(case)
+    if not approved:
+        return False, why
     if ai.get("status") != "done" or ai.get("outcome") != "clear":
         return False, "the AI did not say false positive"
     if not isinstance(conf, (int, float)) or conf < bar:
@@ -376,7 +415,7 @@ def auto_verify(case, settings):
         return ""                                   # nor the ID verification
     hits = sc.get("hits") or []
     if not hits:
-        if not settings.get("auto_no_hit") or case.get("verdict") != "Pass" or (idv and idv.get("status") != "Approved"):
+        if not settings.get("auto_no_hit") or case.get("verdict") != "Pass" or not idv_approved(case)[0]:
             return ""
         whole, safe = True, []
     else:

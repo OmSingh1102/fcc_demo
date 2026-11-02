@@ -490,6 +490,48 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertIn("refused the call", rec["idv"]["error"])
         self.assertEqual(c.get(f"/api/v1/cases/{sid}").status_code, 401)             # the API never takes a session
 
+    def test_didit_must_approve_this_very_document(self):
+        from fincrime.adapters import didit
+        fcc.SCREEN_SETTINGS.update(auto_verify=True, auto_qc_pct=0)
+        fcc.SCREEN_SETTINGS["didit"]["api_key"] = "DD-KEY"
+        import json as _json
+        zeb = a_read(name="ZEBEDIAH QUARTERMAINE", surname="QUARTERMAINE", given="ZEBEDIAH")
+
+        def answered(**v):
+            body = {"request_id": "R", "id_verification": dict({"status": "Approved", "warnings": []}, **v)}
+            return mock.patch.object(didit, "_send", lambda req: (200, _json.dumps(body).encode()))
+        c = self.client()
+        with answered(full_name="Sandbox User", date_of_birth="1990-01-15", document_number="SANDBOX-0001"):
+            sid = self.upload(c, zeb)
+        rec = fcc._scan(sid)
+        self.assertEqual((rec["idv"]["status"], rec["idv"]["cost"], rec["status"]), ("Approved", 0.0, "open"))
+        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        for needle in ("Sandbox: not a real check", 'id="idv-sandbox"', "free (sandbox)", "Name differs"):
+            self.assertIn(needle, page)
+        self.assertEqual(c.get(f"/api/v1/cases/{sid}").status_code, 401)
+        with answered(full_name="ZEBEDIAH OTHERNAME", document_number=zeb["fields"]["document_number"]):
+            sid = self.upload(c, zeb, "ivory")
+        rec = fcc._scan(sid)
+        self.assertEqual(rec["status"], "open")                                   # approved, but another person's document
+        self.assertEqual([d[0] for d in id_screening.idv_differences(rec)], ["Name"])
+        self.assertIn("read a different name", id_screening.idv_approved(rec)[1])
+        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        self.assertIn('id="idv-differs"', page)
+        self.assertIn("Approved a different document", page)
+        with answered(full_name="QUARTERMAINE ZEBEDIAH", date_of_birth=zeb["fields"]["date_of_birth"],
+                      document_number=zeb["fields"]["document_number"]):
+            sid = self.upload(c, zeb, "linen")
+        rec = fcc._scan(sid)
+        self.assertEqual((id_screening.idv_differences(rec), rec["status"]), ([], "closed"))   # the same, in another order
+
+    def test_a_middle_name_left_out_is_the_same_name(self):
+        case = {"idv": {"status": "Approved", "full_name": "Margaret Wallace", "date_of_birth": "1965-09-08", "document_number": "623 984 704"},
+                "read": {"fields": {"full_name": "WALLACE MARGARET MARIE", "date_of_birth": "1965-09-08", "document_number": "623984704"}}}
+        self.assertEqual(id_screening.idv_approved(case), (True, ""))
+        case["idv"]["date_of_birth"] = "1965-08-09"
+        self.assertEqual([d[0] for d in id_screening.idv_differences(case)], ["Date of birth"])
+        self.assertEqual(id_screening.idv_approved({}), (True, ""))                  # none set up
+
     def test_azure_reads_and_the_ai_model_stands_in_when_it_cannot(self):
         from fincrime.adapters import azure_docintel
         fcc.SCREEN_SETTINGS["azure"].update(endpoint="https://res.cognitiveservices.azure.com", api_key="AZ")
