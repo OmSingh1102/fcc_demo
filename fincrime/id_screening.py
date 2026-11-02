@@ -283,6 +283,33 @@ def is_id(read):
     return bool(read) and read.get("document_type") != "Not an identity document" and bool(person(read)["name"])
 
 
+def progress(case):
+    """The case's steps for the case page's stepper, each with the time the
+    case reached it: uploaded, read, screened, the AI's review of every hit,
+    completed (every hit confirmed, or no hit confirmed). done | current | todo."""
+    sc = case.get("screening") or {}
+    hits = sc.get("hits") or []
+    ai = [h.get("ai") or {} for h in hits]
+    reviewed = bool(sc) and not sc.get("error") and all(a.get("status") in ("done", "failed") for a in ai)
+    closed = case.get("status") == "closed"
+    steps = [("Submitted", case["at"], True),
+             ("ID Verification", case["at"] if case.get("read") else "", bool(case.get("read"))),
+             ("Data Screening", sc.get("at", "") if sc and not sc.get("error") else "", bool(sc) and not sc.get("error")),
+             ("AI Review", max([a.get("at", "") for a in ai] or [sc.get("at", "")]) if reviewed else "", reviewed or closed),
+             ("Completed", (case.get("closed") or {}).get("at", ""), closed)]
+    out, current = [], False
+    for n, (label, at, done) in enumerate(steps, 1):
+        state = "done" if done else "todo" if current else "current"
+        current = current or state == "current"
+        out.append({"label": label, "at": at, "state": state, "n": n})
+    return out
+
+
+# The console's alert outcomes (the name-screening page's words) for a hit's confirmation.
+ALERT_OUTCOME = {"True match": "True Positive", "Possible match": "Potential Match", "False positive": "False Positive"}
+FROM_ALERT_OUTCOME = {v: k for k, v in ALERT_OUTCOME.items()}
+
+
 # ── the World-Check console view ─────────────────────────────────────────────
 # A screening case shown in the simulated World-Check console (wc_case.html,
 # wc_match.html), as the 1,000-case book shows its watchlist cases: the case

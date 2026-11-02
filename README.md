@@ -286,10 +286,22 @@ Start from an ID document, with no CSV: every uploaded ID becomes a case.
    address discrepancy, shown as a suggestion (false positive, possible match,
    true match). The calls run on worker threads; the page refreshes itself
    when they answer. No screening rule is in code.
-4. *Confirm.* An analyst confirms each hit (the AI's suggestion preselected;
-   whether they agreed is kept). The case closes when every hit is confirmed
-   (true match, possible match or cleared), or with no hit when the analyst
-   confirms there is none.
+4. *Confirm.* The case opens in the console's case layout: the sidebar
+   (status, Human-in-the-loop while a hit waits, Review, the progress from
+   Submitted through ID Verification, Data Screening and AI Review to
+   Completed, each with its time) and the Overview, Documents, Screening and
+   Decisions tabs. The Screening tab's screening result opens (*Details*) the
+   name-screening page: Basic and Screening Information, and List Screening
+   with an alert row per hit (the AI assessment, the alert outcome; a row
+   opens to the AI's reasons, submitted against matched data, and the
+   record). An analyst gives each alert its outcome with *Change Alert
+   Outcome* (one or several ticked; true positive, potential match, false
+   positive, with reason, risk and comment; the AI's suggestion prefilled,
+   and whether they agreed kept); *AI assessment* asks the AI again. The case
+   closes when every hit has an outcome, or with no hit when the analyst
+   confirms there is none. Every value on these pages is the upload's, the
+   model's read, the hits' or an analyst's: the old book's vendor, merchant
+   and business-line fields are left out, not filled.
    **Open in World-Check** (the case, or *Open in WC* on a hit, in a new tab)
    shows the case in the simulated World-Check console the 1,000-case book
    uses: the matches list with its status and type filters, each record's

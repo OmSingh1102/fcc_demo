@@ -266,12 +266,29 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertEqual((rec["status"], rec["screening"]["source"], hit["uid"]), ("open", "stand-in", "WC-675768"))
         self.assertEqual((hit["ai"]["status"], hit["ai"]["suggested"]), ("done", "False positive"))
         page = c.get(f"/scan/{sid}").data.decode("utf-8")
-        for needle in ('id="scan-screening"', "AI suggests", "Your decision", "UPADHYAY, Ashish", "Patna, Bihar, India"):
+        for needle in ('id="case-rail"', 'id="scan-screening"', "Screening Alert Hit", f'href="/scan/{sid}/screening"',
+                       "Human-in-the-loop", "AI Review", "S3321051", 'id="scan-decisions"'):
             self.assertIn(needle, page)
-        c.post(f"/scan/{sid}/hits/{hit['uid']}/resolve", data={"status": "True match", "note": "same date of birth"})
+        for absent in ("jumio", "Merchant UID", "Business Line", "Breached"):   # nothing the upload does not have
+            self.assertNotIn(absent, page)
+        self.assertEqual([p["state"] for p in id_screening.progress(rec)], ["done", "done", "done", "done", "current"])
+        page = c.get(f"/scan/{sid}/screening").data.decode("utf-8")
+        for needle in ("Basic Information", "Screening Information", "List Screening (1 matches found)", "UPADHYAY, Ashish",
+                       "Patna, Bihar, India", "False Positive · 80%", "Different date of birth", "Pending (1)", "Change Alert Outcome"):
+            self.assertIn(needle, page)
+        bad = c.post(f"/scan/{sid}/hits/outcome", data={"alert_id": hit["uid"], "outcome": "True Positive", "comment": ""},
+                     follow_redirects=True)
+        self.assertIn("Write a comment", bad.data.decode("utf-8"))
+        c.post(f"/scan/{sid}/hits/outcome", data={"alert_id": hit["uid"], "outcome": "True Positive", "risk": "High",
+                                                  "reason": "Confirmed by identification", "comment": "same date of birth"})
         rec = fcc._scan(sid)
         self.assertEqual((rec["status"], rec["closed"]["outcome"]), ("closed", "True match"))
-        self.assertFalse(rec["screening"]["hits"][0]["resolution"]["agreed"])
+        res = rec["screening"]["hits"][0]["resolution"]
+        self.assertEqual((res["status"], res["risk"], res["reason"], res["agreed"]), ("True match", "High", "Confirmed by identification", False))
+        self.assertEqual({p["state"] for p in id_screening.progress(rec)}, {"done"})
+        page = c.get(f"/scan/{sid}/screening").data.decode("utf-8")
+        self.assertIn("True Positive (1)", page)
+        self.assertIn("The analyst decided True Positive", page)
         data = c.get(f"/scan/{sid}/data.json").get_json()
         self.assertEqual((data["outcome"], data["screening"]["hits"][0]["resolution"]["status"]), ("True match", "True match"))
         self.assertIn("Closed", c.get("/scan?status=closed").data.decode("utf-8"))
@@ -280,7 +297,8 @@ class ScreeningBookPageTests(unittest.TestCase):
         c = self.client()
         sid = self.upload(c, a_read())
         uid = fcc._scan(sid)["screening"]["hits"][0]["uid"]
-        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        self.assertIn(f'href="/wc/{sid}" target="_blank"', c.get(f"/scan/{sid}").data.decode("utf-8"))
+        page = c.get(f"/scan/{sid}/screening").data.decode("utf-8")
         self.assertIn(f'href="/wc/{sid}" target="_blank"', page)
         self.assertIn(f'href="/wc/{sid}/match/{uid}" target="_blank"', page)
         page = c.get(f"/wc/{sid}").data.decode("utf-8")
@@ -314,10 +332,24 @@ class ScreeningBookPageTests(unittest.TestCase):
         c = self.client()
         sid = self.upload(c, a_read(name="ZEBEDIAH QUARTERMAINE", surname="QUARTERMAINE", given="ZEBEDIAH"))
         self.assertEqual(fcc._scan(sid)["screening"]["hits"], [])
-        self.assertIn('id="screen-none"', c.get(f"/scan/{sid}").data.decode("utf-8"))
+        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        self.assertIn('id="screen-none"', page)
+        self.assertIn("No hit: confirm no match on the Screening tab", page)
         c.post(f"/scan/{sid}/close", data={"note": "nobody on the list"})
         self.assertEqual(fcc._scan(sid)["closed"]["outcome"], "No match")
         self.assertEqual(self.calls, [])
+
+    def test_ai_assessment_sends_the_alerts_again(self):
+        c = self.client()
+        sid = self.upload(c, a_read())
+        uid = fcc._scan(sid)["screening"]["hits"][0]["uid"]
+        with mock.patch.object(id_screening, "decide", self.decide):
+            r = c.post(f"/scan/{sid}/ai", data={"alert_id": uid})
+            self.assertTrue(r.headers["Location"].endswith(f"/scan/{sid}/screening"))
+            c.post(f"/scan/{sid}/ai")                                   # nothing ticked: every alert with no outcome
+        self.assertEqual(len(self.calls), 3)
+        refused = c.post(f"/scan/{sid}/hits/outcome", data={"outcome": "False Positive", "comment": "x"}, follow_redirects=True)
+        self.assertIn("Tick at least one alert", refused.data.decode("utf-8"))
 
     def test_a_new_sop_version_sends_open_hits_again(self):
         c = self.client()

@@ -1226,7 +1226,7 @@ def _wc_page(wc_case_id):
     rec = _scan(wc_case_id)
     wc = id_screening.wc_view(rec)
     is_open = rec.get("status") != "closed"
-    return wc, {"wc": wc, "alert": None, "back_url": url_for("scan_result", scan_id=rec["id"]),
+    return wc, {"wc": wc, "alert": None, "back_url": url_for("scan_alerts", scan_id=rec["id"]),
                 "can_resolve": is_open and bool(_levels() & {"L1", "L2"}), "case_open": is_open, "wc_statuses": list(id_screening.FROM_WC_STATUS),
                 "resolve_hint": "The case is closed" if not is_open else "An L1 or L2 analyst resolves matches"}, rec
 
@@ -2035,10 +2035,68 @@ def scan_id():
 @app.route("/scan/<scan_id>")
 def scan_result(scan_id):
     rec = _scan(scan_id)
-    waiting = any((h.get("ai") or {}).get("status") == "pending" for h in id_screening.open_hits(rec))
-    return render_template("scan_result.html", s=rec, fields=id_scan.FIELDS, resolutions=id_screening.RESOLUTIONS,
-                           waiting=waiting, outcome=id_screening.outcome(rec), sop=id_screening.sop_current(_sop_stored()),
-                           live=id_screening.live(SCREEN_SETTINGS))
+    return render_template("scan_result.html", s=rec, fields=id_scan.FIELDS, points=id_screening.progress(rec),
+                           outcomes=id_screening.ALERT_OUTCOME, sop=id_screening.sop_current(_sop_stored()))
+
+
+@app.route("/scan/<scan_id>/screening")
+def scan_alerts(scan_id):
+    """The screening case as the console's name-screening page shows one:
+    basic and screening information, a row per World-Check hit (the AI's
+    assessment, the analyst's outcome, the record it opens to)."""
+    rec = _scan(scan_id)
+    wc = id_screening.wc_view(rec)
+    who = (rec.get("screening") or {}).get("person") or id_screening.person(rec.get("read"))
+    client = {"country": who.get("issuing_country", ""), "nationality": who.get("nationality", "")}
+    details = {m["id"]: {"m": m, "compare": worldcheck.comparison_rows(wc, m, client)} for m in wc["matches"]}
+    hits = (rec.get("screening") or {}).get("hits") or []
+    counts = {"All": len(hits), "Pending": 0, **{o: 0 for o in reversed(id_screening.FROM_ALERT_OUTCOME)}}
+    for h in hits:
+        counts[id_screening.ALERT_OUTCOME[h["resolution"]["status"]] if h.get("resolution") else "Pending"] += 1
+    return render_template("scan_alerts.html", s=rec, wc=wc, who=who, details=details, counts=counts,
+                           outcomes=id_screening.ALERT_OUTCOME, sop=id_screening.sop_current(_sop_stored()),
+                           wc_group=SCREEN_SETTINGS["world_check"].get("group_id", "") if id_screening.live(SCREEN_SETTINGS) else "")
+
+
+@app.route("/scan/<scan_id>/hits/outcome", methods=["POST"])
+def scan_hits_outcome(scan_id):
+    """Change Alert Outcome: one outcome, risk, reason and comment written to
+    every ticked hit (the case closes when the last is confirmed)."""
+    _scan(scan_id)
+    uids = request.form.getlist("alert_id")
+    status = id_screening.FROM_ALERT_OUTCOME.get(request.form.get("outcome", ""), "")
+    err = []
+    if not uids:
+        err.append("Tick at least one alert first.")
+    elif not request.form.get("comment", "").strip():
+        err.append("Write a comment.")
+
+    def apply(rec):
+        for uid in uids:
+            try:
+                id_screening.resolve(rec, uid, status, request.form.get("comment", ""), _actor(),
+                                     risk=request.form.get("risk", ""), reason=request.form.get("reason", ""))
+            except ValueError as exc:
+                err.append(str(exc))
+                return
+    rec = _scan(scan_id) if err else _screen_update(scan_id, apply)
+    if err:
+        flash(err[0], "error")
+    elif rec.get("status") == "closed":
+        flash(f"Alert outcome saved. Every hit is confirmed: case closed as {rec['closed']['outcome']}.", "success")
+    else:
+        flash(f"Alert outcome saved on {len(uids)} alert{'s' if len(uids) > 1 else ''}.", "success")
+    return redirect(url_for("scan_alerts", scan_id=scan_id))
+
+
+@app.route("/scan/<scan_id>/ai", methods=["POST"])
+def scan_ai(scan_id):
+    """AI assessment: the ticked hits (or every unconfirmed one) to the AI again."""
+    _scan(scan_id)
+    n = _screen_queue(scan_id, request.form.getlist("alert_id") or None, why="asked again")
+    flash(f"Sent to the AI again: {n} alert{'s' if n != 1 else ''}." if n else "Nothing to send: every hit is confirmed, or the case is closed.",
+          "success" if n else "error")
+    return redirect(url_for("scan_alerts", scan_id=scan_id))
 
 
 @app.route("/scan/<scan_id>/screen", methods=["POST"])
@@ -2047,12 +2105,12 @@ def scan_screen(scan_id):
     rec = _scan(scan_id)
     if rec.get("status") == "closed" or not id_screening.is_id(rec.get("read")):
         flash("Only an open case with a read ID can be searched again.", "error")
-        return redirect(url_for("scan_result", scan_id=scan_id))
+        return redirect(url_for("scan_result", scan_id=scan_id) + "#screening")
     rec = _screen_update(scan_id, _screen_search)
     n = _screen_queue(scan_id, why="searched again")
     flash(rec["screening"]["error"] or f"Searched again on {rec['screening']['source_label']}: "
           f"{len(rec['screening']['hits'])} hit(s); {n} sent to the AI.", "error" if rec["screening"]["error"] else "success")
-    return redirect(url_for("scan_result", scan_id=scan_id))
+    return redirect(url_for("scan_result", scan_id=scan_id) + "#screening")
 
 
 @app.route("/scan/<scan_id>/hits/<uid>/ai", methods=["POST"])
@@ -2062,28 +2120,7 @@ def scan_hit_ai(scan_id, uid):
     flash("Sent to the AI again." if n else "That hit is confirmed already, or the case is closed.", "success" if n else "error")
     if request.form.get("back") == "wc":
         return redirect(url_for("wc_match", wc_case_id=scan_id, match_id=uid))
-    return redirect(url_for("scan_result", scan_id=scan_id) + f"#hit-{uid}")
-
-
-@app.route("/scan/<scan_id>/hits/<uid>/resolve", methods=["POST"])
-def scan_hit_resolve(scan_id, uid):
-    """The analyst confirms one hit: true match, possible match, false positive."""
-    _scan(scan_id)
-    err = []
-
-    def apply(rec):
-        try:
-            id_screening.resolve(rec, uid, request.form.get("status", ""), request.form.get("note", ""), _actor())
-        except ValueError as exc:
-            err.append(str(exc))
-    rec = _screen_update(scan_id, apply)
-    if err:
-        flash(err[0], "error")
-    elif rec.get("status") == "closed":
-        flash(f"Hit confirmed. Every hit is confirmed: case closed as {rec['closed']['outcome']}.", "success")
-    else:
-        flash("Hit confirmed.", "success")
-    return redirect(url_for("scan_result", scan_id=scan_id) + ("" if err or rec.get("status") == "closed" else f"#hit-{uid}"))
+    return redirect(url_for("scan_alerts", scan_id=scan_id))
 
 
 @app.route("/scan/<scan_id>/close", methods=["POST"])
@@ -2099,7 +2136,7 @@ def scan_close(scan_id):
             err.append(str(exc))
     rec = _screen_update(scan_id, apply)
     flash(err[0] if err else f"Case closed as {rec['closed']['outcome']}.", "error" if err else "success")
-    return redirect(url_for("scan_result", scan_id=scan_id))
+    return redirect(url_for("scan_result", scan_id=scan_id) + "#screening")
 
 
 @app.route("/scan/<scan_id>/image")
