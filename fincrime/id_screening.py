@@ -47,7 +47,10 @@ DECISION_MODELS = ("claude-opus-4-8", "claude-sonnet-5-5", "gpt-5", "gemini-2.5-
 
 def default_settings():
     return {"id": SETTINGS_ID, "reader_model": id_scan.DEFAULT_MODEL, "decision_model": "claude-opus-4-8", "examples": 6,
-            "name_threshold": 65, "max_hits": 5, "world_check": dict(world_check.DEFAULTS)}
+            "name_threshold": 65, "max_hits": 5, "world_check": dict(world_check.DEFAULTS),
+            # auto-verify (auto_verify below): which cases the AI closes without an analyst
+            "auto_verify": True, "auto_no_hit": True, "auto_min_confidence": 90, "auto_dob_differs": True,
+            "auto_person_lists": "Sanctions, PEP", "auto_qc_pct": 5}
 
 
 def settings_from(stored):
@@ -273,6 +276,8 @@ def resolve(case, uid, status, note, actor, risk="", reason=""):
 
 
 def close(case, actor, note=""):
+    if case.get("status") == "closed":
+        raise ValueError("The case is closed.")
     if open_hits(case):
         raise ValueError("Confirm every hit first.")
     case["status"] = "closed"
@@ -303,6 +308,88 @@ def progress(case):
         current = current or state == "current"
         out.append({"label": label, "at": at, "state": state, "n": n})
     return out
+
+
+# ── auto-verify: the AI closes the safe cases, an analyst gets the rest ──────
+# What counts as safe is on the Settings page, not in code: whether a case
+# with no World-Check hit closes by itself, the AI's confidence a "false
+# positive" needs, whether the record's date of birth must differ, the lists
+# (words of the record's category) that always go to a person, and the share
+# of the cases the rule would close that still go to an analyst as a QC
+# sample. Nothing is closed while an ID check warns or fails.
+
+AUTO_ACTOR = "AI screening rule"
+
+
+def _person_lists(settings):
+    return [x.strip() for x in str(settings.get("auto_person_lists", "")).split(",") if x.strip()]
+
+
+def hit_is_safe(case, hit, settings):
+    """(safe, why): may the rule clear this hit as a false positive?"""
+    ai = hit.get("ai") or {}
+    bar, conf = int(settings["auto_min_confidence"]), ai.get("confidence")
+    listed = next((x for x in _person_lists(settings) if x.lower() in (hit.get("category") or "").lower()), None)
+    if case.get("verdict") != "Pass":
+        return False, "an ID check did not pass"
+    if ai.get("status") != "done" or ai.get("outcome") != "clear":
+        return False, "the AI did not say false positive"
+    if not isinstance(conf, (int, float)) or conf < bar:
+        return False, f"the AI was {conf}% sure, under the {bar}% bar"
+    if settings.get("auto_dob_differs") and hit.get("dob_result") != "Not matched":
+        return False, "the record's date of birth does not differ from the ID's"
+    if listed:
+        return False, f"a {listed} record always goes to an analyst"
+    return True, (f"the AI said false positive at {conf}% (bar {bar}%)"
+                  + ("; the record's date of birth differs from the ID's" if settings.get("auto_dob_differs") else "")
+                  + (f"; not a {' or '.join(_person_lists(settings))} record" if _person_lists(settings) else "")
+                  + "; every ID check passed")
+
+
+def qc_sampled(case_id, settings):
+    """Is the case one of the QC sample (a fixed share, by its ID)?"""
+    pct = int(settings.get("auto_qc_pct") or 0)
+    return pct > 0 and int(hashlib.sha1(("qc:" + case_id).encode("utf-8")).hexdigest(), 16) % 100 < pct
+
+
+def auto_verify(case, settings):
+    """Once every open hit has the AI's answer: clear the hits the rule calls
+    safe, and close the case when that is all of them, or when there is no
+    hit and every ID check passed; the rest stay for an analyst. A case the
+    rule would close entirely may instead be a QC sample, left for an
+    analyst. Returns what it did: "closed", "cleared", "qc sample" or ""."""
+    sc = case.get("screening") or {}
+    if not settings.get("auto_verify") or case.get("status") == "closed" or not sc or sc.get("error"):
+        return ""
+    pending = open_hits(case)
+    if any((h.get("ai") or {}).get("status") not in ("done", "failed") for h in pending):
+        return ""                                   # the AI has not answered on every hit yet
+    hits = sc.get("hits") or []
+    if not hits:
+        if not settings.get("auto_no_hit") or case.get("verdict") != "Pass":
+            return ""
+        whole, safe = True, []
+    else:
+        judged = [(h, *hit_is_safe(case, h, settings)) for h in pending]
+        safe = [(h, why) for h, ok, why in judged if ok]
+        if not safe:
+            return ""
+        whole = len(safe) == len(pending)
+    if whole and qc_sampled(case["id"], settings):
+        if not case.get("qc_sample"):
+            case["qc_sample"] = {"at": dates.now_str(), "pct": int(settings["auto_qc_pct"])}
+        return "qc sample"
+    now = dates.now_str()
+    for h, why in safe:
+        h["resolution"] = {"status": "False positive", "note": "Cleared by the AI screening rule: " + why + ".", "by": AUTO_ACTOR,
+                           "at": now, "risk": "", "reason": "Date of Birth mismatch" if settings.get("auto_dob_differs") else "",
+                           "ai_suggested": "False positive", "agreed": True, "auto": True}
+    if open_hits(case):
+        return "cleared"
+    close(case, AUTO_ACTOR, "No World-Check record matched the name, and every ID check passed." if not hits
+          else f"Every hit cleared by the AI screening rule ({len(safe)}).")
+    case["closed"]["auto"] = True
+    return "closed"
 
 
 # The console's alert outcomes (the name-screening page's words) for a hit's confirmation.

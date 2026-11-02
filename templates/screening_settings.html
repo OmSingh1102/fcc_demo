@@ -47,6 +47,30 @@
     </div>
 </div>
 
+<div class="card mt-12" id="settings-auto">
+    <div class="card-head"><div><div class="card-title">Auto-verify: the AI closes the safe cases</div>
+        <div class="card-sub">what the AI may close without an analyst; everything else goes to an analyst. Applies as the AI answers from now on</div></div>
+        <span class="badge {{ 'emerald' if s.auto_verify else 'slate' }}">{{ 'On' if s.auto_verify else 'Off' }}</span></div>
+    <div class="card-body settings-grid">
+        <input type="hidden" name="auto_form" value="1">
+        <label><span><input type="checkbox" name="auto_verify" value="1"{% if s.auto_verify %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> Auto-verify on</span>
+            <span class="tiny muted">off: an analyst gives every hit its outcome</span></label>
+        <label><span><input type="checkbox" name="auto_no_hit" value="1"{% if s.auto_no_hit %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> Close a case with no World-Check hit</span>
+            <span class="tiny muted">only when every ID check passed</span></label>
+        <label>Clear a hit when the AI says false positive at (%)
+            <input class="input" type="number" name="auto_min_confidence" min="50" max="100" value="{{ s.auto_min_confidence }}"{% if not can_edit %} disabled{% endif %}>
+            <span class="tiny muted">or more, and every ID check passed</span></label>
+        <label><span><input type="checkbox" name="auto_dob_differs" value="1"{% if s.auto_dob_differs %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> and the record's date of birth differs from the ID's</span>
+            <span class="tiny muted">a record with no date, or the same date or year, goes to an analyst</span></label>
+        <label>Lists that always go to an analyst
+            <input class="input" name="auto_person_lists" value="{{ s.auto_person_lists }}"{% if not can_edit %} disabled{% endif %}>
+            <span class="tiny muted">words of the record's category, comma-separated (Sanctions, PEP)</span></label>
+        <label>QC sample (%)
+            <input class="input" type="number" name="auto_qc_pct" min="0" max="100" value="{{ s.auto_qc_pct }}"{% if not can_edit %} disabled{% endif %}>
+            <span class="tiny muted">of the cases the AI would close, left for an analyst to check the AI</span></label>
+    </div>
+</div>
+
 {% if can_edit %}
 <div class="row mt-12">
     <button class="btn btn-primary" type="submit">{{ icon('check') }} Save settings</button>

@@ -1939,6 +1939,7 @@ def _screen_job(job):
         h = _hit(r, uid)
         if h and (h.get("ai") or {}).get("job") == token and not h.get("resolution"):
             h["ai"] = dict(ai, job=token)
+            id_screening.auto_verify(r, SCREEN_SETTINGS)
     _screen_update(scan_id, land)
 
 
@@ -2007,11 +2008,13 @@ def scan_id():
     if request.method == "GET":
         scans = _scans()
         status = request.args.get("status", "")
-        shown = [s for s in scans if not status or s.get("status", "open") == status]
+        kind = lambda s: ("open" if s.get("status", "open") == "open"                       # noqa: E731
+                          else "auto" if (s.get("closed") or {}).get("auto") else "closed")
+        shown = [s for s in scans if not status or kind(s) == status]
         return render_template("scan.html", models=id_scan.models(), default_model=SCREEN_SETTINGS["reader_model"],
                                model_ready=id_scan.model_ready(), scans=shown, status=status,
-                               counts={"open": sum(1 for s in scans if s.get("status", "open") == "open"),
-                                       "closed": sum(1 for s in scans if s.get("status") == "closed"), "all": len(scans)},
+                               counts={k: sum(1 for s in scans if kind(s) == k) for k in ("open", "auto", "closed")} | {"all": len(scans)},
+                               auto_on=SCREEN_SETTINGS.get("auto_verify"),
                                source=id_screening.source_label(SCREEN_SETTINGS), outcome=id_screening.outcome)
     f = request.files.get("image")
     if not f or not f.filename:
@@ -2028,6 +2031,7 @@ def scan_id():
                   image=uploads.store("scans", sid, jpeg), verdict=id_scan.verdict(result))
     if id_screening.is_id(result["read"]):
         _screen_search(record)
+        id_screening.auto_verify(record, SCREEN_SETTINGS)          # a case with no hit (hits wait for the AI)
     _save("scan", record)
     if result["error"]:
         flash(result["error"], "error")
@@ -2111,7 +2115,7 @@ def scan_screen(scan_id):
     if rec.get("status") == "closed" or not id_screening.is_id(rec.get("read")):
         flash("Only an open case with a read ID can be searched again.", "error")
         return redirect(url_for("scan_result", scan_id=scan_id) + "#screening")
-    rec = _screen_update(scan_id, _screen_search)
+    rec = _screen_update(scan_id, lambda r: (_screen_search(r), id_screening.auto_verify(r, SCREEN_SETTINGS)))
     n = _screen_queue(scan_id, why="searched again")
     flash(rec["screening"]["error"] or f"Searched again on {rec['screening']['source_label']}: "
           f"{len(rec['screening']['hits'])} hit(s); {n} sent to the AI.", "error" if rec["screening"]["error"] else "success")
@@ -2242,6 +2246,18 @@ def screening_settings():
         if not (0 <= examples <= 12 and 50 <= threshold <= 100 and 1 <= max_hits <= 20):
             flash("Examples 0-12, name score 50-100, hits 1-20.", "error")
             return redirect(url_for("screening_settings"))
+        if f.get("auto_form"):                      # the auto-verify card was on the page: unticked boxes are off
+            try:
+                confidence, qc_pct = int(f.get("auto_min_confidence", 0)), int(f.get("auto_qc_pct", 0))
+            except ValueError:
+                flash("The AI's confidence and the QC sample are whole numbers.", "error")
+                return redirect(url_for("screening_settings"))
+            if not (50 <= confidence <= 100 and 0 <= qc_pct <= 100):
+                flash("Confidence 50-100, QC sample 0-100%.", "error")
+                return redirect(url_for("screening_settings"))
+            s.update(auto_verify=bool(f.get("auto_verify")), auto_no_hit=bool(f.get("auto_no_hit")),
+                     auto_dob_differs=bool(f.get("auto_dob_differs")), auto_min_confidence=confidence, auto_qc_pct=qc_pct,
+                     auto_person_lists=", ".join(x.strip() for x in f.get("auto_person_lists", "").split(",") if x.strip()))
         s.update(reader_model=f.get("reader_model") if f.get("reader_model") in reader_ids else s["reader_model"],
                  decision_model=f.get("decision_model") if f.get("decision_model") in decision_ids else s["decision_model"],
                  examples=examples, name_threshold=threshold, max_hits=max_hits)

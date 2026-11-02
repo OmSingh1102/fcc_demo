@@ -27,7 +27,9 @@
             <div class="arch-arrow">→</div>
             <div class="arch-step ai"><b>6. AI decision on each hit</b><span>{{ decider_label }} under the current <a href="{{ url_for('screening_sop') }}">Screening SOP</a>, with the most similar resolved cases: clear, true match, ask the customer or escalate, with its reasons</span></div>
             <div class="arch-arrow">→</div>
-            <div class="arch-step person"><b>7. Alert outcome</b><span>An analyst gives each hit its outcome on the name-screening page or in the World-Check console; the case closes when every hit has one</span></div>
+            <div class="arch-step rule"><b>7. Auto-verify</b><span>The AI screening rule closes the safe cases: no hit, or the AI sure it is a different person with a different date of birth and not a sanctions or PEP record (all set on <a href="{{ url_for('screening_settings') }}#settings-auto">Settings</a>), with a QC sample left for an analyst</span></div>
+            <div class="arch-arrow">→</div>
+            <div class="arch-step person"><b>8. Alert outcome</b><span>An analyst gives the rest their outcome on the name-screening page or in the World-Check console; the case closes when every hit has one</span></div>
         </div>
         <div class="arch-side">
             <div class="arch-step rule"><b>Settings, not code</b><span>The reading and deciding models, how many similar cases go in the prompt, the name-match floor, how many hits are kept, the World-Check account: on <a href="{{ url_for('screening_settings') }}">Settings</a></span></div>
@@ -49,6 +51,7 @@
         <tr><td class="strong">Searching World-Check</td><td>A name search (word order, diacritics, initials set aside); the date of birth and country are shown beside each hit, never used to drop one</td><td>{% if wc_live %}<span class="arch-key api">External API</span>{% else %}<span class="arch-key sim">Simulated</span>{% endif %}</td></tr>
         <tr><td class="strong">Deciding each hit</td><td>A model given the SOP, the client's variance reference and the most similar resolved cases; a suggestion with its reasons</td><td><span class="arch-key ai">AI model</span></td></tr>
         <tr><td class="strong">The SOP</td><td>Written by the QC lead on the Screening SOP page, kept as versions</td><td><span class="arch-key person">People</span></td></tr>
+        <tr><td class="strong">Closing the safe cases</td><td>The AI screening rule on the AI's answer: the confidence it needs, the date of birth differing, the lists that always go to a person, the QC sample, all on Settings</td><td><span class="arch-key rule">Rules</span></td></tr>
         <tr><td class="strong">The alert outcome</td><td>An analyst, with the AI's suggestion prefilled; whether they agreed with it is kept</td><td><span class="arch-key person">People</span></td></tr>
         </tbody>
     </table>

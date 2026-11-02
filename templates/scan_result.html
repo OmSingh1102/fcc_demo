@@ -11,8 +11,8 @@
    Every value is the upload's, the model's read, the World-Check hits' or an
    analyst's; a field nothing filled is left out. #}
 {% set r = s.read or {} %}{% set f = r.fields or {} %}{% set sc = s.screening or {} %}{% set hits = sc.hits or [] %}
-{% set ns = namespace(open=0, ai_wait=0, ai_done=0) %}
-{% for h in hits %}{% if not h.resolution %}{% set ns.open = ns.open + 1 %}{% endif %}{% if (h.ai or {}).status == 'pending' %}{% set ns.ai_wait = ns.ai_wait + 1 %}{% elif (h.ai or {}).status == 'done' %}{% set ns.ai_done = ns.ai_done + 1 %}{% endif %}{% endfor %}
+{% set ns = namespace(open=0, ai_wait=0, ai_done=0, auto=0) %}
+{% for h in hits %}{% if not h.resolution %}{% set ns.open = ns.open + 1 %}{% elif h.resolution.auto %}{% set ns.auto = ns.auto + 1 %}{% endif %}{% if (h.ai or {}).status == 'pending' %}{% set ns.ai_wait = ns.ai_wait + 1 %}{% elif (h.ai or {}).status == 'done' %}{% set ns.ai_done = ns.ai_done + 1 %}{% endif %}{% endfor %}
 {% set closed = s.status == 'closed' %}
 {% set name = f.full_name or ((f.given_names ~ ' ' ~ f.surname)|trim) %}
 <div class="case-layout">
@@ -23,7 +23,9 @@
         <div class="rail-chips">
             {% if closed %}<span class="badge {{ {'True match': 'solid-rose', 'Possible match': 'amber'}.get(s.closed.outcome, 'emerald') }}" id="case-status">Closed · {{ s.closed.outcome }}</span>
             {% else %}<span class="badge blue" id="case-status">Open</span>{% endif %}
-            {% if not closed and ns.open %}{{ workflow_badge('human-in-the-loop', 'An analyst confirms each World-Check hit; the AI only suggests') }}{% endif %}
+            {% if closed and s.closed.auto %}{{ workflow_badge('auto-verified', s.closed.note) }}
+            {% elif not closed and ns.open %}{{ workflow_badge('human-in-the-loop', 'An analyst gives the hits the AI screening rule did not clear their outcome') }}{% endif %}
+            {% if s.qc_sample %}<span class="badge amber" title="The AI screening rule would have closed it ({{ s.qc_sample.pct }}% of such cases go to an analyst)">QC sample</span>{% endif %}
             {% if ns.ai_wait %}<span class="badge blue"><span class="spin"></span> AI reviewing {{ ns.ai_wait }}</span>{% endif %}
             {% include "_scan_verdict.html" %}
         </div>
@@ -197,7 +199,7 @@
                 <div class="verdict-box differs small">{{ sc.error }}</div>
             {% else %}
                 <div class="small mb-8">Screening Alert Hit: {{ hit_mark('Hit' if hits else 'No Match') }}</div>
-                {% if hits %}<div class="small mb-8 muted" id="ai-summary">AI: {{ ns.ai_done }} of {{ hits|length }} hit{{ 's' if hits|length != 1 }} reviewed under the screening SOP{% if ns.ai_wait %}, {{ ns.ai_wait }} still reviewing{% endif %}; {{ hits|length - ns.open }} confirmed by an analyst, {{ ns.open }} left for review. <a href="{{ url_for('screening_sop') }}">The SOP</a></div>{% endif %}
+                {% if hits %}<div class="small mb-8 muted" id="ai-summary">AI: {{ ns.ai_done }} of {{ hits|length }} hit{{ 's' if hits|length != 1 }} reviewed under the screening SOP{% if ns.ai_wait %}, {{ ns.ai_wait }} still reviewing{% endif %}; {% if ns.auto %}{{ ns.auto }} cleared by the AI screening rule, {% endif %}{{ hits|length - ns.open - ns.auto }} given an outcome by an analyst, {{ ns.open }} left for review. <a href="{{ url_for('screening_sop') }}">The SOP</a></div>{% endif %}
                 <table class="tbl dense">
                     <thead><tr><th>Platform Name</th><th>User Name</th><th>Screen time</th><th>Name screening list</th><th>Screening result</th><th>Alert ID</th></tr></thead>
                     <tbody>
@@ -243,7 +245,7 @@
                     <td class="strong nowrap">{{ h.name }} <span class="tiny muted mono">{{ h.uid }}</span></td>
                     <td class="nowrap">{% if ai.status == 'done' %}{{ outcome_badge(outcomes[ai.suggested]) }} <span class="tiny muted">{{ ai.confidence }}%</span>{% elif ai.status == 'pending' %}<span class="tiny muted">reviewing…</span>{% else %}-{% endif %}</td>
                     <td>{% if res %}{{ outcome_badge(outcomes[res.status]) }}{% else %}{{ outcome_badge('Pending') }}{% endif %}</td>
-                    <td>{% if res and res.ai_suggested %}{{ 'Yes' if res.agreed else 'No' }}{% else %}-{% endif %}</td>
+                    <td>{% if res and res.auto %}<span class="badge emerald" title="{{ res.note }}">Cleared by the rule</span>{% elif res and res.ai_suggested %}{{ 'Yes' if res.agreed else 'No' }}{% else %}-{% endif %}</td>
                     <td>{% if res and res.risk %}{{ outcome_badge(res.risk) }}{% else %}-{% endif %}</td>
                     <td>{{ (res.reason if res else '') or '-' }}</td>
                     <td><span class="ellipsis" title="{{ res.note if res else '' }}">{{ (res.note if res else '') or '-' }}</span></td>

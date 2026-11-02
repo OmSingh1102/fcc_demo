@@ -13,7 +13,9 @@
 <div class="row between mb-12">
     <div class="row">
         <a class="btn btn-ghost btn-xs btn-icon" href="{{ url_for('scan_alerts', scan_id=s.id) }}" title="Refresh">{{ icon('refresh-cw') }}</a>
-        {% if closed %}<span class="badge slate">Closed</span>{% else %}<span class="badge emerald">Open</span>{% endif %}
+        {% if closed and s.closed.auto %}<span class="badge violet" title="{{ s.closed.note }}">{{ icon('check-circle') }} Auto-verified by the AI screening rule</span>
+        {% elif closed %}<span class="badge slate">Closed</span>{% else %}<span class="badge emerald">Open</span>{% endif %}
+        {% if s.qc_sample %}<span class="badge amber" title="The AI screening rule would have closed it">QC sample</span>{% endif %}
         {% if counts.Pending %}<span class="badge amber" title="hits no analyst has confirmed yet">{{ counts.Pending }} for review</span>{% endif %}
         <a class="small" href="{{ url_for('scan_result', scan_id=s.id) }}">{{ icon('arrow-left') }} Case</a>
     </div>
@@ -124,7 +126,8 @@
                             {% if ai.reasons %}<ul class="small screen-reasons">{% for x in ai.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
                             {% if ai.request %}<p class="small"><span class="muted">Ask the customer for:</span> <b>{{ ai.request }}</b></p>{% endif %}
                             {% if ai.name_variance or ai.address_variance %}<p class="tiny muted">Name discrepancy: {{ ai.name_variance or '—' }} · address discrepancy: {{ ai.address_variance or '—' }}</p>{% endif %}
-                            {% if res and res.ai_suggested %}<p class="small">{% if res.agreed %}<span class="badge emerald">The analyst agreed</span>{% else %}<span class="badge amber">The analyst decided {{ outcomes[res.status] }}</span>{% endif %}</p>{% endif %}
+                            {% if res and res.auto %}<p class="small"><span class="badge violet">{{ icon('check-circle') }} Cleared by the AI screening rule</span> {{ res.note }}</p>
+                            {% elif res and res.ai_suggested %}<p class="small">{% if res.agreed %}<span class="badge emerald">The analyst agreed</span>{% else %}<span class="badge amber">The analyst decided {{ outcomes[res.status] }}</span>{% endif %}</p>{% endif %}
                             {% elif ai.status == 'pending' %}<p class="small"><span class="spin"></span> The AI is reviewing this alert under SOP {{ sop.version }}, with the resolved cases most like it… <span class="muted">this page refreshes when it answers</span></p>
                             {% elif ai.status == 'failed' %}<p class="small"><b>The AI gave no answer.</b> {{ ai.error }}</p>
                             {% else %}<p class="small muted">Not sent to the AI.</p>{% endif %}

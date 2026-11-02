@@ -36,8 +36,9 @@
         <div class="card-sub">real ID images are kept until the case is deleted</div></div>
     <div class="tabs chips" style="padding:0 16px">
         <a class="tab chip {% if not status %}active{% endif %}" href="{{ url_for('scan_id') }}">All <span class="n">{{ counts.all }}</span></a>
-        <a class="tab chip {% if status == 'open' %}active{% endif %}" href="{{ url_for('scan_id', status='open') }}">Open <span class="n">{{ counts.open }}</span></a>
-        <a class="tab chip {% if status == 'closed' %}active{% endif %}" href="{{ url_for('scan_id', status='closed') }}">Closed <span class="n">{{ counts.closed }}</span></a>
+        <a class="tab chip {% if status == 'open' %}active{% endif %}" href="{{ url_for('scan_id', status='open') }}">Needs an analyst <span class="n">{{ counts.open }}</span></a>
+        <a class="tab chip {% if status == 'auto' %}active{% endif %}" href="{{ url_for('scan_id', status='auto') }}" title="Closed by the AI screening rule ({{ 'on' if auto_on else 'off' }} on Settings)">Auto-verified <span class="n">{{ counts.auto }}</span></a>
+        <a class="tab chip {% if status == 'closed' %}active{% endif %}" href="{{ url_for('scan_id', status='closed') }}">Closed by an analyst <span class="n">{{ counts.closed }}</span></a>
     </div>
     {% if scans %}
     <div class="tbl-scroll">
@@ -56,8 +57,10 @@
                 {% if ns.wait %}<span class="badge blue">Reviewing {{ ns.wait }}</span>{% endif %}
                 {% for d in ns.done|unique %}<span class="badge {{ {'True match': 'rose', 'Possible match': 'amber', 'False positive': 'emerald'}[d] }}">{{ d }}</span> {% endfor %}
                 {% if not hits %}<span class="muted">—</span>{% endif %}</td>
-            <td>{% if s.status == 'closed' %}{% set o = s.closed.outcome %}<span class="badge {{ {'True match': 'solid-rose', 'Possible match': 'amber', 'Cleared': 'emerald', 'No match': 'emerald'}.get(o, 'slate') }}">{{ o }}</span><div class="tiny muted">{{ s.closed.by|who }}</div>
-                {% else %}<span class="badge slate">Open</span>{% endif %}</td>
+            <td>{% if s.status == 'closed' and s.closed.auto %}<span class="badge emerald" title="{{ s.closed.note }}">{{ icon('shield-check') }} Auto-verified</span><div class="tiny muted">{{ s.closed.outcome }} · AI screening rule</div>
+                {% elif s.status == 'closed' %}{% set o = s.closed.outcome %}<span class="badge {{ {'True match': 'solid-rose', 'Possible match': 'amber', 'Cleared': 'emerald', 'No match': 'emerald'}.get(o, 'slate') }}">{{ o }}</span><div class="tiny muted">{{ s.closed.by|who }}</div>
+                {% elif s.qc_sample %}<span class="badge amber" title="The AI screening rule would have closed it; kept for an analyst as a QC sample">QC sample</span>
+                {% else %}<span class="badge slate">Needs an analyst</span>{% endif %}</td>
             <td><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('scan_result', scan_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a></td></tr>
         {% endfor %}</tbody>
     </table>

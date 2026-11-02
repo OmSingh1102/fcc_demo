@@ -304,6 +304,20 @@ Start from an ID document, with no CSV: every uploaded ID becomes a case.
    is shown there too: an *AI suggestion* column in the matches list, and on
    each record its verdict, confidence, date-of-birth finding and reasons,
    with *Ask the AI again* while the match is unresolved.
+**Auto-verify** (`id_screening.auto_verify`; *Auto-verify* on Settings, on by
+default). Once the AI has answered on every hit, the AI screening rule
+closes the safe cases and leaves the rest for an analyst: a case with no
+World-Check hit closes as *No match*; a hit is cleared as a false positive
+when the AI said false positive at the confidence set (90% by default), the
+record's date of birth differs from the ID's, and the record's category is
+not one of the lists that always go to an analyst (Sanctions, PEP); the case
+closes when every hit is cleared. Nothing is closed while an ID check warns
+or fails. A share of the cases the rule would close (5% by default, fixed by
+the case ID) is left for an analyst as a QC sample. All of it is on
+Settings. The case list has *Needs an analyst*, *Auto-verified* and *Closed
+by an analyst*; the case and the name-screening page say what the rule
+cleared and why; Model evaluation counts the rule's clears apart and does
+not score them (no analyst gave them an answer).
 Saving a new SOP version (the QC lead) sends every open case's unconfirmed
 hits to the model again under it. Settings (the QC lead) holds the models,
 the examples per hit, the stand-in's name-score floor and the hits kept, and

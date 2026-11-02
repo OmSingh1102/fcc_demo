@@ -17,7 +17,7 @@
     <div><h2>Model evaluation</h2>
         <p>The two models of the Screening cases flow, measured on the IDs uploaded in this console as they are read and decided; the page follows every upload and every alert outcome. An upload has no answer key, so the reading model is measured by what the code's checks find on its read, and the deciding model against the analysts: each alert outcome an analyst gives is the answer its suggestion is scored on.</p>
         <p class="small">In use (set on <a href="{{ url_for('screening_settings') }}">Settings</a>; the reader can also be chosen on each upload): reading <b>{{ reader_label }}</b> · deciding <b>{{ decider_label }}</b>.
-            So far: {{ totals.uploads }} upload{{ 's' if totals.uploads != 1 }}, {{ totals.hits }} World-Check hit{{ 's' if totals.hits != 1 }}, {{ totals.confirmed }} given an outcome by an analyst after the AI's suggestion.</p></div>
+            So far: {{ totals.uploads }} upload{{ 's' if totals.uploads != 1 }}, {{ totals.hits }} World-Check hit{{ 's' if totals.hits != 1 }}, {{ totals.confirmed }} given an outcome by an analyst after the AI's suggestion; {{ totals.auto_closed }} case{{ 's' if totals.auto_closed != 1 }} auto-verified and {{ totals.auto_cleared }} hit{{ 's' if totals.auto_cleared != 1 }} cleared by the AI screening rule (<a href="{{ url_for('screening_settings') }}#settings-auto">its settings</a>). A hit the rule cleared is not scored: no analyst gave it an answer.</p></div>
 </div>
 
 {% if not totals.uploads %}
@@ -62,12 +62,13 @@
     {% if deciding %}
     <div class="tbl-scroll">
     <table class="tbl" id="eval-deciding-table">
-        <thead><tr><th>Model</th><th class="num">Hits decided</th><th class="num">Given an outcome by an analyst</th><th class="num">Analyst agreed</th><th class="num">AI said clear, analyst did not</th><th class="num">Calls failed</th><th class="num">Seconds a hit</th><th class="num">Cost a hit</th><th class="num">Spent</th></tr></thead>
+        <thead><tr><th>Model</th><th class="num">Hits decided</th><th class="num">Cleared by the rule</th><th class="num">Given an outcome by an analyst</th><th class="num">Analyst agreed</th><th class="num">AI said clear, analyst did not</th><th class="num">Calls failed</th><th class="num">Seconds a hit</th><th class="num">Cost a hit</th><th class="num">Spent</th></tr></thead>
         <tbody>
         {% for m in deciding %}
         <tr{% if m.id == decider %} class="arch-current"{% endif %}>
             <td class="strong nowrap">{{ m.label }}{% if m.id == decider %} <span class="badge blue">in use</span>{% endif %}<div class="tiny muted">{{ m.id }}</div></td>
             <td class="num">{{ m.decided }}</td>
+            <td class="num">{{ m.auto }}</td>
             <td class="num">{{ m.confirmed }}</td>
             <td class="num">{% if m.confirmed %}{{ m.agreed }} · {{ pct(m.agreement) }}{% else %}—{% endif %}</td>
             <td class="num">{% if m.cleared_wrongly %}<span class="badge rose">{{ m.cleared_wrongly }}</span>{% else %}0{% endif %}</td>

@@ -219,7 +219,7 @@ class ScreeningBookPageTests(unittest.TestCase):
             StateStore.delete("scan", [rec["id"]])
         StateStore.delete(id_screening.SOP_KIND, [r["id"] for r in StateStore.records(id_screening.SOP_KIND)])
         fcc.SCREEN_SETTINGS.clear()
-        fcc.SCREEN_SETTINGS.update(id_screening.default_settings())
+        fcc.SCREEN_SETTINGS.update(id_screening.default_settings(), auto_verify=False)    # the auto-verify tests turn it on
         self.calls = []
 
     def client(self, who="amara.iyer"):
@@ -362,6 +362,60 @@ class ScreeningBookPageTests(unittest.TestCase):
             self.assertIn(needle, page)
         for absent in ("Tesseract", "CSV", "second opinion"):
             self.assertNotIn(absent, page)
+
+    def test_auto_verify_closes_the_safe_cases_only(self):
+        fcc.SCREEN_SETTINGS.update(auto_verify=True, auto_qc_pct=0)
+        c = self.client()
+        sid = self.upload(c, a_read(name="ZEBEDIAH QUARTERMAINE", surname="QUARTERMAINE", given="ZEBEDIAH"))
+        rec = fcc._scan(sid)                                         # no hit, every check passed
+        self.assertEqual((rec["status"], rec["closed"]["outcome"], rec["closed"]["by"], rec["closed"].get("auto")),
+                         ("closed", "No match", id_screening.AUTO_ACTOR, True))
+        refused = c.post(f"/scan/{sid}/close", data={"note": "again"}, follow_redirects=True)
+        self.assertIn("The case is closed", refused.data.decode("utf-8"))
+        plain = self.decide
+        with mock.patch.object(self, "decide", lambda *a, **k: dict(plain(*a, **k), confidence=95)):
+            sid = self.upload(c, a_read(dob="1970-01-01"), "ivory")    # a different date of birth, an adverse-media record
+        rec = fcc._scan(sid)
+        res = rec["screening"]["hits"][0]["resolution"]
+        self.assertEqual((rec["status"], rec["closed"]["outcome"], res["by"], res["auto"]), ("closed", "Cleared", id_screening.AUTO_ACTOR, True))
+        self.assertIn("95%", res["note"])
+        sid = self.upload(c, a_read(), "linen")                       # the same date of birth (and 80% sure): an analyst's
+        self.assertEqual(fcc._scan(sid)["status"], "open")
+        page = c.get("/scan").data.decode("utf-8")
+        for needle in ('Auto-verified <span class="n">2</span>', 'Needs an analyst <span class="n">1</span>'):
+            self.assertIn(needle, page)
+        self.assertIn("Cleared by the rule", c.get(f"/scan/{rec['id']}").data.decode("utf-8"))
+        self.assertIn("Cleared by the AI screening rule", c.get(f"/scan/{rec['id']}/screening").data.decode("utf-8"))
+        [m] = upload_eval.deciding(fcc._scans())
+        self.assertEqual((m["auto"], m["confirmed"]), (1, 0))      # the rule's clear is not an analyst's answer
+        self.assertEqual(upload_eval.totals(fcc._scans())["auto_closed"], 2)
+        self.assertIn('id="settings-auto"', c.get("/screening/settings").data.decode("utf-8"))
+
+    def test_the_rule(self):
+        s = id_screening.default_settings()
+        case = {"id": "SCAN-1", "verdict": "Pass", "status": "open"}
+        hit = {"uid": "WC-1", "category": "Adverse Media - Fraud", "dob_result": "Not matched",
+               "ai": {"status": "done", "outcome": "clear", "confidence": 92}}
+        self.assertTrue(id_screening.hit_is_safe(case, hit, s)[0])
+        self.assertIn("ID check", id_screening.hit_is_safe(dict(case, verdict="Check"), hit, s)[1])
+        for change, why in (({"category": "Sanctions (OFAC SDN)"}, "Sanctions"), ({"category": "PEP - Level 2"}, "PEP"),
+                            ({"dob_result": "Matched"}, "date of birth"), ({"dob_result": "Unknown"}, "date of birth"),
+                            ({"ai": dict(hit["ai"], confidence=85)}, "85%"), ({"ai": dict(hit["ai"], outcome="escalate")}, "false positive")):
+            ok, said = id_screening.hit_is_safe(case, dict(hit, **change), s)
+            self.assertFalse(ok)
+            self.assertIn(why, said)
+        self.assertTrue(id_screening.hit_is_safe(case, dict(hit, dob_result="Matched"), dict(s, auto_dob_differs=False))[0])
+        two = {"id": "SCAN-2", "verdict": "Pass", "status": "open",
+               "screening": {"hits": [dict(hit, uid="A"), dict(hit, uid="B", category="Sanctions")]}}
+        self.assertEqual(id_screening.auto_verify(two, dict(s, auto_qc_pct=0)), "cleared")   # the sanctions hit stays
+        self.assertEqual([h["uid"] for h in id_screening.open_hits(two)], ["B"])
+        waiting = {"id": "SCAN-3", "verdict": "Pass", "status": "open",
+                   "screening": {"hits": [dict(hit), dict(hit, uid="B", ai={"status": "pending"})]}}
+        self.assertEqual(id_screening.auto_verify(waiting, s), "")                # not before the AI answered every hit
+        sampled = {"id": "SCAN-4", "verdict": "Pass", "status": "open", "screening": {"hits": [dict(hit)]}}
+        self.assertEqual(id_screening.auto_verify(sampled, dict(s, auto_qc_pct=100)), "qc sample")
+        self.assertEqual((sampled["status"], bool(sampled["qc_sample"])), ("open", True))
+        self.assertEqual(id_screening.auto_verify(sampled, dict(s, auto_verify=False)), "")
 
     def test_ai_assessment_sends_the_alerts_again(self):
         c = self.client()
