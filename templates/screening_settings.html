@@ -6,6 +6,9 @@
     <div><h2>Settings</h2>
         <p>Where the console screens, and with which models. Nothing here is in the code: the QC lead changes it, and it applies to the next upload (and to "Search again" on an open case).</p></div>
 </div>
+{% if not can_edit %}
+<div class="note warn mt-12" id="settings-locked"><b>Read only.</b> Only the QC lead changes the settings: sign out and sign in as <b>{{ qc_names or 'the QC lead' }}</b> to enter keys and change models.</div>
+{% endif %}
 
 <form method="post" id="settings-form">
 <div class="card mt-12" id="settings-wc">
@@ -117,7 +120,7 @@
     <button class="btn btn-outline" type="submit" form="settings-azure-test"{% if not az_live %} disabled title="Save the endpoint and key first"{% endif %}>{{ icon('activity') }} Test Azure</button>
 </div>
 {% else %}
-<div class="small muted mt-12">Only the QC lead changes the settings: sign in as the QC lead to edit.</div>
+<div class="small muted mt-12">Only the QC lead changes the settings: sign in as {{ qc_names or 'the QC lead' }} to edit.</div>
 {% endif %}
 </form>
 <form method="post" action="{{ url_for('screening_settings_test') }}" id="settings-test"></form>

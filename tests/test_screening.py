@@ -417,6 +417,14 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertEqual((sampled["status"], bool(sampled["qc_sample"])), ("open", True))
         self.assertEqual(id_screening.auto_verify(sampled, dict(s, auto_verify=False)), "")
 
+    def test_settings_say_who_can_edit(self):
+        page = self.client().get("/screening/settings").data.decode("utf-8")
+        self.assertIn('id="settings-locked"', page)
+        self.assertIn("Leah Fernandez", page)
+        page = self.client("leah.fernandez").get("/screening/settings").data.decode("utf-8")
+        self.assertNotIn('id="settings-locked"', page)
+        self.assertNotIn(" disabled>", page.split('id="settings-intake"')[0].split('id="settings-form"')[1].replace('disabled title=', ''))
+
     def test_the_intake_api(self):
         qc = self.client("leah.fernandez")
         self.assertEqual(self.client().post("/screening/settings/intake-keys", data={"name": "x"}).status_code, 302)

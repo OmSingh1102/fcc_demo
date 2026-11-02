@@ -2454,7 +2454,7 @@ def screening_settings():
                            api_base=request.url_root.rstrip("/") + "/api/v1",
                            readers=_readers(), deciders=id_screening.decision_models(), live=id_screening.live(s),
                            source=id_screening.source_label(s), can_edit="QC" in _levels(), model_ready=id_scan.model_ready(),
-                           watchlist_size=len(watchlist.profiles()))
+                           qc_names=_analysts_with(["QC"], _tenant()), watchlist_size=len(watchlist.profiles()))
 
 
 def _services_update(s, f):
