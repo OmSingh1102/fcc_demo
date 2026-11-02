@@ -36,9 +36,9 @@
             <select class="input" name="reader_model"{% if not can_edit %} disabled{% endif %}>{% for m in readers %}<option value="{{ m.id }}"{% if m.id == s.reader_model %} selected{% endif %}>{{ m.label }}</option>{% endfor %}</select></label>
         <label>Model that decides each hit
             <select class="input" name="decision_model"{% if not can_edit %} disabled{% endif %}>{% for m in deciders %}<option value="{{ m.id }}"{% if m.id == s.decision_model %} selected{% endif %}>{{ m.label }} · ${{ m.price[0] }} / ${{ m.price[1] }} per M tokens</option>{% endfor %}</select></label>
-        <label>Examples per hit: hits your analysts gave an outcome
+        <label>Resolved example cases per hit
             <input class="input" type="number" name="examples" min="0" max="12" value="{{ s.examples }}"{% if not can_edit %} disabled{% endif %}>
-            <span class="tiny muted">the most similar go to the AI with their outcome; 0 = the SOP alone; none until analysts give outcomes</span></label>
+            <span class="tiny muted">0 = the SOP alone</span></label>
         <label>Name score a stand-in hit needs (50-100)
             <input class="input" type="number" name="name_threshold" min="50" max="100" value="{{ s.name_threshold }}"{% if not can_edit %} disabled{% endif %}>
             <span class="tiny muted">the stand-in's search floor; World-Check One applies its own</span></label>

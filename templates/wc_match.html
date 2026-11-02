@@ -91,7 +91,7 @@
         <div class="wc-panel mt-12" id="wc-ai">
             <h4>AI suggestion <span class="tiny muted" style="text-transform:none;letter-spacing:0;font-weight:400">· a suggestion under the screening SOP; the analyst resolves</span></h4>
             {% if ai.status == 'pending' %}
-                <div class="small"><span class="spin"></span> The AI is reviewing this match under the screening SOP, with the hits your analysts resolved that are most like it… <span class="muted">this page refreshes when it answers</span></div>
+                <div class="small"><span class="spin"></span> The AI is reviewing this match under the screening SOP, with the resolved cases most like it… <span class="muted">this page refreshes when it answers</span></div>
             {% elif ai.status == 'failed' %}
                 <div class="small"><b>The AI gave no decision.</b> {{ ai.error }}</div>
             {% elif ai.status == 'done' %}

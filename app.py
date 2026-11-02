@@ -1933,7 +1933,7 @@ def _screen_job(job):
     if not hit or (hit.get("ai") or {}).get("job") != token or hit.get("resolution"):
         return
     ai = id_screening.decide(scan_id, rec["screening"]["person"], hit, id_screening.sop_current(_sop_stored()),
-                             dict(SCREEN_SETTINGS), id_screening.resolved(_scans()))
+                             dict(SCREEN_SETTINGS))
 
     def land(r):
         h = _hit(r, uid)

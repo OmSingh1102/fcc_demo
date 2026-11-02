@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-head">
     <div><h2>Screening cases</h2>
-        <p>Upload an ID. The AI reads it; the person is searched on World-Check; the AI decides each hit under the <a href="{{ url_for('screening_sop') }}">screening SOP</a>, learning from the hits your analysts have already given an outcome; an analyst gives each hit its outcome. Every upload is a case.</p></div>
+        <p>Upload an ID. The AI reads it; the person is searched on World-Check; the AI decides each hit under the <a href="{{ url_for('screening_sop') }}">screening SOP</a>, from similar resolved cases; an analyst confirms. Every upload is a case.</p></div>
 </div>
 
 <div class="card mt-12" id="scan-form">

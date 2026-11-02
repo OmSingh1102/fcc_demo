@@ -10,12 +10,12 @@ rule is written in code.
      cases (fincrime/watchlist). Either way the search only finds candidates.
   3. Decide. For each hit a model gets the SOP (the current version of the
      SOP page: the files' v1 to v3, then any version saved in the console),
-     the client's variance reference, and the hits this console's analysts
-     have already given an outcome that are most like this one, with that
-     outcome (none at first: the SOP alone), and answers clear, true match,
-     ask the customer or escalate, with the name and address discrepancy and
-     its reasons. The 1,000 records are the stand-in World-Check only: no
-     resolved case of theirs is an example.
+     the client's variance reference, and the resolved cases of the log most
+     like this one with what the analysts decided, and answers as the
+     decision model of the Model evaluation page does: clear, true match, ask
+     the customer, escalate; with the name and address discrepancy and its
+     reasons. The resolved case behind the very record that was hit is never
+     one of the examples (it would hand the model the analysts' answer).
   4. An analyst confirms each hit (true match, possible match, false
      positive). The case closes when every hit is confirmed, or, with no hit,
      when the analyst confirms there is none.
@@ -158,9 +158,8 @@ _FILE_COUNTRY = {"INDIA": "India", "VIETNAM": "Vietnam", "UNITED STATES": "Unite
 
 
 def _pseudo_row(key, who, hit):
-    """The scanned case in the log's columns, so its signals can be computed
-    the way the decision model computes them (decision_model.signals): the
-    World-Check record's columns, nothing of the log's answers."""
+    """The scanned case in the log's columns, so the examples can be chosen
+    the way the decision model chooses them (decision_model.signals)."""
     src = watchlist.row_of(hit["uid"]) if hit.get("source") == "stand-in" else None
     country = watchlist._country_key(who["issuing_country"]) or watchlist._country_key(who["nationality"])
     row = {k: "" for k in loader.read_rows()[0]}
@@ -177,67 +176,43 @@ def _pseudo_row(key, who, hit):
     return row
 
 
-def resolved(cases):
-    """The hits this console's analysts have given an outcome: what the AI
-    learns from, as {case, who, hit}."""
-    out = []
-    for c in cases:
-        sc = c.get("screening") or {}
-        if sc.get("person"):
-            out += [{"case": c["id"], "who": sc["person"], "hit": h} for h in sc.get("hits") or [] if h.get("resolution")]
-    return out
-
-
-def examples(case_id, who, hit, k, library):
-    """The k hits of `library` (resolved()) most like this one, on the
-    decision model's signals (the date-of-birth relation, the country, the
-    place, the list, the customer type); never one of this case's own."""
+def examples(case_id, who, hit, k):
+    """The k resolved cases of the log most like this one (same weighting as
+    the decision model's, without its name rules), never the case whose
+    World-Check record this hit is."""
     if k <= 0:
         return []
     me = decision_model.signals(_pseudo_row(f"{case_id}:{hit['uid']}", who, hit))
     scored = []
-    for item in library:
-        if item["case"] == case_id:
+    for other in decision_model.rows().values():
+        if other["world_check_uid"] == hit["uid"]:
             continue
-        o = decision_model.signals(_pseudo_row(f"{item['case']}:{item['hit']['uid']}", item["who"], item["hit"]))
+        o = decision_model.signals(other)
         w = (3 * (o["date of birth"] == me["date of birth"]) + 3 * (o["country"] == me["country"])
              + (o["place"] == me["place"]) + (o["list"] == me["list"]) + (o["customer"] == me["customer"]))
-        tie = hashlib.sha1((case_id + hit["uid"] + item["case"] + item["hit"]["uid"]).encode("utf-8")).hexdigest()
-        scored.append((-w, tie, item))
+        tie = hashlib.sha1((case_id + hit["uid"] + other["kyc_case_id"]).encode("utf-8")).hexdigest()
+        scored.append((-w, tie, other))
     return [o for _, _, o in sorted(scored, key=lambda t: t[:2])[:k]]
 
 
-_ANALYST = {"False positive": "False positive (cleared: a different person)",
-            "Possible match": "Possible match (the customer asked for a document, or escalated)", "True match": "True match"}
-
-
-def example(item):
-    """A hit an analyst gave an outcome: its facts and that outcome."""
-    res = item["hit"]["resolution"]
-    lines = [facts(item["who"], item["hit"]), f"The analyst's outcome: {_ANALYST.get(res['status'], res['status'])}"]
-    lines += [f"  {label}: {res[key]}" for key, label in (("reason", "reason"), ("risk", "risk"), ("note", "comment")) if res.get(key)]
-    return "\n".join(lines)
-
-
-def prompt(case_id, who, hit, k, library=()):
-    items = examples(case_id, who, hit, k, library)
+def prompt(case_id, who, hit, k):
+    rows = examples(case_id, who, hit, k)
     parts = []
-    if items:
-        parts.append("Hits this team's analysts have already given an outcome, most like this one:\n\n"
-                     + "\n\n".join(f"### Example {i}\n{example(o)}" for i, o in enumerate(items, 1)))
+    if rows:
+        parts.append("Resolved cases like this one, with what the analysts decided:\n\n"
+                     + "\n\n".join(f"### Example {i}\n{decision_model.example(o)}" for i, o in enumerate(rows, 1)))
     parts.append("### The case to decide\n" + facts(who, hit))
-    return "\n\n".join(parts), [f"{o['case']}:{o['hit']['uid']}" for o in items]
+    return "\n\n".join(parts), [o["kyc_case_id"] for o in rows]
 
 
-def decide(case_id, who, hit, sop, settings, library=()):
-    """The model's answer on one hit under one SOP version (an "ai" record),
-    with the most similar of `library` (resolved()) as examples; status
-    "failed" with the reason when there is no answer."""
+def decide(case_id, who, hit, sop, settings):
+    """The model's answer on one hit under one SOP version (an "ai" record);
+    status "failed" with the reason when there is no answer."""
     model = next((m for m in decision_models() if m["id"] == settings["decision_model"]), decision_models()[0])
     base = {"model": model["id"], "model_label": model["label"], "sop": sop["version"], "at": dates.now_str()}
     if not llm.KEY:
         return dict(base, status="failed", error="No model is configured (LLM_FOUNDRY_KEY): decide this hit yourself.")
-    text, used = prompt(case_id, who, hit, int(settings["examples"]), library)
+    text, used = prompt(case_id, who, hit, int(settings["examples"]))
     started = time.monotonic()
     try:
         ans, t_in, t_out = benchmark.call(model, [{"type": "text", "text": text}], decision_model.instructions(sop["text"]),
