@@ -1,4 +1,4 @@
-"""The Architecture page and the model benchmark's scoring (file book, no
+"""The model benchmark's scoring (file book, no
 network: the benchmark's model calls are not made here).
 
 Run:  .venv\\Scripts\\python.exe -m unittest -v tests.test_architecture
@@ -38,29 +38,6 @@ class ArchitectureTestCase(unittest.TestCase):
         fcc.CASE_BOOK = cls.book_before
         StateStore.clear()
         fcc._load_seed()
-
-    def page(self):
-        c = fcc.app.test_client()
-        c.post("/login", data={"analyst": "amara.iyer", "password": "1234"})
-        return c.get("/architecture").data.decode("utf-8")
-
-    def test_the_page_without_and_with_a_run(self):
-        with mock.patch.object(benchmark, "load", lambda: None):
-            page = self.page()
-        for needle in ('id="arch-pipeline"', 'id="arch-split"', 'id="arch-apis"', "World-Check One", "python -m fincrime.benchmark"):
-            self.assertIn(needle, page)
-        self.assertNotIn('id="arch-model-table"', page)
-        sample = [c for c in benchmark.sample(fcc.KYC_CASES, 4)]
-        rows = {m["id"]: [dict(benchmark.score(c, benchmark.truth(c)), tokens_in=7000, tokens_out=900, seconds=12.0)
-                          for c in sample] for m in benchmark.MODELS[:2]}
-        result = {"run_at": "2026-10-28 15:00:00", "price_sources": "test", "per_case": rows,
-                  "sample": {"cases": len(sample), "spoiled": sum(benchmark.spoiled(c) for c in sample), "ids": []},
-                  "fields": [{"key": f"{s}.{f}", "label": label} for s, f, label in benchmark.FIELDS],
-                  "models": [benchmark.summarise(m, rows[m["id"]]) for m in benchmark.MODELS[:2]]}
-        with mock.patch.object(benchmark, "load", lambda: result):
-            page = self.page()
-        for needle in ('id="arch-model-table"', 'id="arch-verdict"', "Claude Opus 4.8", "in use", 'id="arch-fields"'):
-            self.assertIn(needle, page)
 
     def test_the_right_read_scores_full_marks(self):
         sample = benchmark.sample(fcc.KYC_CASES, 8)

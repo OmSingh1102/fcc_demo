@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Model evaluation{% endblock %}
 
-{% macro matrix(m, rows_are="Analysts", cols_are="Model") -%}
+{% macro matrix(m, rows_are="Analyst", cols_are="AI") -%}
 <table class="cm">
     <thead><tr><th class="cm-corner">{{ rows_are }} ↓ · {{ cols_are }} →</th>{% for c in m.cols %}<th>{{ c }}</th>{% endfor %}</tr></thead>
     <tbody>{% for r in m.rows %}<tr><th>{{ r.label }}</th>{% for c in r.cells %}<td class="cm-{{ c.kind }}" style="--a: {{ c.alpha }}">{{ c.n if c.n else '·' }}</td>{% endfor %}</tr>{% endfor %}</tbody>
@@ -9,194 +9,108 @@
 {%- endmacro %}
 
 {% macro pct(v) %}{{ v if v is not none else '—' }}{% if v is not none %}%{% endif %}{% endmacro %}
+{% macro money(v, d=4) %}{% if v is not none %}${{ ('%.' ~ d ~ 'f')|format(v) }}{% else %}—{% endif %}{% endmacro %}
+{% macro ratio(x) %}{% if x[1] %}{{ x[0] }}/{{ x[1] }}{% else %}—{% endif %}{% endmacro %}
 
 {% block content %}
 <div class="page-head">
     <div><h2>Model evaluation</h2>
-        <p>Two models work on a case: one reads the documents, one decides. Each is tested here on the client's sample cases against answers known in advance, with a confusion matrix: what the analysts decided (rows) against what the model decided (columns). Green is agreement, red is a hit cleared that the analysts did not clear, amber any other difference.</p></div>
+        <p>The two models of the Screening cases flow, measured on the IDs uploaded in this console as they are read and decided; the page follows every upload and every alert outcome. An upload has no answer key, so the reading model is measured by what the code's checks find on its read, and the deciding model against the analysts: each alert outcome an analyst gives is the answer its suggestion is scored on.</p>
+        <p class="small">In use (set on <a href="{{ url_for('screening_settings') }}">Settings</a>; the reader can also be chosen on each upload): reading <b>{{ reader_label }}</b> · deciding <b>{{ decider_label }}</b>.
+            So far: {{ totals.uploads }} upload{{ 's' if totals.uploads != 1 }}, {{ totals.hits }} World-Check hit{{ 's' if totals.hits != 1 }}, {{ totals.confirmed }} given an outcome by an analyst after the AI's suggestion.</p></div>
 </div>
 
-{% if not ev %}
-<div class="card mt-12"><div class="card-body small muted">No run yet. <code>python -m fincrime.decision_model --baselines</code> scores the rules and the learned tree with no model call; <code>python -m fincrime.decision_model --models gemini-2.5-flash</code> adds a model (it needs LLM_FOUNDRY_KEY).</div></div>
-{% else %}
+{% if not totals.uploads %}
+<div class="card mt-12"><div class="card-body small muted" id="eval-empty">No upload yet. Upload an ID on <a href="{{ url_for('scan_id') }}">Screening cases</a>: this page fills as IDs are read, their hits decided by the AI, and analysts give each hit its outcome.</div></div>
+{% endif %}
 
-{# ── the decision ── #}
-<div class="card mt-12 pad-0" id="eval-decision">
-    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Deciding the case</div>
-        <div class="card-sub">{{ ev.split.sizes.train + ev.split.sizes.test }} sample cases: {{ ev.split.sizes.train }} to learn from, {{ ev.split.sizes.test }} held out and only scored {% set o = ev.split.outcomes['test'] %}({{ o['clear'] }} cleared, {{ o['true_match'] }} true matches, {{ o['request_documents'] }} customer asked, {{ o['escalate'] }} escalated) · last run {{ ev.run_at }}</div></div>
-    <div class="card-body" style="padding-top:0" id="eval-lines">
-        {% for line in ev.lines %}<div class="small" style="margin-bottom:4px">{{ icon('check') }} {{ line }}</div>{% endfor %}
-    </div>
+{# ── reading ── #}
+<div class="card mt-12 pad-0" id="eval-reading">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Reading the ID</div>
+        <div class="card-sub">each model that read an upload · what the code's checks found on its read</div></div>
+    {% if reading %}
     <div class="tbl-scroll">
-    <table class="tbl" id="eval-table">
-        <thead><tr><th>Approach</th><th class="num">Outcome right</th><th class="num">Decided without a person</th><th class="num">Settled or left open, right</th><th class="num">Hits cleared wrongly</th><th class="num">Name discrepancy right</th><th class="num">Address discrepancy right</th><th class="num">The three together</th><th class="num">Cost a case</th><th class="num">Per 1,000</th><th class="num">Seconds</th></tr></thead>
+    <table class="tbl" id="eval-reading-table">
+        <thead><tr><th>Model</th><th class="num">Uploads read</th><th class="num">MRZ check digits add up</th><th class="num">Printed fields agree with the MRZ</th><th class="num">Photos called spoiled</th><th class="num">Reads with a field unsure</th><th class="num">Not an ID</th><th class="num">Seconds a read</th><th class="num">Cost a read</th><th class="num">Spent</th></tr></thead>
         <tbody>
-        {% for r in ev.table %}{% set s = r.summary %}
-        <tr{% if ev.best and r.key == ev.best.key %} class="arch-current"{% endif %}>
-            <td class="strong">{{ r.label }}{% if r.kind == 'llm' %} <span class="tiny muted nowrap">SOP {{ r.sop }} · {{ r.examples }} similar cases</span>{% endif %}
-                {% if ev.best and r.key == ev.best.key %}<span class="badge blue">best</span>{% endif %}{% if r.current %} <span class="badge slate">in use for reading</span>{% endif %}
-                {% if s.errors %}<span class="badge amber" title="{{ s.error_samples|join(' | ') }}">{{ s.errors }} failed</span>{% endif %}
-                <div class="tiny muted">{% if r.kind == 'rules' %}the date-of-birth rule clears; the rest go to a person · name: the hand-written name rules{% elif r.kind == 'tree' %}learned from the 800 cases on six signals computed from the facts{% else %}{{ {'anthropic': 'Anthropic', 'openai': 'OpenAI', 'gemini': 'Google'}.get(r.provider, r.provider) }} · {{ r.model }} · {{ r.per_case|length }} cases{% endif %}</div></td>
-            <td class="num">{{ pct(s.accuracy) }}</td>
-            <td class="num">{{ pct(s.automated) }}</td>
-            <td class="num">{{ pct(s.settled_accuracy) }}</td>
-            <td class="num">{% if s.wrongly_cleared %}<span class="badge rose">{{ s.wrongly_cleared }}</span>{% else %}0{% endif %}</td>
-            <td class="num">{{ pct(s.name_accuracy) }}</td>
-            <td class="num">{{ pct(s.address_accuracy) }}</td>
-            <td class="num strong">{{ pct(r.overall) }}</td>
-            <td class="num">{% if s.cost_per_case is defined %}${{ '%.4f'|format(s.cost_per_case) }}{% else %}$0{% endif %}</td>
-            <td class="num">{% if s.cost_per_1000 is defined %}${{ '%.2f'|format(s.cost_per_1000) }}{% else %}$0{% endif %}</td>
-            <td class="num">{{ s.seconds_median if s.seconds_median is defined else '—' }}</td>
-        </tr>
+        {% for m in reading %}
+        <tr{% if m.id == reader %} class="arch-current"{% endif %}>
+            <td class="strong nowrap">{{ m.label }}{% if m.id == reader %} <span class="badge blue">in use</span>{% endif %}<div class="tiny muted">{{ m.id }}</div></td>
+            <td class="num">{{ m.reads }}</td>
+            <td class="num">{{ ratio(m.mrz_ok) }}</td>
+            <td class="num">{{ ratio(m.mrz_fields_ok) }}</td>
+            <td class="num">{{ m.flagged }}</td>
+            <td class="num">{{ m.unsure }}</td>
+            <td class="num">{{ m.not_id }}</td>
+            <td class="num">{{ m.seconds if m.seconds is not none else '—' }}</td>
+            <td class="num">{{ money(m.cost) }}</td>
+            <td class="num">{{ money(m.total, 2) }}</td></tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
-    <div class="card-body small muted" style="padding-top:8px">
-        <b>Outcome right</b>: the analysts' disposition in four (clear, true match, ask the customer, escalate to L2); "to a person" never counts as right. <b>Settled or left open</b>: the same with "ask the customer", "escalate" and "to a person" taken as one answer, open. <b>Hits cleared wrongly</b>: cleared as a false positive when the analysts did not: the mistake that must stay at 0. <b>The three together</b>: the mean of the outcome, name and address scores; the models are ranked by it, and "best" is the first with no hit cleared wrongly. Cost is the tokens each call used at list price.
-    </div>
+    <div class="card-body small muted" style="padding-top:8px"><b>MRZ check digits add up</b>: on the uploads with a passport zone the model transcribed; a digit that does not add up is a misread or a forged zone. <b>Printed fields agree with the MRZ</b>: the name, number and dates printed on the page against the zone's. To compare readers, choose another model on the upload form.</div>
+    {% else %}
+    <div class="card-body small muted">No ID read yet.</div>
+    {% endif %}
 </div>
 
-{# ── the outcome matrices ── #}
+{# ── deciding ── #}
+<div class="card mt-12 pad-0" id="eval-deciding">
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Deciding each World-Check hit</div>
+        <div class="card-sub">each model that decided a hit · scored on the hits an analyst then gave an outcome</div></div>
+    {% if deciding %}
+    <div class="tbl-scroll">
+    <table class="tbl" id="eval-deciding-table">
+        <thead><tr><th>Model</th><th class="num">Hits decided</th><th class="num">Given an outcome by an analyst</th><th class="num">Analyst agreed</th><th class="num">AI said clear, analyst did not</th><th class="num">Calls failed</th><th class="num">Seconds a hit</th><th class="num">Cost a hit</th><th class="num">Spent</th></tr></thead>
+        <tbody>
+        {% for m in deciding %}
+        <tr{% if m.id == decider %} class="arch-current"{% endif %}>
+            <td class="strong nowrap">{{ m.label }}{% if m.id == decider %} <span class="badge blue">in use</span>{% endif %}<div class="tiny muted">{{ m.id }}</div></td>
+            <td class="num">{{ m.decided }}</td>
+            <td class="num">{{ m.confirmed }}</td>
+            <td class="num">{% if m.confirmed %}{{ m.agreed }} · {{ pct(m.agreement) }}{% else %}—{% endif %}</td>
+            <td class="num">{% if m.cleared_wrongly %}<span class="badge rose">{{ m.cleared_wrongly }}</span>{% else %}0{% endif %}</td>
+            <td class="num">{{ m.failed }}</td>
+            <td class="num">{{ m.seconds if m.seconds is not none else '—' }}</td>
+            <td class="num">{{ money(m.cost) }}</td>
+            <td class="num">{{ money(m.total, 2) }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="card-body small muted" style="padding-top:8px"><b>Analyst agreed</b>: the alert outcome the analyst gave is the AI's suggestion (false positive, possible match, true match). <b>AI said clear, analyst did not</b>: the dangerous mistake, which must stay at 0 before any hit is closed without an analyst. To compare deciders, change the model on Settings: the hits decided after the change count for the new one.</div>
+    {% else %}
+    <div class="card-body small muted">No hit decided by the AI yet.</div>
+    {% endif %}
+</div>
+
+{% if deciding %}
 <div class="card mt-12" id="eval-matrices">
-    <div class="card-head"><div class="card-title">Confusion matrices: the outcome</div>
-        <div class="card-sub">the {{ ev.split.sizes.test }} held-out cases · rows: what the analysts decided · columns: what each approach decided</div></div>
+    <div class="card-head"><div class="card-title">Confusion matrices</div>
+        <div class="card-sub">the hits an analyst gave an outcome · rows: the analyst's outcome · columns: the AI's suggestion · green agreement, red the AI said clear and the analyst did not, amber any other difference</div></div>
     <div class="card-body">
         <div class="cm-grid">
-            {% for r in ev.table %}
-            <div class="cm-card{% if ev.best and r.key == ev.best.key %} best{% endif %}">
-                <div class="cm-title">{{ r.title }}</div>
-                <div class="tiny muted" style="margin-bottom:6px">{{ pct(r.summary.accuracy) }} right{% if r.summary.missed_true_matches %} · <span class="rose-text">{{ r.summary.missed_true_matches }} true match cleared</span>{% endif %}</div>
-                {{ matrix(r.matrix) }}
+            {% for m in deciding %}
+            <div class="cm-card{% if m.id == decider %} best{% endif %}">
+                <div class="cm-title">{{ m.label }}{% if m.id == decider %} <span class="badge blue">in use</span>{% endif %}</div>
+                <div class="tiny muted" style="margin-bottom:6px">{% if m.confirmed %}{{ pct(m.agreement) }} agreed, on {{ m.confirmed }} hit{{ 's' if m.confirmed != 1 }}{% else %}no hit given an outcome yet{% endif %}</div>
+                {{ matrix(m.view) }}
             </div>
             {% endfor %}
         </div>
     </div>
 </div>
-
-{# ── name and address discrepancies ── #}
-{% if ev.variance.name or ev.variance.address %}
-<div class="card mt-12" id="eval-variance">
-    <div class="card-head"><div class="card-title">Name and address discrepancies</div>
-        <div class="card-sub">which of the client's variance types explains the difference between the record and the documents · the type the analysts recorded is the answer</div></div>
-    <div class="card-body">
-        <div class="fact-cards">
-            {% if ev.variance.name %}
-            <div class="card"><div class="card-body">
-                <div class="strong" style="margin-bottom:4px">Name · {{ ev.best.label }}: {{ pct(ev.variance.name.accuracy) }} right{% if ev.variance.rules_name %} · the console's name rules: {{ pct(ev.variance.rules_name.accuracy) }}{% endif %}</div>
-                <div class="small muted" style="margin-bottom:6px">The name rules are hand-written code (fincrime/filebook/names.py); the model works from the SOP, the variance reference and similar resolved cases.</div>
-                <div class="tiny strong">The model's most frequent mix-ups</div>
-                <ul class="small cm-list">{% for c in ev.variance.name.confusions %}<li>{{ c.n }} × <b>{{ c.truth }}</b> taken for {{ c.said }}</li>{% else %}<li>none</li>{% endfor %}</ul>
-                {% if ev.variance.rules_name %}
-                <div class="tiny strong mt-8">The name rules' most frequent mix-ups</div>
-                <ul class="small cm-list">{% for c in ev.variance.rules_name.confusions %}<li>{{ c.n }} × <b>{{ c.truth }}</b> taken for {{ c.said }}</li>{% endfor %}</ul>
-                {% endif %}
-            </div></div>
-            {% endif %}
-            {% if ev.variance.address %}
-            <div class="card"><div class="card-body">
-                <div class="strong" style="margin-bottom:4px">Address · {{ ev.best.label }}: {{ pct(ev.variance.address.accuracy) }} right</div>
-                <div class="small muted" style="margin-bottom:6px">The console has no rule that names an address variance type: its address rules only say whether two addresses are the same home.</div>
-                <div class="tiny strong">The model's most frequent mix-ups</div>
-                <ul class="small cm-list">{% for c in ev.variance.address.confusions %}<li>{{ c.n }} × <b>{{ c.truth }}</b> taken for {{ c.said }}</li>{% else %}<li>none</li>{% endfor %}</ul>
-            </div></div>
-            {% endif %}
-        </div>
-        {% for field in ('name', 'address') %}{% if ev.variance[field] %}
-        <details class="mt-12 small" id="eval-{{ field }}-matrix"><summary style="cursor:pointer"><b>The full {{ field }} matrix ({{ ev.variance[field].labels|length }} types)</b></summary>
-            <div class="tbl-scroll mt-8">{{ matrix(ev.variance[field].matrix) }}</div>
-            <ol class="tiny muted cm-legend">{% for l in ev.variance[field].labels %}<li>{{ l }}</li>{% endfor %}</ol>
-        </details>
-        {% endif %}{% endfor %}
-    </div>
-</div>
 {% endif %}
 
-{# ── the SOP, tuned on the training cases ── #}
+{% if by_sop %}
 <div class="card mt-12 pad-0" id="eval-sop">
-    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Tuning on the SOP</div>
-        <div class="card-sub">each SOP version tried on {{ ev.split.sizes.tune }} of the 800 training cases, never on the held-out ones; its errors read, the SOP revised, tried again</div></div>
-    {% if ev.tune %}
-    <div class="tbl-scroll">
-    <table class="tbl" id="eval-tune">
-        <thead><tr><th>Model and SOP</th><th class="num">Cases</th><th class="num">Outcome right</th><th class="num">Hits cleared wrongly</th><th class="num">Name right</th><th class="num">Address right</th><th class="num">Cost a case</th></tr></thead>
-        <tbody>{% for r in ev.tune %}{% set s = r.summary %}
-        <tr><td class="strong">{{ r.title }}</td><td class="num">{{ r.per_case|length }}</td><td class="num">{{ pct(s.accuracy) }}</td>
-            <td class="num">{{ s.wrongly_cleared }}</td><td class="num">{{ pct(s.name_accuracy) }}</td><td class="num">{{ pct(s.address_accuracy) }}</td>
-            <td class="num">{% if s.cost_per_case is defined %}${{ '%.4f'|format(s.cost_per_case) }}{% endif %}</td></tr>
-        {% endfor %}</tbody>
+    <div class="card-head" style="padding-bottom:10px"><div class="card-title">By SOP version</div>
+        <div class="card-sub">the analysts' agreement with the AI under each version of the <a href="{{ url_for('screening_sop') }}">screening SOP</a> it decided by</div></div>
+    <table class="tbl">
+        <thead><tr><th>SOP</th><th class="num">Hits given an outcome</th><th class="num">Analyst agreed</th></tr></thead>
+        <tbody>{% for v in by_sop %}<tr><td class="strong">{{ v.version }}</td><td class="num">{{ v.confirmed }}</td><td class="num">{{ v.agreed }} · {{ pct(v.agreement) }}</td></tr>{% endfor %}</tbody>
     </table>
-    </div>
-    {% endif %}
-    <div class="card-body">
-        {% for v in ev.sops|reverse %}
-        <details class="small" style="margin-bottom:8px"{% if loop.first %} open{% endif %}><summary style="cursor:pointer"><b>SOP {{ v.version }}</b>{% if v.changes %}: {{ v.changes|length }} change{{ 's' if v.changes|length != 1 }} from the version before{% endif %}</summary>
-            {% if v.changes %}<ul class="cm-list">{% for c in v.changes %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
-            <pre class="sop-text">{{ v.text }}</pre>
-        </details>
-        {% endfor %}
-        <div class="small muted">The model is given the SOP, then the client's variance reference (43 rows: what happens, the recommended control) as its playbook, then the most similar resolved training cases with the analysts' outcome and note. Changing the SOP changes the model's decisions with no code change: that is where the client's updated SOPs go in. Weight fine-tuning was not tried: the LLM Foundry gateway serves model calls only, and 800 labelled cases are few for it.</div>
-    </div>
-</div>
-
-{# ── the learned tree ── #}
-{% if ev.tree %}
-<details class="card mt-12" id="eval-tree"><summary class="card-head" style="cursor:pointer"><div class="card-title">The decision tree learned from the 800 cases</div>
-        <div class="card-sub">a classical model on six signals computed from the facts; readable as rules</div></summary>
-    <div class="card-body"><pre class="sop-text">{{ ev.tree|join('\n') }}</pre></div>
-</details>
-{% endif %}
-
-{# ── where the best model differs ── #}
-{% if ev.best %}
-<details class="card mt-12 pad-0" id="eval-errors"><summary class="card-head" style="cursor:pointer;padding-bottom:10px"><div class="card-title">Where {{ ev.best.label }} differs from the analysts</div>
-        <div class="card-sub">{{ ev.errors|length }} of the {{ ev.best.per_case|length }} held-out cases · the cases to read before the next SOP version</div></summary>
-    <div class="tbl-scroll">
-    <table class="tbl dense">
-        <thead><tr><th>Case</th><th>Analysts</th><th>Model</th><th>The model's reasons</th><th>The analysts' note</th></tr></thead>
-        <tbody>{% for e in ev.errors %}
-        <tr><td class="nowrap"><span class="cell-id">{{ e.case }}</span><div class="tiny muted">{{ e.name }}</div></td>
-            <td class="nowrap">{{ e.truth }}<div class="tiny muted">{{ e.disposition }}</div></td>
-            <td class="nowrap">{% if e.danger %}<span class="badge rose">{{ e.said }}</span>{% else %}{{ e.said }}{% endif %}</td>
-            <td class="small">{% if e.dob %}<div>{{ e.dob }}</div>{% endif %}{% for x in e.reasons %}<div>· {{ x }}</div>{% endfor %}</td>
-            <td class="small">{{ e.note }}</td></tr>
-        {% else %}<tr><td colspan="5" class="small muted">None.</td></tr>{% endfor %}</tbody>
-    </table>
-    </div>
-</details>
-{% endif %}
-{% endif %}
-
-{# ── reading the documents ── #}
-<div class="card mt-12" id="eval-ocr">
-    <div class="card-head"><div class="card-title">Confusion matrices: reading the documents</div>
-        <div class="card-sub">{% if ocr %}the document benchmark's {{ ocr[0].cases }} cases · the full table, with each field, is on the <a href="{{ url_for('architecture') }}#arch-models">Architecture</a> page{% else %}no run yet: <code>python -m fincrime.benchmark</code>{% endif %}</div></div>
-    {% if ocr %}
-    <div class="card-body">
-        <div class="cm-grid small">
-            {% for m in ocr %}
-            <div class="cm-card">
-                <div class="cm-title">{{ m.label }}{% if m.current %} <span class="badge blue">in use</span>{% endif %}</div>
-                <div class="tiny muted" style="margin:4px 0">Photo check: spoiled on purpose or clean</div>
-                {{ matrix(m.photo, "Photo", "Model") }}
-                <div class="tiny muted" style="margin:8px 0 4px">Decision: on the right read, against on the model's read</div>
-                {{ matrix(m.decision, "Right read", "Its read") }}
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-</div>
-
-{% if ev %}
-<div class="card mt-12" id="eval-method">
-    <div class="card-head"><div class="card-title">Method</div></div>
-    <div class="card-body small">
-        <p><b>What the model sees</b>: the CRM record (name, date of birth, registered address, customer type), the passport (data page, MRZ line 1, address), the secondary ID (name, address), the proof of address, and the World-Check record (name with its aliases, listed date of birth, places, category, match score, how many profiles the name returned, the trigger).</p>
-        <p><b>What it never sees</b>: the analysts' answers and what the file sets from them: the disposition, the compliance notes, the name and address variance types, the pain point, the resolution, the screening impact, the score after normalisation, the handling time, the analyst and the review date, the discrepancy analysis, the matched attributes, the note beside the listed date of birth ("Exact Match", "12 yrs diff"), and the risk rating (every true match in the file is rated High: it was set after the review).</p>
-        <p><b>The split</b>: a fifth of each outcome held out, picked by a hash of the case ID, so it never changes between runs. The SOP is revised on {{ ev.split.sizes.tune }} training cases; the similar cases in the prompt come from the 800 training cases only.</p>
-        <p class="muted">Rerun: <code>python -m fincrime.decision_model --models claude-opus-4-8,gemini-2.5-flash --examples 6</code> (the latest SOP unless <code>--sop</code> names one) · <code>--set tune</code> for the tuning cases · <code>--baselines</code> for the rules and the tree alone.</p>
-    </div>
 </div>
 {% endif %}
 {% endblock %}

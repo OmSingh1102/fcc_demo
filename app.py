@@ -42,7 +42,7 @@ from fincrime.analytics.queues import QueueConsole
 from fincrime.analytics.routing_console import RoutingConsole
 from fincrime.analytics.trackers import TrackerConsole, to_csv
 from fincrime.analytics.work import WorkConsole
-from fincrime import benchmark, decision_model, id_screening, watchlist
+from fincrime import benchmark, decision_model, id_screening, upload_eval, watchlist
 from fincrime.data import vocab
 from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
@@ -1869,9 +1869,14 @@ def routing_capacity():
 # ─── Architecture: what the console is built of, and the models evaluated ───
 @app.route("/architecture")
 def architecture():
-    bench = benchmark.load()
-    return render_template("architecture.html", bench=bench, verdict=benchmark.verdict(bench), agent_model=ai_agent.MODEL,
-                           llm_ready=ai_review.configured(), ocr_ready=ocr.available())
+    labels = {m["id"]: m["label"] for m in benchmark.MODELS}
+    reader, decider = SCREEN_SETTINGS["reader_model"], SCREEN_SETTINGS["decision_model"]
+    t = upload_eval.totals(_scans())
+    headline = (f"{t['read']} uploaded ID{'s' if t['read'] != 1 else ''} read, {t['decided']} hit{'s' if t['decided'] != 1 else ''} "
+                f"decided" + (f", the analysts agreeing with the AI on {t['agreed']} of the {t['confirmed']} they gave an outcome"
+                              if t["confirmed"] else "") if t["uploads"] else "")
+    return render_template("architecture.html", reader_label=labels.get(reader, reader), decider_label=labels.get(decider, decider),
+                           llm_ready=ai_review.configured(), wc_live=id_screening.live(SCREEN_SETTINGS), headline=headline)
 
 
 # ─── Scan ID: an uploaded ID read, screened on World-Check, decided by the AI ──
@@ -2275,15 +2280,19 @@ def screening_settings_test():
     return redirect(url_for("screening_settings"))
 
 
-# ─── Model evaluation: the decision model and the document read, on the sample cases ───
+# ─── Model evaluation: the Screening cases flow's two models, on the console's own uploads ───
 @app.route("/model-evaluation")
 def model_evaluation():
-    ocr = [dict(m, photo=decision_model.matrix_view(m["photo"], danger=lambda t, c: t == "Spoiled" and c == "Accepted",
-                                                    right=lambda t, c: (t, c) in (("Spoiled", "Flagged"), ("Clean", "Accepted"))),
-                decision=decision_model.matrix_view(m["decision"], danger=lambda t, c: t == "To a person" and c == "Pass"))
-           for m in benchmark.confusion(benchmark.load())]
-    return render_template("model_evaluation.html", ev=decision_model.view(decision_model.load_cached()), ocr=ocr,
-                           llm_ready=ai_review.configured())
+    """The Screening cases flow's two models, measured on the IDs uploaded in
+    the console as they are read and decided (fincrime/upload_eval)."""
+    scans = _scans()
+    labels = {m["id"]: m["label"] for m in benchmark.MODELS}
+    reader, decider = SCREEN_SETTINGS["reader_model"], SCREEN_SETTINGS["decision_model"]
+    danger = lambda t, c: t != "False positive" and c == "False positive"      # noqa: E731
+    deciding = [dict(m, view=decision_model.matrix_view(m["matrix"], None, danger)) for m in upload_eval.deciding(scans)]
+    return render_template("model_evaluation.html", reading=upload_eval.reading(scans), deciding=deciding,
+                           by_sop=upload_eval.by_sop(scans), totals=upload_eval.totals(scans), reader=reader, decider=decider,
+                           reader_label=labels.get(reader, reader), decider_label=labels.get(decider, decider))
 
 
 # ─── Analytics ─────────────────────────────────────────────────────────────────

@@ -29,7 +29,7 @@ from fincrime.data.state_store import StateStore  # noqa: E402
 if StateStore.path != os.environ["FCC_STATE_DB"]:
     StateStore.path = os.environ["FCC_STATE_DB"]
 import app as fcc  # noqa: E402
-from fincrime import benchmark, decision_model, id_screening, watchlist  # noqa: E402
+from fincrime import benchmark, decision_model, id_screening, upload_eval, watchlist  # noqa: E402
 from fincrime.adapters import world_check  # noqa: E402
 from fincrime.documents import id_scan  # noqa: E402
 from fincrime.filebook import llm  # noqa: E402
@@ -227,10 +227,10 @@ class ScreeningBookPageTests(unittest.TestCase):
         c.post("/login", data={"analyst": who, "password": "1234"})
         return c
 
-    def png(self):
+    def png(self, colour="white"):
         from PIL import Image
         out = io.BytesIO()
-        Image.new("RGB", (900, 600), "white").save(out, "PNG")
+        Image.new("RGB", (900, 600), colour).save(out, "PNG")
         return out.getvalue()
 
     def decide(self, case_id, who, hit, sop, settings):
@@ -240,12 +240,12 @@ class ScreeningBookPageTests(unittest.TestCase):
                 "name_variance": "", "address_variance": "", "model": "m", "model_label": "Model", "sop": sop["version"],
                 "seconds": 1.0, "cost": 0.01}
 
-    def upload(self, c, read):
+    def upload(self, c, read, colour="white"):
         result = {"read": read, "model": {"model": "m", "label": "Model", "tokens_in": 1, "tokens_out": 1, "cost": 0.0, "seconds": 1.0},
                   "checks": id_scan.checks(read), "error": ""}
         with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None: dict(result)), \
                 mock.patch.object(id_screening, "decide", self.decide):
-            r = c.post("/scan", data={"image": (io.BytesIO(self.png()), "id.png")}, content_type="multipart/form-data")
+            r = c.post("/scan", data={"image": (io.BytesIO(self.png(colour)), "id.png")}, content_type="multipart/form-data")
         self.assertEqual(r.status_code, 302)
         return r.headers["Location"].rsplit("/", 1)[-1]
 
@@ -338,6 +338,30 @@ class ScreeningBookPageTests(unittest.TestCase):
         c.post(f"/scan/{sid}/close", data={"note": "nobody on the list"})
         self.assertEqual(fcc._scan(sid)["closed"]["outcome"], "No match")
         self.assertEqual(self.calls, [])
+
+    def test_the_model_evaluation_follows_the_uploads(self):
+        c = self.client()
+        self.assertIn('id="eval-empty"', c.get("/model-evaluation").data.decode("utf-8"))
+        sid = self.upload(c, a_read())
+        uid = fcc._scan(sid)["screening"]["hits"][0]["uid"]
+        c.post(f"/scan/{sid}/hits/outcome", data={"alert_id": uid, "outcome": "False Positive", "comment": "different person"})
+        page = c.get("/model-evaluation").data.decode("utf-8")
+        for needle in ('id="eval-reading-table"', 'id="eval-deciding-table"', 'id="eval-matrices"', 'id="eval-sop"', "1 · 100.0%"):
+            self.assertIn(needle, page)
+        for absent in ('id="eval-empty"', "Console rules today", "decision tree", "Tesseract"):
+            self.assertNotIn(absent, page)
+        sid = self.upload(c, a_read(), "ivory")                      # the AI says false positive; the analyst does not
+        uid = fcc._scan(sid)["screening"]["hits"][0]["uid"]
+        c.post(f"/scan/{sid}/hits/outcome", data={"alert_id": uid, "outcome": "True Positive", "comment": "same person"})
+        [m] = upload_eval.deciding(fcc._scans())
+        self.assertEqual((m["decided"], m["confirmed"], m["agreed"], m["cleared_wrongly"]), (2, 2, 1, 1))
+        self.assertEqual(m["matrix"]["cells"]["True match"]["False positive"], 1)
+        self.assertEqual(upload_eval.reading(fcc._scans())[0]["reads"], 2)
+        page = c.get("/architecture").data.decode("utf-8")
+        for needle in ('id="arch-pipeline"', 'id="arch-split"', 'id="arch-apis"', "2 uploaded IDs read", "agreeing with the AI on 1 of the 2"):
+            self.assertIn(needle, page)
+        for absent in ("Tesseract", "CSV", "second opinion"):
+            self.assertNotIn(absent, page)
 
     def test_ai_assessment_sends_the_alerts_again(self):
         c = self.client()

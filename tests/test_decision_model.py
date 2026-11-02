@@ -115,45 +115,5 @@ class BaselineAndScoringTests(unittest.TestCase):
         self.assertEqual(kinds["Clear"][0], "hit")
 
 
-class PageTests(unittest.TestCase):
-
-    @classmethod
-    def setUpClass(cls):
-        fcc.app.testing = True
-        fcc.app.secret_key = "test"
-        StateStore.clear()
-        fcc._load_seed()
-
-    def page(self):
-        c = fcc.app.test_client()
-        c.post("/login", data={"analyst": "amara.iyer", "password": "1234"})
-        return c.get("/model-evaluation").data.decode("utf-8")
-
-    def test_the_page_without_and_with_a_run(self):
-        with mock.patch.object(dm, "load_cached", lambda: None):
-            page = self.page()
-        self.assertIn("No run yet", page)
-        self.assertNotIn('id="eval-table"', page)
-        result = dm.baselines({}, write=False)
-        test_ids = result["split"]["test_ids"]
-        rows = dm.rows()
-        per_case = [{"case": cid, "truth": dm.outcome(rows[cid]), "outcome": dm.outcome(rows[cid]),
-                     "name_truth": rows[cid]["name_variance_type"], "name_variance": rows[cid]["name_variance_type"],
-                     "address_truth": rows[cid]["address_variance_type"], "address_variance": dm.NONE, "confidence": 90,
-                     "reasons": ["a reason"], "dob_finding": "", "request": "", "tokens_in": 6000, "tokens_out": 300, "seconds": 9.0}
-                    for cid in test_ids]
-        result["runs"]["test:gemini-2.5-flash:v2:6"] = {
-            "key": "test:gemini-2.5-flash:v2:6", "kind": "llm", "model": "gemini-2.5-flash", "label": "Gemini 2.5 Flash",
-            "provider": "gemini", "price": [0.3, 2.5], "current": False, "sop": "v2", "examples": 6, "set": "test",
-            "run_at": "2026-10-28 20:00:00", "per_case": per_case, "summary": dm.summarise(per_case, (0.3, 2.5))}
-        with mock.patch.object(dm, "load_cached", lambda: result):
-            page = self.page()
-        for needle in ('id="eval-table"', 'id="eval-matrices"', 'id="eval-variance"', 'id="eval-sop"', 'id="eval-tree"',
-                       'id="eval-errors"', 'id="eval-ocr"', "Console rules today", "Gemini 2.5 Flash", "Screening decision SOP, version 2",
-                       "cm-danger" if any(r["summary"]["wrongly_cleared"] for r in result["runs"].values()) else "cm-hit"):
-            self.assertIn(needle, page)
-        self.assertIn("Model evaluation", page)                # the menu entry
-
-
 if __name__ == "__main__":
     unittest.main()

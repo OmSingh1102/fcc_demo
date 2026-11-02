@@ -4,33 +4,35 @@
 {% block content %}
 <div class="page-head">
     <div><h2>Architecture</h2>
-        <p>What the console is built of: which steps are a model's judgement, which are fixed rules a compliance team can audit, which are people, and where real services connect through their APIs. Below, the models evaluated for the one step that needs a model, reading the documents, on accuracy and cost.</p></div>
+        <p>What the Screening cases flow is built of: which steps are a model's judgement, which are fixed code, which are people, and where real services connect through their APIs. Models, the SOP and the World-Check account are settings a team changes in the console, not code.</p></div>
 </div>
 
 {# ── the pipeline ── #}
 <div class="card mt-12" id="arch-pipeline">
-    <div class="card-head"><div class="card-title">How a case goes through</div>
+    <div class="card-head"><div class="card-title">How an uploaded ID goes through</div>
         <div class="row" style="gap:6px;flex-wrap:wrap">
             <span class="arch-key ai">AI model</span><span class="arch-key rule">Rules (code)</span><span class="arch-key api">External API</span><span class="arch-key sim">Simulated</span><span class="arch-key person">People</span>
         </div></div>
     <div class="card-body">
         <div class="arch-flow">
-            <div class="arch-step rule"><b>1. Intake</b><span>Cases as CSV (CRM record + watchlist hit); the customers' ID images as a ZIP, or uploaded on the case</span></div>
+            <div class="arch-step person"><b>1. Upload</b><span>An analyst uploads one photo or scan of an ID on <a href="{{ url_for('scan_id') }}">Screening cases</a>; every upload is a case</span></div>
             <div class="arch-arrow">→</div>
             <div class="arch-step rule"><b>2. Image preparation</b><span>Checked, turned upright, resized, EXIF and GPS removed (Pillow)</span></div>
             <div class="arch-arrow">→</div>
-            <div class="arch-step ai api"><b>3. Document reading</b><span>{{ agent_model }} through Straive's LLM Foundry API reads every field on the four documents and judges each photo{% if not llm_ready %} <em>(no key here)</em>{% endif %}</span></div>
+            <div class="arch-step ai api"><b>3. Reading the ID</b><span>{{ reader_label }} through Straive's LLM Foundry API reads every printed field and the MRZ, and says what spoils the photo{% if not llm_ready %} <em>(no key here)</em>{% endif %}</span></div>
             <div class="arch-arrow">→</div>
-            <div class="arch-step rule"><b>4. Verification checks</b><span>The read held to the CRM record: name, date of birth, nationality, number, expiry, address, proof-of-address rules. Parameters from the SOP rules page</span></div>
+            <div class="arch-step rule"><b>4. Checks on the read</b><span>MRZ check digits, the printed fields against the zone, expiry, age, not an identity document</span></div>
             <div class="arch-arrow">→</div>
-            <div class="arch-step rule sim"><b>5. Screening</b><span>The World-Check hit (from the client's file) cleared by the screening rules, or left for an analyst</span></div>
+            <div class="arch-step {{ 'api' if wc_live else 'sim' }}"><b>5. World-Check search</b><span>{% if wc_live %}World-Check One, by its API{% else %}The stand-in World-Check: the World-Check records of the client's 1,000 cases, searched by name as World-Check does{% endif %}</span></div>
             <div class="arch-arrow">→</div>
-            <div class="arch-step person"><b>6. Decision</b><span>Verified, Data Screening, sent to a person with the reasons, or the customer asked for a document</span></div>
+            <div class="arch-step ai"><b>6. AI decision on each hit</b><span>{{ decider_label }} under the current <a href="{{ url_for('screening_sop') }}">Screening SOP</a>, with the most similar resolved cases: clear, true match, ask the customer or escalate, with its reasons</span></div>
+            <div class="arch-arrow">→</div>
+            <div class="arch-step person"><b>7. Alert outcome</b><span>An analyst gives each hit its outcome on the name-screening page or in the World-Check console; the case closes when every hit has one</span></div>
         </div>
         <div class="arch-side">
-            <div class="arch-step rule"><b>Beside step 3: OCR cross-check</b><span>Tesseract on this machine reads the passport's MRZ and its check digits{% if not ocr_ready %} <em>(not installed here)</em>{% endif %}. A stop-gap: in production a market OCR / ID API takes this place (below)</span></div>
-            <div class="arch-step ai"><b>Beside step 6: second opinion</b><span>A text-only model call gives its own verdict for comparison; it never acts on the case</span></div>
-            <div class="arch-step ai"><b>Beside steps 5 and 6: decision model (evaluated)</b><span>A model decides the alert (clear, true match, ask the customer, escalate) and names the name and address discrepancies, from the SOP and the most similar resolved cases. Scored on 200 held-out sample cases on the <a href="{{ url_for('model_evaluation') }}">Model evaluation</a> page; not switched on in the console</span></div>
+            <div class="arch-step rule"><b>Settings, not code</b><span>The reading and deciding models, how many similar cases go in the prompt, the name-match floor, how many hits are kept, the World-Check account: on <a href="{{ url_for('screening_settings') }}">Settings</a></span></div>
+            <div class="arch-step person"><b>The SOP, in versions</b><span>The QC lead edits the screening SOP in the console; saving a version sends every open case's unconfirmed hits to the AI again under it</span></div>
+            <div class="arch-step ai"><b>Measured as it runs</b><span>Both models are measured on the uploads themselves on the <a href="{{ url_for('model_evaluation') }}">Model evaluation</a> page, the deciding one against the analysts' alert outcomes{% if headline %}: {{ headline }}{% endif %}</span></div>
         </div>
     </div>
 </div>
@@ -38,18 +40,16 @@
 {# ── intelligence and workflow ── #}
 <div class="card mt-12 pad-0" id="arch-split">
     <div class="card-head" style="padding-bottom:10px"><div class="card-title">Where it is a model's judgement, and where it is workflow</div>
-        <div class="card-sub">the model reads; fixed, auditable rules decide; people take what the rules cannot settle</div></div>
+        <div class="card-sub">the models read and suggest; code checks; people decide</div></div>
     <table class="tbl">
         <thead><tr><th>Step</th><th>How it is decided</th><th>Kind</th></tr></thead>
         <tbody>
-        <tr><td class="strong">Reading the documents</td><td>A vision model extracts each printed field and names what spoils a photo (blur, glare, cut off, covered)</td><td><span class="arch-key ai">AI model</span></td></tr>
-        <tr><td class="strong">Matching names across documents</td><td>Name rules: transliteration, nicknames, word order, married and maiden surnames, anglicised first names</td><td><span class="arch-key rule">Rules</span></td></tr>
-        <tr><td class="strong">Verification checks and the SOP</td><td>Fixed checks with parameters a team lead changes on the SOP rules page, applied at once</td><td><span class="arch-key rule">Rules</span></td></tr>
-        <tr><td class="strong">Watchlist screening</td><td>Date-of-birth and gender rules clear a hit that is plainly someone else; anything else goes to an analyst</td><td><span class="arch-key rule">Rules</span> <span class="arch-key sim">Simulated</span></td></tr>
-        <tr><td class="strong">Watchlist finding on an open hit</td><td>The documents beside the World-Check record: likely match, possible, likely a different person. Informs the analyst</td><td><span class="arch-key rule">Rules</span></td></tr>
-        <tr><td class="strong">Deciding the alert and naming the discrepancies (evaluated)</td><td>A model given the SOP, the client's variance reference and similar resolved cases; scored against the analysts' outcomes with confusion matrices on the <a href="{{ url_for('model_evaluation') }}">Model evaluation</a> page</td><td><span class="arch-key ai">AI model</span></td></tr>
-        <tr><td class="strong">Second opinion</td><td>A model's own verify / send-to-a-person verdict, counted against the rules' decision</td><td><span class="arch-key ai">AI model</span></td></tr>
-        <tr><td class="strong">Everything left over</td><td>Analysts in the console, with the agent's reasons and reads in front of them</td><td><span class="arch-key person">People</span></td></tr>
+        <tr><td class="strong">Reading the ID</td><td>A vision model transcribes each printed field and the MRZ, marks what it is unsure of and names what spoils the photo (blur, glare, cut off, covered)</td><td><span class="arch-key ai">AI model</span></td></tr>
+        <tr><td class="strong">Checks on the read</td><td>Code: the MRZ check digits (the ICAO formula), the printed fields against the zone, expiry, age</td><td><span class="arch-key rule">Rules</span></td></tr>
+        <tr><td class="strong">Searching World-Check</td><td>A name search (word order, diacritics, initials set aside); the date of birth and country are shown beside each hit, never used to drop one</td><td>{% if wc_live %}<span class="arch-key api">External API</span>{% else %}<span class="arch-key sim">Simulated</span>{% endif %}</td></tr>
+        <tr><td class="strong">Deciding each hit</td><td>A model given the SOP, the client's variance reference and the most similar resolved cases; a suggestion with its reasons</td><td><span class="arch-key ai">AI model</span></td></tr>
+        <tr><td class="strong">The SOP</td><td>Written by the QC lead on the Screening SOP page, kept as versions</td><td><span class="arch-key person">People</span></td></tr>
+        <tr><td class="strong">The alert outcome</td><td>An analyst, with the AI's suggestion prefilled; whether they agreed with it is kept</td><td><span class="arch-key person">People</span></td></tr>
         </tbody>
     </table>
 </div>
@@ -62,50 +62,11 @@
         <thead><tr><th>Service</th><th>In this demo</th><th>Production: an existing solution, by API</th><th>Status</th></tr></thead>
         <tbody>
         <tr><td class="strong">Language and vision models</td><td>Straive's LLM Foundry gateway: Claude, GPT and Gemini models</td><td>The same gateway</td><td>{% if llm_ready %}<span class="badge emerald">Connected</span>{% else %}<span class="badge slate">Needs LLM_FOUNDRY_KEY</span>{% endif %}</td></tr>
-        <tr><td class="strong">OCR and ID document extraction</td><td>Tesseract on this machine, the passport MRZ only</td><td>Azure AI Document Intelligence (ID documents), AWS Textract AnalyzeID, Google Document AI</td><td><span class="badge amber">Not connected: needs an account</span></td></tr>
-        <tr><td class="strong">ID verification (face match, liveness, tampering)</td><td>A mock vendor result</td><td>An IDV provider's API (for example Onfido, Jumio, Veriff, IDnow)</td><td><span class="badge amber">Not connected: needs an account</span></td></tr>
-        <tr><td class="strong">Watchlist screening</td><td>World-Check records from the client's reconciliation log: the stand-in an uploaded ID is searched on (Screening cases)</td><td>LSEG World-Check One API</td><td><span class="badge amber">Ready for a key: enter it on <a href="{{ url_for('screening_settings') }}">Settings</a> (not yet run against the service)</span></td></tr>
-        <tr><td class="strong">Sanctions lists</td><td>The list on the SOP rules page</td><td>OFAC, UN and EU consolidated lists, or an aggregator API</td><td><span class="badge amber">Not connected</span></td></tr>
-        <tr><td class="strong">CRM / case intake</td><td>CSV and ZIP upload</td><td>The client's CRM or onboarding system, pushing cases and images by API</td><td><span class="badge amber">Not connected</span></td></tr>
+        <tr><td class="strong">Reading the ID (OCR)</td><td>The vision model above; no OCR engine of our own</td><td>The same, or a specialist ID-document API (Azure AI Document Intelligence, AWS Textract AnalyzeID, Google Document AI)</td><td><span class="badge emerald">The vision model</span></td></tr>
+        <tr><td class="strong">ID verification (face match, liveness, tampering, chip)</td><td>Not done</td><td>An IDV provider's API (for example Onfido, Jumio, Veriff, Didit)</td><td><span class="badge amber">Not connected: needs an account</span></td></tr>
+        <tr><td class="strong">Watchlist screening</td><td>{% if wc_live %}World-Check One, with the account on Settings{% else %}The stand-in World-Check: the World-Check records of the client's 1,000 cases{% endif %}</td><td>LSEG World-Check One API</td><td>{% if wc_live %}<span class="badge emerald">Account entered</span>{% else %}<span class="badge amber">Ready for a key: enter it on <a href="{{ url_for('screening_settings') }}">Settings</a> (not yet run against the service)</span>{% endif %}</td></tr>
+        <tr><td class="strong">Case intake</td><td>An analyst uploads the ID</td><td>The client's onboarding system, sending the ID by API</td><td><span class="badge amber">Not connected</span></td></tr>
         </tbody>
     </table>
-</div>
-
-{# ── the evaluated models ── #}
-<div class="card mt-12 pad-0" id="arch-models">
-    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Models evaluated for document reading</div>
-        <div class="card-sub">{% if bench %}run {{ bench.run_at }} · {{ bench.sample.cases }} cases ({{ bench.sample.spoiled }} with a spoiled photo) · the same prompt and images for every model{% else %}no run yet{% endif %}</div></div>
-    {% if bench %}
-    {% if verdict %}<div class="card-body" style="padding-top:0" id="arch-verdict">{% for line in verdict %}<div class="small" style="margin-bottom:4px">{{ icon('check') }} {{ line }}</div>{% endfor %}</div>{% endif %}
-    <div class="tbl-scroll">
-    <table class="tbl" id="arch-model-table">
-        <thead><tr><th>Model</th><th class="num">Fields read right</th><th class="num">Spoiled photos caught</th><th class="num">False alarms</th><th class="num">Decisions as on the right read</th><th class="num">Seconds a case</th><th class="num">Cost a case</th><th class="num">Per 1,000 cases</th><th class="num">Price in / out per M tokens</th></tr></thead>
-        <tbody>
-        {% for m in bench.models|sort(attribute='field_accuracy', reverse=True) %}
-        <tr{% if m.current %} class="arch-current"{% endif %}><td class="strong nowrap">{{ m.label }}{% if m.current %} <span class="badge blue">in use</span>{% endif %}{% if m.errors %} <span class="badge amber" title="{{ m.error_samples|join(' | ') }}">{{ m.errors }} failed</span>{% endif %}<div class="tiny muted">{{ {'anthropic': 'Anthropic', 'openai': 'OpenAI', 'gemini': 'Google'}.get(m.provider, m.provider) }} · {{ m.id }}</div></td>
-            <td class="num">{{ m.field_accuracy if m.field_accuracy is not none else '—' }}%</td>
-            <td class="num">{{ m.defects_caught }}</td><td class="num">{{ m.false_alarms }}</td>
-            <td class="num">{{ m.decision_agreement if m.decision_agreement is not none else '—' }}%</td>
-            <td class="num">{{ m.seconds_median or '—' }}</td>
-            <td class="num">{% if m.cost_per_case is not none %}${{ '%.4f'|format(m.cost_per_case) }}{% else %}—{% endif %}</td>
-            <td class="num">{% if m.cost_per_1000 is not none %}${{ '%.2f'|format(m.cost_per_1000) }}{% else %}—{% endif %}</td>
-            <td class="num small">${{ m.price_in }} / ${{ m.price_out }}</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
-    <details class="card-body small" id="arch-fields"><summary style="cursor:pointer"><b>Each field, by model</b></summary>
-        <div class="tbl-scroll mt-8">
-        <table class="tbl dense">
-            <thead><tr><th>Field</th>{% for m in bench.models %}<th class="num">{{ m.label }}</th>{% endfor %}</tr></thead>
-            <tbody>{% for f in bench.fields %}<tr><td class="nowrap">{{ f.label }}</td>{% for m in bench.models %}<td class="num">{{ m.fields[f.key] if m.fields[f.key] is not none else '—' }}%</td>{% endfor %}</tr>{% endfor %}</tbody>
-        </table></div>
-    </details>
-    <div class="card-body small muted" style="padding-top:0" id="arch-method">
-        <b>Method.</b> The AI Agent's own request (its instructions, the four document images and the answer schema) went to every model through the LLM Foundry gateway: Claude by the Anthropic API as the agent calls it, GPT and Gemini by the gateway's OpenAI-compatible routes with the schema in the instructions. The documents are the console's drawn specimens of the client's reconciliation log, so what each one prints is known exactly; some photos are spoiled on purpose. <b>Fields read right</b>: ten printed values on the clean photos (passport names, date of birth, nationality, number, expiry; secondary ID name and date of birth; proof-of-address address and date). <b>Decisions</b>: the console's fixed checks run on each model's read, against the same checks on the right read (pass, or a person). Cost is the tokens each call used at list price. {{ bench.price_sources }} A small sample: read the differences of a point or two as noise. Rerun with <code>python -m fincrime.benchmark</code>.
-    </div>
-    {% else %}
-    <div class="card-body small muted">Run <code>python -m fincrime.benchmark</code> (it needs LLM_FOUNDRY_KEY) to fill this table.</div>
-    {% endif %}
 </div>
 {% endblock %}

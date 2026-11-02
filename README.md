@@ -232,26 +232,17 @@ one with a person is confirmed when it passes or has its reasons brought
 up to date. Closed cases stay closed. At the shipped values every label and
 text reads as before ("Issued within the last 6 months").
 
-**Architecture and the models evaluated** (`/architecture`, Insights in
-the left menu; `fincrime/benchmark.py`). One page for the presentation:
-the pipeline step by step (intake, image preparation, the model's read of
-the documents, the fixed checks and their SOP parameters, screening, the
-decision), which steps are a model's judgement, which are auditable rules
-and which are people, the services each step stands in for and the
-existing solution that takes it over by API (an OCR / ID-document API, an
-ID-verification provider, World-Check One, the sanctions lists, the
-client's CRM), and the models evaluated for the one step that needs a
-model. The benchmark sends the AI Agent's own request (its instructions,
-the four document images, the answer schema) to every model the LLM
-Foundry gateway serves (Claude Opus 4.8 in use, Sonnet 5.5, Sonnet 4.6,
-Haiku 4.5; GPT-5, GPT-5 mini, GPT-4.1, GPT-4.1 mini; Gemini 2.5 Pro and
-Flash) and scores each against what the drawn documents print: ten
-printed fields read right, spoiled photos caught and false alarms, the
-console's decision on its read against the decision on the right read,
-seconds and cost a case (measured tokens at list price). Run it with
-`python -m fincrime.benchmark` (it needs `LLM_FOUNDRY_KEY`; a full run is
-about 160 calls); it writes `fincrime/data/benchmark.json`, which the page
-shows with a few plain lines on what the numbers say.
+**Architecture** (`/architecture`, Insights in the left menu). One page for
+the presentation, on the Screening cases flow as it runs: upload, image
+preparation, the vision model's read of the ID, the checks code makes on
+the read, the World-Check search (the stand-in, or World-Check One once its
+account is on Settings), the AI's decision on each hit under the SOP, and
+the analyst's alert outcome; which steps are a model's judgement, which are
+code and which are people; the services each step stands in for and the
+existing solution that takes it over by API (a specialist ID-document API,
+an ID-verification provider, World-Check One, the client's onboarding
+system); the models in use (from Settings) with what the Model evaluation
+page has measured on the uploads so far.
 
 **Screening cases** (`/scan`, the home page of the default book; `fincrime/documents/id_scan.py`,
 `fincrime/watchlist.py`, `fincrime/id_screening.py`, `fincrime/adapters/world_check.py`).
@@ -320,26 +311,24 @@ the World-Check One account; the secret is never shown back. Download gives
 a case as JSON; Delete removes it and its image (real IDs: `uploads/scans/`,
 gitignored).
 
-**Model evaluation** (`/model-evaluation`, Insights; `fincrime/decision_model.py`).
-A decision model built from the client's 1,000 sample cases and scored
-against what the analysts decided, with confusion matrices. The model sees
-the case's facts only (CRM record, passport VIZ and MRZ, secondary ID, proof
-of address, World-Check record; never the disposition, notes, variance types
-or anything the file sets from them) and answers three things in one call:
-the outcome (clear, true match, ask the customer, escalate to L2), the name
-discrepancy and the address discrepancy, from the client's variance
-reference. The file is split once by case ID: 200 cases held out and only
-scored, 800 to learn from. The model's instructions are the SOP
-(`fincrime/data/decision_sop/v*.md`, each version revised on 60 of the 800
-training cases, with a change note at its top), the variance reference, and
-the most similar resolved training cases with the analysts' outcome and
-note. Beside the language models, two baselines need no call: the console's
-own rules (the date-of-birth rule; the hand-written name rules) and a
-decision tree learned from the 800 cases. The page also draws the document
-benchmark's confusion matrices (spoiled photos; decisions on the model's
-read). Run `python -m fincrime.decision_model --models gemini-2.5-flash,claude-sonnet-5-5` (the latest SOP; `--sop v1` for another)
-(`--set tune` for the tuning cases, `--baselines` for the baselines alone,
-`--retry-failed` for failed calls); it writes `fincrime/data/decision_eval.json`.
+**Model evaluation** (`/model-evaluation`, Insights; `fincrime/upload_eval.py`).
+The Screening cases flow's two models, measured on the IDs uploaded in the
+console as they are read and decided: no sample data and no separate run;
+the page is built from the cases each time. An upload has no answer key, so
+the reading model is measured by what the code's checks find on its reads
+(MRZ check digits adding up, printed fields agreeing with the zone, photos
+it called spoiled, fields it was unsure of, seconds and cost a read), and
+the deciding model against the analysts: each alert outcome given after the
+AI's suggestion is the answer it is scored on (agreement, the hits it
+suggested clearing that the analyst did not clear, a confusion matrix of
+the analyst's outcome against its suggestion, seconds and cost a hit), and
+the agreement under each SOP version. The models marked *in use* are
+Settings'; choosing another reader on the upload form, or another decider
+on Settings, adds its row. The client's 1,000 records are used only as the
+stand-in World-Check. (`fincrime/decision_model.py` builds the decider's
+instructions; its own evaluation of the old case facts, and
+`fincrime/benchmark.py`'s of the old four-document read, still run from the
+command line and are not shown.)
 
 The console's names and colours are client-neutral: the two onboarding
 lines are **Individuals** and **Businesses**, customer tiers are Tier 1–4,
@@ -431,7 +420,7 @@ made by Pillow in memory: the slot replaced, the photo turned upright and
 its EXIF gone, served only to the case's tenant, read by the agent in
 place of the drawing, a resubmission back in Data Confirming, bad files and
 closed or held cases refused, kept through a restart, removed by the
-reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_architecture.py` (the Architecture page with and without a benchmark run, the benchmark's scoring: the right read scores full marks, a misread and a missed spoiled photo cost marks, cost at list price), `tests/test_id_scan.py` (Scan ID: a good passport passes, an expired one, a misread number and a minor are caught, a miscounted MRZ filler run counted out, no OCR engine run beside the model, a document that is not an ID; the upload, result, image, JSON and delete pages with the model stood in for, a file that is not an image refused), `tests/test_screening.py` (screening an uploaded ID: the stand-in watchlist is the file's 1,000 records without the analysts' date notes, name scores across word order, diacritics, initials and middle names, the date of birth and country reported but never dropping a hit; the deciding model never shown the case behind the record hit, its answer kept to the four outcomes; SOP versions; confirming every hit closes the case; World-Check One's request signing and result mapping and a refusal said plainly; the screening book's empty start and menu, an upload to a closed case, no hit confirmed and closed, a new SOP version sending open hits to the model again, the settings keeping the secret out of the page and switching the search to World-Check One, the reset deleting the cases only), `tests/test_decision_model.py` (the decision model: the analysts' answers never shown to it, the fixed stratified split, examples from the training cases and never the case itself, the SOP's change note kept out of the prompt, the rules and the learned tree, the scoring and its confusion matrices, the Model evaluation page with and without a run), `tests/test_ai_agent.py` (the AI Agent with the model call stood
+reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_architecture.py` (the old document benchmark's scoring: the right read scores full marks, a misread and a missed spoiled photo cost marks, cost at list price), `tests/test_id_scan.py` (Scan ID: a good passport passes, an expired one, a misread number and a minor are caught, a miscounted MRZ filler run counted out, no OCR engine run beside the model, a document that is not an ID; the upload, result, image, JSON and delete pages with the model stood in for, a file that is not an image refused), `tests/test_screening.py` (screening an uploaded ID: the stand-in watchlist is the file's 1,000 records without the analysts' date notes, name scores across word order, diacritics, initials and middle names, the date of birth and country reported but never dropping a hit; the deciding model never shown the case behind the record hit, its answer kept to the four outcomes; SOP versions; confirming every hit closes the case; World-Check One's request signing and result mapping and a refusal said plainly; the screening book's empty start and menu, an upload to a closed case, no hit confirmed and closed, a new SOP version sending open hits to the model again, the settings keeping the secret out of the page and switching the search to World-Check One, the reset deleting the cases only, the Model evaluation and Architecture pages following the uploads and the analysts' outcomes), `tests/test_decision_model.py` (the decision model: the analysts' answers never shown to it, the fixed stratified split, examples from the training cases and never the case itself, the SOP's change note kept out of the prompt, the rules and the learned tree, the scoring and its confusion matrices), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a
