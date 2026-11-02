@@ -85,17 +85,26 @@ class DecisionTests(unittest.TestCase):
     def hit(self):
         return watchlist.search(WHO)[0]
 
-    def test_the_record_hit_is_never_an_example(self):
+    def test_the_examples_are_the_analysts_own_outcomes(self):
         hit = self.hit()
         text, used = id_screening.prompt("SCAN-1", WHO, hit, 6)
-        self.assertEqual(len(used), 6)
-        self.assertNotIn(hit["row"], used)
-        rows = decision_model.rows()
-        self.assertFalse([u for u in used if rows[u]["world_check_uid"] == hit["uid"]])
-        case = text.split("### The case to decide")[1]
+        self.assertEqual(used, [])                               # nothing resolved yet: the SOP alone, no sample case
+        self.assertNotIn("Example", text)
+        other = dict(WHO, name="ASHISH KUMAR UPADHYAY")
+        done = [{"id": "SCAN-1", "screening": {"person": WHO, "hits": [dict(hit, resolution={"status": "True match", "note": "mine"})]}},
+                {"id": "SCAN-2", "screening": {"person": other, "hits": [dict(hit, resolution={"status": "False positive", "reason": "Date of Birth mismatch", "note": "older man"})]}},
+                {"id": "SCAN-3", "screening": {"person": other, "hits": [dict(hit)]}}]          # no outcome yet: not an example
+        library = id_screening.resolved(done)
+        self.assertEqual([x["case"] for x in library], ["SCAN-1", "SCAN-2"])
+        text, used = id_screening.prompt("SCAN-1", WHO, hit, 6, library)
+        self.assertEqual(used, [f"SCAN-2:{hit['uid']}"])               # never the case's own
+        examples, case = text.split("### The case to decide")
+        self.assertIn("The analyst's outcome: False positive", examples)
+        self.assertIn("reason: Date of Birth mismatch", examples)
         self.assertIn("World-Check record WC-675768", case)
-        self.assertNotIn("Analysts' outcome", case)            # the answer is only on the examples
-        self.assertNotIn("SOP", text)                          # the SOP is the system prompt, not the case
+        self.assertNotIn("outcome", case)                        # the answer is only on the examples
+        self.assertNotIn("SOP", text)                            # the SOP is the system prompt, not the case
+        self.assertEqual(id_screening.prompt("SCAN-9", WHO, hit, 0, library)[1], [])
 
     def test_decide(self):
         hit, sop = self.hit(), id_screening.sop_current([])
@@ -220,7 +229,7 @@ class ScreeningBookPageTests(unittest.TestCase):
         StateStore.delete(id_screening.SOP_KIND, [r["id"] for r in StateStore.records(id_screening.SOP_KIND)])
         fcc.SCREEN_SETTINGS.clear()
         fcc.SCREEN_SETTINGS.update(id_screening.default_settings())
-        self.calls = []
+        self.calls, self.libraries = [], []
 
     def client(self, who="amara.iyer"):
         c = fcc.app.test_client()
@@ -233,8 +242,9 @@ class ScreeningBookPageTests(unittest.TestCase):
         Image.new("RGB", (900, 600), colour).save(out, "PNG")
         return out.getvalue()
 
-    def decide(self, case_id, who, hit, sop, settings):
+    def decide(self, case_id, who, hit, sop, settings, library=()):
         self.calls.append((case_id, hit["uid"], sop["version"]))
+        self.libraries.append([x["case"] for x in library])
         return {"status": "done", "outcome": "clear", "label": "Clear (false positive)", "suggested": "False positive",
                 "confidence": 80, "reasons": ["Different date of birth"], "dob_finding": "", "request": "", "examples": ["KYC-1"],
                 "name_variance": "", "address_variance": "", "model": "m", "model_label": "Model", "sop": sop["version"],
@@ -350,7 +360,9 @@ class ScreeningBookPageTests(unittest.TestCase):
             self.assertIn(needle, page)
         for absent in ('id="eval-empty"', "Console rules today", "decision tree", "Tesseract"):
             self.assertNotIn(absent, page)
+        first = sid
         sid = self.upload(c, a_read(), "ivory")                      # the AI says false positive; the analyst does not
+        self.assertEqual(self.libraries[-1], [first])                # it learnt from the first case's outcome
         uid = fcc._scan(sid)["screening"]["hits"][0]["uid"]
         c.post(f"/scan/{sid}/hits/outcome", data={"alert_id": uid, "outcome": "True Positive", "comment": "same person"})
         [m] = upload_eval.deciding(fcc._scans())

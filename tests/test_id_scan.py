@@ -109,7 +109,7 @@ class PageTests(unittest.TestCase):
                                               "tokens_out": 300, "cost": 0.001, "seconds": 5.0},
                   "error": ""}
         result["checks"] = id_scan.checks(result["read"])
-        no_call = lambda case_id, who, hit, sop, settings: {"status": "failed", "error": "no call in the suite", "sop": sop["version"]}
+        no_call = lambda case_id, who, hit, sop, settings, library=(): {"status": "failed", "error": "no call in the suite", "sop": sop["version"]}
         with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None: dict(result)),                 mock.patch.object(fcc.id_screening, "decide", no_call):
             r = c.post("/scan", data={"image": (io.BytesIO(self.png()), "id.png"), "model": "gemini-2.5-flash"},
                        content_type="multipart/form-data")

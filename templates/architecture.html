@@ -25,7 +25,7 @@
             <div class="arch-arrow">→</div>
             <div class="arch-step {{ 'api' if wc_live else 'sim' }}"><b>5. World-Check search</b><span>{% if wc_live %}World-Check One, by its API{% else %}The stand-in World-Check: the World-Check records of the client's 1,000 cases, searched by name as World-Check does{% endif %}</span></div>
             <div class="arch-arrow">→</div>
-            <div class="arch-step ai"><b>6. AI decision on each hit</b><span>{{ decider_label }} under the current <a href="{{ url_for('screening_sop') }}">Screening SOP</a>, with the most similar resolved cases: clear, true match, ask the customer or escalate, with its reasons</span></div>
+            <div class="arch-step ai"><b>6. AI decision on each hit</b><span>{{ decider_label }} under the current <a href="{{ url_for('screening_sop') }}">Screening SOP</a>, with the most similar hits your analysts have already given an outcome: clear, true match, ask the customer or escalate, with its reasons</span></div>
             <div class="arch-arrow">→</div>
             <div class="arch-step person"><b>7. Alert outcome</b><span>An analyst gives each hit its outcome on the name-screening page or in the World-Check console; the case closes when every hit has one</span></div>
         </div>
@@ -47,7 +47,7 @@
         <tr><td class="strong">Reading the ID</td><td>A vision model transcribes each printed field and the MRZ, marks what it is unsure of and names what spoils the photo (blur, glare, cut off, covered)</td><td><span class="arch-key ai">AI model</span></td></tr>
         <tr><td class="strong">Checks on the read</td><td>Code: the MRZ check digits (the ICAO formula), the printed fields against the zone, expiry, age</td><td><span class="arch-key rule">Rules</span></td></tr>
         <tr><td class="strong">Searching World-Check</td><td>A name search (word order, diacritics, initials set aside); the date of birth and country are shown beside each hit, never used to drop one</td><td>{% if wc_live %}<span class="arch-key api">External API</span>{% else %}<span class="arch-key sim">Simulated</span>{% endif %}</td></tr>
-        <tr><td class="strong">Deciding each hit</td><td>A model given the SOP, the client's variance reference and the most similar resolved cases; a suggestion with its reasons</td><td><span class="arch-key ai">AI model</span></td></tr>
+        <tr><td class="strong">Deciding each hit</td><td>A model given the SOP, the client's variance reference and the most similar hits the analysts have already given an outcome; a suggestion with its reasons</td><td><span class="arch-key ai">AI model</span></td></tr>
         <tr><td class="strong">The SOP</td><td>Written by the QC lead on the Screening SOP page, kept as versions</td><td><span class="arch-key person">People</span></td></tr>
         <tr><td class="strong">The alert outcome</td><td>An analyst, with the AI's suggestion prefilled; whether they agreed with it is kept</td><td><span class="arch-key person">People</span></td></tr>
         </tbody>

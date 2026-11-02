@@ -117,7 +117,7 @@
                     </div>
                     <div class="ad-pane show" data-pane="ai">
                         <div class="ad-card" id="ai-{{ h.uid }}">
-                            <h5>AI assessment{% if ai.status == 'done' %} ({{ ai.model_label }} · SOP {{ ai.sop }} · {{ ai.examples|length }} similar resolved case{{ 's' if ai.examples|length != 1 }}){% endif %}</h5>
+                            <h5>AI assessment{% if ai.status == 'done' %} ({{ ai.model_label }} · SOP {{ ai.sop }} · {{ ai.examples|length }} example{{ 's' if ai.examples|length != 1 }} from your analysts' outcomes){% endif %}</h5>
                             {% if ai.status == 'done' %}
                             <p class="small"><span class="badge {{ ai_tone.get(ai.suggested, 'slate') }}">{{ outcomes[ai.suggested] }}</span> <b>{{ ai.label }}</b> · confidence {{ ai.confidence }}%</p>
                             {% if ai.dob_finding %}<p class="small"><span class="muted">Date of birth:</span> {{ ai.dob_finding }}</p>{% endif %}
@@ -125,7 +125,7 @@
                             {% if ai.request %}<p class="small"><span class="muted">Ask the customer for:</span> <b>{{ ai.request }}</b></p>{% endif %}
                             {% if ai.name_variance or ai.address_variance %}<p class="tiny muted">Name discrepancy: {{ ai.name_variance or '—' }} · address discrepancy: {{ ai.address_variance or '—' }}</p>{% endif %}
                             {% if res and res.ai_suggested %}<p class="small">{% if res.agreed %}<span class="badge emerald">The analyst agreed</span>{% else %}<span class="badge amber">The analyst decided {{ outcomes[res.status] }}</span>{% endif %}</p>{% endif %}
-                            {% elif ai.status == 'pending' %}<p class="small"><span class="spin"></span> The AI is reviewing this alert under SOP {{ sop.version }}, with the resolved cases most like it… <span class="muted">this page refreshes when it answers</span></p>
+                            {% elif ai.status == 'pending' %}<p class="small"><span class="spin"></span> The AI is reviewing this alert under SOP {{ sop.version }}, with the hits your analysts resolved that are most like it… <span class="muted">this page refreshes when it answers</span></p>
                             {% elif ai.status == 'failed' %}<p class="small"><b>The AI gave no answer.</b> {{ ai.error }}</p>
                             {% else %}<p class="small muted">Not sent to the AI.</p>{% endif %}
                             <p class="tiny muted">A suggestion: the alert outcome is the analyst's.</p>

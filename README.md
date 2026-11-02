@@ -270,9 +270,10 @@ Start from an ID document, with no CSV: every uploaded ID becomes a case.
 3. *Decide.* For each hit, a model decides as the Model evaluation's decision
    model does: the **screening SOP** (the files' v1–v3, then any version
    saved on the Screening SOP page) as instructions, the client's variance
-   reference as the playbook, and the resolved cases of the log most like
-   this one with what the analysts decided (never the case behind the very
-   record that was hit). It answers clear / true match / ask the customer /
+   reference as the playbook, and the hits this console's analysts have
+   already given an outcome that are most like this one, with that outcome
+   (none at first: the SOP alone; never one of the case's own; the 1,000
+   records are the stand-in World-Check only). It answers clear / true match / ask the customer /
    escalate, with its reasons, the date-of-birth finding and the name and
    address discrepancy, shown as a suggestion (false positive, possible match,
    true match). The calls run on worker threads; the page refreshes itself
