@@ -304,6 +304,34 @@ Start from an ID document, with no CSV: every uploaded ID becomes a case.
    is shown there too: an *AI suggestion* column in the matches list, and on
    each record its verdict, confidence, date-of-birth finding and reasons,
    with *Ask the AI again* while the match is unresolved.
+**Services connected by API** (`fincrime/adapters/`; each one's account on
+Settings, nothing of it in the code):
+- *The intake API* (`POST /api/v1/cases`, `GET /api/v1/cases/<id>`,
+  `GET /api/v1/cases?reference=`): the client's onboarding system sends an
+  ID image (multipart `image`, or JSON `image_base64`, with its own
+  `reference` for the customer) and reads the case back as JSON: the read,
+  the World-Check hits with the AI's suggestion and each outcome,
+  `auto_verified`, the ID verification, the outcome once closed. Each system
+  has its own key (`X-API-Key`, or `Authorization: Bearer`), created by the
+  QC lead on Settings, shown once, kept as its SHA-256 only, revocable. The
+  case is made exactly as an upload is (`_new_scan`). Working.
+- *Azure AI Document Intelligence* (`adapters/azure_docintel.py`): once its
+  endpoint and key are on Settings, it can be chosen as the reader (on
+  Settings, or per upload); its prebuilt ID-document read is mapped to Scan
+  ID's, so the same checks run on it, and a field under the confidence
+  floor is marked unsure. When Azure cannot read the ID the AI model does,
+  and the case says so. *Test Azure* lists the resource's models. Written
+  from Microsoft's REST reference (v4, 2024-11-30); not yet run against the
+  service.
+- *Didit ID verification* (`adapters/didit.py`): once its API key is on
+  Settings, every uploaded ID (or the case's *Verify with Didit*) goes to
+  Didit's ID Verification API in the background: Approved or Declined, the
+  warnings (screen capture, printed copy, portrait changed, covered fields,
+  MRZ, expiry), the photo quality, shown as the case's *ID vendor check*. A
+  document Didit does not approve (or could not check) is never closed by
+  auto-verify. Face match and liveness need a selfie and are not called.
+  Written from Didit's API reference (`/v3/id-verification/`); not yet run
+  against the service (a sandbox key answers with a fixed Approved sample).
 **Auto-verify** (`id_screening.auto_verify`; *Auto-verify* on Settings, on by
 default). Once the AI has answered on every hit, the AI screening rule
 closes the safe cases and leaves the rest for an analyst: a case with no
@@ -434,7 +462,7 @@ made by Pillow in memory: the slot replaced, the photo turned upright and
 its EXIF gone, served only to the case's tenant, read by the agent in
 place of the drawing, a resubmission back in Data Confirming, bad files and
 closed or held cases refused, kept through a restart, removed by the
-reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_architecture.py` (the old document benchmark's scoring: the right read scores full marks, a misread and a missed spoiled photo cost marks, cost at list price), `tests/test_id_scan.py` (Scan ID: a good passport passes, an expired one, a misread number and a minor are caught, a miscounted MRZ filler run counted out, no OCR engine run beside the model, a document that is not an ID; the upload, result, image, JSON and delete pages with the model stood in for, a file that is not an image refused), `tests/test_screening.py` (screening an uploaded ID: the stand-in watchlist is the file's 1,000 records without the analysts' date notes, name scores across word order, diacritics, initials and middle names, the date of birth and country reported but never dropping a hit; the deciding model never shown the case behind the record hit, its answer kept to the four outcomes; SOP versions; confirming every hit closes the case; World-Check One's request signing and result mapping and a refusal said plainly; the screening book's empty start and menu, an upload to a closed case, no hit confirmed and closed, a new SOP version sending open hits to the model again, the settings keeping the secret out of the page and switching the search to World-Check One, the reset deleting the cases only, the Model evaluation and Architecture pages following the uploads and the analysts' outcomes), `tests/test_decision_model.py` (the decision model: the analysts' answers never shown to it, the fixed stratified split, examples from the training cases and never the case itself, the SOP's change note kept out of the prompt, the rules and the learned tree, the scoring and its confusion matrices), `tests/test_ai_agent.py` (the AI Agent with the model call stood
+reset; a CSV without the document columns waiting for its images, a CSV with a ZIP of them, the ZIP's checks), `tests/test_ocr.py` (the MRZ parser on the ICAO 9303 specimen, readings pooled, the agent's OCR check agreeing, differing, look-alike, unreadable or required, no Tesseract, and one real Tesseract read of a drawn passport, skipped without it), `tests/test_sop.py` (the SOP rules: the shipped values read as before, only the team lead changes one, kept through a restart and undone by the reset, the checks and the SLA following a change at once, and a case waiting for a new proof of address verified by a longer limit), `tests/test_architecture.py` (the old document benchmark's scoring: the right read scores full marks, a misread and a missed spoiled photo cost marks, cost at list price), `tests/test_id_scan.py` (Scan ID: a good passport passes, an expired one, a misread number and a minor are caught, a miscounted MRZ filler run counted out, no OCR engine run beside the model, a document that is not an ID; the upload, result, image, JSON and delete pages with the model stood in for, a file that is not an image refused), `tests/test_screening.py` (screening an uploaded ID: the stand-in watchlist is the file's 1,000 records without the analysts' date notes, name scores across word order, diacritics, initials and middle names, the date of birth and country reported but never dropping a hit; the deciding model never shown the case behind the record hit, its answer kept to the four outcomes; SOP versions; confirming every hit closes the case; World-Check One's request signing and result mapping and a refusal said plainly; the screening book's empty start and menu, an upload to a closed case, no hit confirmed and closed, a new SOP version sending open hits to the model again, the settings keeping the secret out of the page and switching the search to World-Check One, the reset deleting the cases only, the Model evaluation and Architecture pages following the uploads and the analysts' outcomes, auto-verify and its rule, the intake API with its keys, Didit holding back a declined document, Azure reading with the AI model standing in), `tests/test_services.py` (the Azure and Didit adapters: the requests they make, their answers read, their refusals said plainly), `tests/test_decision_model.py` (the decision model: the analysts' answers never shown to it, the fixed stratified split, examples from the training cases and never the case itself, the SOP's change note kept out of the prompt, the rules and the learned tree, the scoring and its confusion matrices), `tests/test_ai_agent.py` (the AI Agent with the model call stood
 in for: the clean path to Verified, a held alert to Data Screening, every
 reason a case goes to a person, an old proof of address asked for again and
 what is never asked for, the record's slips corrected (the father's name, a

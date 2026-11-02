@@ -21,7 +21,7 @@
             <div class="scan-options">
                 <label class="small strong" for="scan-model">AI model that reads the document</label>
                 <select name="model" id="scan-model" class="input"{% if not model_ready %} disabled{% endif %}>
-                    {% for m in models %}<option value="{{ m.id }}"{% if m.id == default_model %} selected{% endif %}>{{ m.label }} · ${{ m.price[0] }} / ${{ m.price[1] }} per M tokens</option>{% endfor %}
+                    {% for m in models %}<option value="{{ m.id }}"{% if m.id == default_model %} selected{% endif %}>{{ m.label }} · {% if m.price %}${{ m.price[0] }} / ${{ m.price[1] }} per M tokens{% else %}${{ m.per_page }} a page (Azure){% endif %}</option>{% endfor %}
                 </select>
                 <div class="tiny muted">{% if model_ready %}Through Straive's LLM Foundry gateway; the default is set on <a href="{{ url_for('screening_settings') }}">Settings</a>.{% else %}No model is configured (LLM_FOUNDRY_KEY): the image cannot be read.{% endif %}</div>
                 <div class="tiny muted" id="scan-source">Screened on: <b>{{ source }}</b> (<a href="{{ url_for('screening_settings') }}">change</a>).</div>

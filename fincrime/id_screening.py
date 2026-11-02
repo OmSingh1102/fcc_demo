@@ -29,7 +29,7 @@ import hashlib
 import time
 
 from fincrime import benchmark, decision_model, watchlist
-from fincrime.adapters import world_check
+from fincrime.adapters import azure_docintel, didit, world_check
 from fincrime.documents import id_scan
 from fincrime.filebook import llm, loader
 from fincrime.utils import dates
@@ -50,15 +50,18 @@ def default_settings():
             "name_threshold": 65, "max_hits": 5, "world_check": dict(world_check.DEFAULTS),
             # auto-verify (auto_verify below): which cases the AI closes without an analyst
             "auto_verify": True, "auto_no_hit": True, "auto_min_confidence": 90, "auto_dob_differs": True,
-            "auto_person_lists": "Sanctions, PEP", "auto_qc_pct": 5}
+            "auto_person_lists": "Sanctions, PEP", "auto_qc_pct": 5,
+            # the services connected by API (adapters/): reading the ID, verifying it; the client's system sending IDs
+            "azure": dict(azure_docintel.DEFAULTS), "didit": dict(didit.DEFAULTS), "intake_keys": []}
 
 
 def settings_from(stored):
     """The defaults with the stored record laid on top."""
     s = default_settings()
     stored = stored or {}
-    s.update({k: v for k, v in stored.items() if k != "world_check"})
-    s["world_check"].update(stored.get("world_check") or {})
+    s.update({k: v for k, v in stored.items() if k not in ("world_check", "azure", "didit")})
+    for service in ("world_check", "azure", "didit"):
+        s[service].update(stored.get(service) or {})
     return s
 
 
@@ -332,6 +335,9 @@ def hit_is_safe(case, hit, settings):
     listed = next((x for x in _person_lists(settings) if x.lower() in (hit.get("category") or "").lower()), None)
     if case.get("verdict") != "Pass":
         return False, "an ID check did not pass"
+    idv = case.get("idv") or {}
+    if idv and idv.get("status") != "Approved":
+        return False, f"{idv.get('provider', 'The ID verification')} did not approve the document"
     if ai.get("status") != "done" or ai.get("outcome") != "clear":
         return False, "the AI did not say false positive"
     if not isinstance(conf, (int, float)) or conf < bar:
@@ -341,6 +347,7 @@ def hit_is_safe(case, hit, settings):
     if listed:
         return False, f"a {listed} record always goes to an analyst"
     return True, (f"the AI said false positive at {conf}% (bar {bar}%)"
+                  + (f"; {idv['provider']} approved the document" if idv else "")
                   + ("; the record's date of birth differs from the ID's" if settings.get("auto_dob_differs") else "")
                   + (f"; not a {' or '.join(_person_lists(settings))} record" if _person_lists(settings) else "")
                   + "; every ID check passed")
@@ -364,9 +371,12 @@ def auto_verify(case, settings):
     pending = open_hits(case)
     if any((h.get("ai") or {}).get("status") not in ("done", "failed") for h in pending):
         return ""                                   # the AI has not answered on every hit yet
+    idv = case.get("idv") or {}
+    if idv.get("status") == "pending":
+        return ""                                   # nor the ID verification
     hits = sc.get("hits") or []
     if not hits:
-        if not settings.get("auto_no_hit") or case.get("verdict") != "Pass":
+        if not settings.get("auto_no_hit") or case.get("verdict") != "Pass" or (idv and idv.get("status") != "Approved"):
             return ""
         whole, safe = True, []
     else:

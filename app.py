@@ -11,6 +11,9 @@ management · Documents · Name screening · World-Check (simulated) · Queues �
 Operations hub (My Work, Pipeline, Trackers, Investigation file, Audit log,
 QC, Routing) · Analytics · Demo affordances · Main.
 """
+import base64
+import binascii
+import hashlib
 import hmac
 import json
 import os
@@ -32,7 +35,7 @@ except ImportError:  # pragma: no cover
     pass
 
 # ─── Modular imports ───────────────────────────────────────────────────────────
-from fincrime.adapters import idv_vendor, world_check
+from fincrime.adapters import azure_docintel, didit, idv_vendor, world_check
 from fincrime.analytics.audit_log import AuditLogConsole
 from fincrime.analytics.case_list import PAGE_SIZES, PER_PAGE, CaseListConsole, read_query as read_case_query
 from fincrime.analytics.ai_console import AiScreeningConsole
@@ -116,7 +119,7 @@ CONSOLE_KINDS = ("kyc", "alert", "wc", "analyst", "settings", "upload")
 _SHOW_DEMO_HINT = "STRAIVE_DEMO_PASSWORD" not in os.environ
 
 ROLE_LABEL = {"L1": "L1 Analyst", "L2": "L2 Analyst", "EDD": "EDD Analyst", "QC": "QC Lead"}
-PUBLIC_ENDPOINTS = {"portal", "login", "logout", "static"}
+PUBLIC_ENDPOINTS = {"portal", "login", "logout", "static", "api_cases", "api_case"}     # the API checks its own key
 
 ANALYSTS = []            # filled by _load_seed
 ANALYST_BY_KEY = {}
@@ -1875,8 +1878,11 @@ def architecture():
     headline = (f"{t['read']} uploaded ID{'s' if t['read'] != 1 else ''} read, {t['decided']} hit{'s' if t['decided'] != 1 else ''} "
                 f"decided" + (f", the analysts agreeing with the AI on {t['agreed']} of the {t['confirmed']} they gave an outcome"
                               if t["confirmed"] else "") if t["uploads"] else "")
+    labels[AZURE_READER["id"]] = AZURE_READER["label"]
     return render_template("architecture.html", reader_label=labels.get(reader, reader), decider_label=labels.get(decider, decider),
-                           llm_ready=ai_review.configured(), wc_live=id_screening.live(SCREEN_SETTINGS), headline=headline)
+                           llm_ready=ai_review.configured(), wc_live=id_screening.live(SCREEN_SETTINGS), headline=headline,
+                           az_live=azure_docintel.configured(SCREEN_SETTINGS["azure"]), dd_live=didit.configured(SCREEN_SETTINGS["didit"]),
+                           intake_n=len(SCREEN_SETTINGS.get("intake_keys") or []))
 
 
 # ─── Scan ID: an uploaded ID read, screened on World-Check, decided by the AI ──
@@ -1984,6 +1990,8 @@ def _screen_resume():
         waiting = [h["uid"] for h in id_screening.open_hits(rec) if (h.get("ai") or {}).get("status") == "pending"]
         if waiting:
             _screen_queue(rec["id"], waiting, why="restart")
+        if (rec.get("idv") or {}).get("status") == "pending":
+            _idv_start(rec["id"])
 
 
 def _screen_search(rec):
@@ -2011,7 +2019,7 @@ def scan_id():
         kind = lambda s: ("open" if s.get("status", "open") == "open"                       # noqa: E731
                           else "auto" if (s.get("closed") or {}).get("auto") else "closed")
         shown = [s for s in scans if not status or kind(s) == status]
-        return render_template("scan.html", models=id_scan.models(), default_model=SCREEN_SETTINGS["reader_model"],
+        return render_template("scan.html", models=_readers(), default_model=SCREEN_SETTINGS["reader_model"],
                                model_ready=id_scan.model_ready(), scans=shown, status=status,
                                counts={k: sum(1 for s in scans if kind(s) == k) for k in ("open", "auto", "closed")} | {"all": len(scans)},
                                auto_on=SCREEN_SETTINGS.get("auto_verify"),
@@ -2020,31 +2028,186 @@ def scan_id():
     if not f or not f.filename:
         flash("Choose a photo or scan of the ID document.", "error")
         return redirect(url_for("scan_id"))
-    ok, res = _run_action(uploads.prepare, f.read(), "The ID image")
+    ok, record = _run_action(_new_scan, f.read(), f.filename, request.form.get("model") or None, _actor())
     if not ok:
         return redirect(url_for("scan_id"))
-    jpeg, info = res
-    result = id_scan.scan(jpeg, request.form.get("model") or SCREEN_SETTINGS["reader_model"])
+    for message in (record.get("fallback"), record["error"], (record.get("screening") or {}).get("error")):
+        if message:
+            flash(message, "error")
+    return redirect(url_for("scan_result", scan_id=record["id"]))
+
+
+AZURE_READER = {"id": azure_docintel.MODEL["model"], "label": azure_docintel.MODEL["label"], "price": None}
+
+
+def _readers():
+    """What can read an uploaded ID: the AI models, and Azure AI Document
+    Intelligence once its endpoint and key are on Settings."""
+    out = list(id_scan.models())
+    if azure_docintel.configured(SCREEN_SETTINGS["azure"]):
+        out.append(dict(AZURE_READER, per_page=SCREEN_SETTINGS["azure"].get("price_per_page")))
+    return out
+
+
+def _read_id(jpeg, reader):
+    """Scan ID's result for one image, read by `reader`. Azure's read gets
+    the same checks; when Azure cannot read it, the AI model does, and the
+    case says so (result["fallback"])."""
+    if reader != AZURE_READER["id"]:
+        return id_scan.scan(jpeg, reader)
+    cfg = SCREEN_SETTINGS["azure"]
+    why = "its endpoint and key are not on Settings"
+    if azure_docintel.configured(cfg):
+        try:
+            read, used = azure_docintel.read(cfg, jpeg, [k for k, _ in id_scan.FIELDS])
+            return {"read": read, "model": used, "checks": id_scan.checks(read), "error": ""}
+        except azure_docintel.AzureError as exc:
+            why = str(exc)
+    result = id_scan.scan(jpeg, id_scan.DEFAULT_MODEL)
+    result["fallback"] = f"Azure AI Document Intelligence did not read the ID ({why}): the AI model read it instead."
+    return result
+
+
+def _new_scan(data, filename, reader, actor, reference=""):
+    """A new screening case from an ID image, for the upload page and the
+    intake API: prepared, read, searched on World-Check, and the rule run on
+    a case with no hit; its hits go to the AI and the ID to the verification
+    service in the background. WorkflowError when the image is unusable."""
+    jpeg, info = uploads.prepare(data, "The ID image")
+    result = _read_id(jpeg, reader or SCREEN_SETTINGS["reader_model"])
     at = dates.now_str()
     sid = "SCAN-" + "".join(ch for ch in at if ch.isdigit()) + "-" + info["sha256"][:6].upper()
-    record = dict(result, id=sid, at=at, by=_actor(), file=f.filename[:120], info=info, status="open",
+    while _scan_or_none(sid):                       # the same image twice in a second (a client's retry)
+        sid += "-" + secrets.token_hex(2).upper()
+    record = dict(result, id=sid, at=at, by=actor, file=(filename or "id")[:120], info=info, status="open",
                   image=uploads.store("scans", sid, jpeg), verdict=id_scan.verdict(result))
+    if reference:
+        record["reference"] = str(reference)[:120]
     if id_screening.is_id(result["read"]):
         _screen_search(record)
+        if _idv_wanted():
+            record["idv"] = {"provider": "Didit", "status": "pending", "at": at}
         id_screening.auto_verify(record, SCREEN_SETTINGS)          # a case with no hit (hits wait for the AI)
     _save("scan", record)
-    if result["error"]:
-        flash(result["error"], "error")
-    elif (record.get("screening") or {}).get("error"):
-        flash(record["screening"]["error"], "error")
     _screen_queue(sid, why="upload")
-    return redirect(url_for("scan_result", scan_id=sid))
+    if (record.get("idv") or {}).get("status") == "pending":
+        _idv_start(sid)
+    return record
+
+
+# ─── ID verification by Didit (adapters/didit), in the background ───────────────
+def _idv_wanted():
+    cfg = SCREEN_SETTINGS["didit"]
+    return didit.configured(cfg) and bool(cfg.get("auto", True))
+
+
+def _idv_job(scan_id):
+    rec = _scan_or_none(scan_id)
+    if not rec:
+        return
+    try:
+        res = didit.verify(SCREEN_SETTINGS["didit"], uploads.load(rec["image"]), rec.get("reference") or scan_id)
+    except (didit.DiditError, OSError, ValueError) as exc:
+        res = {"provider": "Didit", "status": "error", "error": str(exc)[:300]}
+    res["at"] = dates.now_str()
+
+    def land(r):
+        r["idv"] = res
+        id_screening.auto_verify(r, SCREEN_SETTINGS)
+    _screen_update(scan_id, land)
+
+
+def _idv_start(scan_id):
+    if app.testing:                         # the suite wants the answer before the next line
+        _idv_job(scan_id)
+    else:
+        threading.Thread(target=_idv_job, args=(scan_id,), name="didit", daemon=True).start()
+
+
+@app.route("/scan/<scan_id>/idv", methods=["POST"])
+def scan_idv(scan_id):
+    """Verify the ID with Didit now (when it is not run on upload, or again)."""
+    rec = _scan(scan_id)
+    if not didit.configured(SCREEN_SETTINGS["didit"]):
+        flash("Enter the Didit API key on Settings first.", "error")
+    elif rec.get("status") == "closed":
+        flash("The case is closed.", "error")
+    else:
+        _screen_update(scan_id, lambda r: r.update(idv={"provider": "Didit", "status": "pending", "at": dates.now_str()}))
+        _idv_start(scan_id)
+        flash("Sent to Didit.", "success")
+    return redirect(url_for("scan_result", scan_id=scan_id))
+
+
+# ─── The intake API: the client's onboarding system sends IDs ─────────────────
+def _intake_key():
+    """The intake key the request carries (X-API-Key, or Authorization:
+    Bearer), or None. Keys are kept as their SHA-256 only."""
+    given = (request.headers.get("X-API-Key") or "").strip()
+    auth = request.headers.get("Authorization") or ""
+    if not given and auth.lower().startswith("bearer "):
+        given = auth[7:].strip()
+    if not given:
+        return None
+    digest = hashlib.sha256(given.encode("utf-8")).hexdigest()
+    return next((k for k in SCREEN_SETTINGS.get("intake_keys") or [] if hmac.compare_digest(k["hash"], digest)), None)
+
+
+def _api_error(status, message):
+    return jsonify({"error": message}), status
+
+
+@app.route("/api/v1/cases", methods=["GET", "POST"])
+def api_cases():
+    """POST an ID image (multipart `image`, or JSON `image_base64`), with an
+    optional `reference` (the client's own ID for the customer) and `model`:
+    the case as /api/v1/cases/<id> returns it, 201. GET: the cases, or those
+    of one `reference`."""
+    key = _intake_key()
+    if not key:
+        return _api_error(401, "A valid intake API key is required: the X-API-Key header, or Authorization: Bearer.")
+    if request.method == "GET":
+        ref = request.args.get("reference", "")
+        return jsonify({"cases": [_scan_export(r) for r in _scans() if not ref or r.get("reference") == ref][:100]})
+    if request.files.get("image"):
+        f = request.files["image"]
+        data, name = f.read(), f.filename or "id"
+        reference, reader = request.form.get("reference", ""), request.form.get("model", "")
+    else:
+        body = request.get_json(silent=True) or {}
+        try:
+            data = base64.b64decode(body.get("image_base64") or "", validate=True)
+        except (binascii.Error, ValueError):
+            return _api_error(400, "image_base64 is not base64.")
+        name, reference, reader = str(body.get("filename") or "id.jpg"), str(body.get("reference") or ""), str(body.get("model") or "")
+    if not data:
+        return _api_error(400, "Send the ID image: a multipart field `image`, or `image_base64` in a JSON body.")
+    if reader and reader not in {m["id"] for m in _readers()}:
+        return _api_error(400, f"Unknown model {reader!r}: one of {', '.join(m['id'] for m in _readers())}.")
+    try:
+        rec = _new_scan(data, name, reader or None, f"Intake API ({key['name']})", reference)
+    except WorkflowError as exc:
+        return _api_error(400, str(exc))
+    key["last_used"] = dates.now_str()
+    _save("settings", SCREEN_SETTINGS)
+    return jsonify(_scan_export(_scan(rec["id"]))), 201, {"Location": url_for("api_case", scan_id=rec["id"])}
+
+
+@app.route("/api/v1/cases/<scan_id>")
+def api_case(scan_id):
+    """One case: its status, the read, the World-Check hits with the AI's
+    suggestion and the outcome, the ID verification."""
+    if not _intake_key():
+        return _api_error(401, "A valid intake API key is required: the X-API-Key header, or Authorization: Bearer.")
+    rec = _scan_or_none(scan_id)
+    return jsonify(_scan_export(rec)) if rec else _api_error(404, f"No case {scan_id}.")
 
 
 @app.route("/scan/<scan_id>")
 def scan_result(scan_id):
     rec = _scan(scan_id)
     return render_template("scan_result.html", s=rec, fields=id_scan.FIELDS, points=id_screening.progress(rec),
+                           didit_ready=didit.configured(SCREEN_SETTINGS["didit"]),
                            outcomes=id_screening.ALERT_OUTCOME, sop=id_screening.sop_current(_sop_stored()))
 
 
@@ -2164,7 +2327,13 @@ def scan_image(scan_id):
 def scan_json(scan_id):
     """The case for another system: the document, its fields, the checks,
     the World-Check hits with the AI's decision and the analyst's."""
-    rec = _scan(scan_id)
+    body = _scan_export(_scan(scan_id))
+    return Response(json.dumps(body, indent=2, ensure_ascii=False), mimetype="application/json",
+                    headers={"Cache-Control": "no-store, private", "Content-Disposition": f'attachment; filename="{scan_id}.json"'})
+
+
+def _scan_export(rec):
+    """The case as another system reads it (Download JSON, the intake API)."""
     read = rec.get("read") or {}
     sc = rec.get("screening") or {}
     body = {"scan_id": rec["id"], "scanned_at": rec["at"], "verdict": rec["verdict"], "status": rec.get("status", "open"),
@@ -2176,9 +2345,10 @@ def scan_json(scan_id):
                                  "hits": [{k: h.get(k) for k in ("uid", "name", "aka", "dob_text", "places", "category", "score",
                                                                   "strength", "dob_result", "country_result", "ai", "resolution")}
                                           for h in sc.get("hits") or []]},
-            "closed": rec.get("closed")}
-    return Response(json.dumps(body, indent=2, ensure_ascii=False), mimetype="application/json",
-                    headers={"Cache-Control": "no-store, private", "Content-Disposition": f'attachment; filename="{scan_id}.json"'})
+            "closed": rec.get("closed"), "reference": rec.get("reference", ""), "uploaded_by": rec.get("by", ""),
+            "auto_verified": bool((rec.get("closed") or {}).get("auto")), "qc_sample": bool(rec.get("qc_sample")),
+            "id_verification": rec.get("idv"), "reader_fallback": rec.get("fallback", "")}
+    return body
 
 
 @app.route("/scan/<scan_id>/delete", methods=["POST"])
@@ -2234,7 +2404,7 @@ def screening_settings():
             flash("Only the QC lead changes the settings.", "error")
             return redirect(url_for("screening_settings"))
         f = request.form
-        reader_ids = {m["id"] for m in id_scan.models()}
+        reader_ids = {m["id"] for m in _readers()}
         decision_ids = {m["id"] for m in id_screening.decision_models()}
         try:
             examples = int(f.get("examples", s["examples"]))
@@ -2269,13 +2439,95 @@ def screening_settings():
             wc["api_secret"] = f["api_secret"].strip()
         if f.get("forget_secret"):
             wc["api_secret"] = ""
+        if f.get("services_form"):                  # the Azure and Didit cards were on the page
+            err = _services_update(s, f)
+            if err:
+                flash(err, "error")
+                return redirect(url_for("screening_settings"))
         _save("settings", s)
         flash("Settings saved. World-Check: " + id_screening.source_label(s) + ".", "success")
         return redirect(url_for("screening_settings"))
     return render_template("screening_settings.html", s=s, wc=s["world_check"], secret_shown=_masked(s["world_check"]["api_secret"]),
-                           readers=id_scan.models(), deciders=id_screening.decision_models(), live=id_screening.live(s),
+                           az=s["azure"], az_key_shown=_masked(s["azure"]["api_key"]), az_live=azure_docintel.configured(s["azure"]),
+                           dd=s["didit"], dd_key_shown=_masked(s["didit"]["api_key"]), dd_live=didit.configured(s["didit"]),
+                           intake_keys=s.get("intake_keys") or [], new_key=session.pop("new_intake_key", None),
+                           api_base=request.url_root.rstrip("/") + "/api/v1",
+                           readers=_readers(), deciders=id_screening.decision_models(), live=id_screening.live(s),
                            source=id_screening.source_label(s), can_edit="QC" in _levels(), model_ready=id_scan.model_ready(),
                            watchlist_size=len(watchlist.profiles()))
+
+
+def _services_update(s, f):
+    """Azure's and Didit's settings from the form ("" when saved, else what is wrong)."""
+    az, dd = s["azure"], s["didit"]
+    try:
+        floor, page_price, call_price = (float(f.get("az_min_confidence", az["min_confidence"])),
+                                         float(f.get("az_price_per_page", az["price_per_page"]) or 0),
+                                         float(f.get("dd_price_per_call", dd["price_per_call"]) or 0))
+    except ValueError:
+        return "The confidence floor and the prices are numbers."
+    if not (0 <= floor <= 1 and page_price >= 0 and call_price >= 0):
+        return "The confidence floor is 0-1; prices are 0 or more."
+    az.update(endpoint=f.get("az_endpoint", "").strip(), api_version=f.get("az_api_version", "").strip() or azure_docintel.DEFAULTS["api_version"],
+              model_id=f.get("az_model_id", "").strip() or azure_docintel.DEFAULTS["model_id"], min_confidence=floor, price_per_page=page_price)
+    dd.update(base_url=f.get("dd_base_url", "").strip() or didit.DEFAULTS["base_url"], path=f.get("dd_path", "").strip() or didit.DEFAULTS["path"],
+              auto=bool(f.get("dd_auto")), document_liveness=bool(f.get("dd_liveness")), price_per_call=call_price)
+    for cfg, field, forget in ((az, "az_api_key", "az_forget"), (dd, "dd_api_key", "dd_forget")):
+        if f.get(field, "").strip():                # blank keeps the stored key
+            cfg["api_key"] = f[field].strip()
+        if f.get(forget):
+            cfg["api_key"] = ""
+    if s["reader_model"] == AZURE_READER["id"] and not azure_docintel.configured(az):
+        s["reader_model"] = id_scan.DEFAULT_MODEL
+    return ""
+
+
+@app.route("/screening/settings/azure-test", methods=["POST"])
+def screening_azure_test():
+    """List the Azure resource's models with the saved endpoint and key."""
+    cfg = SCREEN_SETTINGS["azure"]
+    if not azure_docintel.configured(cfg):
+        flash("Enter and save the Azure endpoint and key first.", "error")
+        return redirect(url_for("screening_settings") + "#settings-azure")
+    try:
+        found = azure_docintel.models(cfg)
+    except azure_docintel.AzureError as exc:
+        flash(f"Connection failed: {exc}", "error")
+        return redirect(url_for("screening_settings") + "#settings-azure")
+    has = cfg["model_id"] in found
+    flash(f"Connected to Azure AI Document Intelligence: {len(found)} models"
+          + ("." if has else f"; {cfg['model_id']} is not among them: check the model on Settings."), "success" if has else "error")
+    return redirect(url_for("screening_settings") + "#settings-azure")
+
+
+@app.route("/screening/settings/intake-keys", methods=["POST"])
+def intake_key_new():
+    """A new intake API key, shown once (the QC lead)."""
+    if "QC" not in _levels():
+        flash("Only the QC lead creates API keys.", "error")
+        return redirect(url_for("screening_settings") + "#settings-intake")
+    name = (request.form.get("name") or "").strip()[:60] or "Client system"
+    raw = "fcc_" + secrets.token_urlsafe(24)
+    SCREEN_SETTINGS.setdefault("intake_keys", []).append(
+        {"id": secrets.token_hex(4), "name": name, "hash": hashlib.sha256(raw.encode("utf-8")).hexdigest(), "prefix": raw[:8],
+         "created_at": dates.now_str(), "created_by": _actor(), "last_used": ""})
+    _save("settings", SCREEN_SETTINGS)
+    session["new_intake_key"] = {"name": name, "key": raw}
+    return redirect(url_for("screening_settings") + "#settings-intake")
+
+
+@app.route("/screening/settings/intake-keys/<key_id>/revoke", methods=["POST"])
+def intake_key_revoke(key_id):
+    if "QC" not in _levels():
+        flash("Only the QC lead revokes API keys.", "error")
+        return redirect(url_for("screening_settings") + "#settings-intake")
+    keys = SCREEN_SETTINGS.get("intake_keys") or []
+    gone = [k for k in keys if k["id"] == key_id]
+    SCREEN_SETTINGS["intake_keys"] = [k for k in keys if k["id"] != key_id]
+    _save("settings", SCREEN_SETTINGS)
+    flash(f"Revoked the key for {gone[0]['name']}: calls with it are refused from now." if gone else "No such key.",
+          "success" if gone else "error")
+    return redirect(url_for("screening_settings") + "#settings-intake")
 
 
 @app.route("/screening/settings/test", methods=["POST"])

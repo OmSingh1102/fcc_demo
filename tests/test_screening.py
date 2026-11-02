@@ -417,6 +417,99 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertEqual((sampled["status"], bool(sampled["qc_sample"])), ("open", True))
         self.assertEqual(id_screening.auto_verify(sampled, dict(s, auto_verify=False)), "")
 
+    def test_the_intake_api(self):
+        qc = self.client("leah.fernandez")
+        self.assertEqual(self.client().post("/screening/settings/intake-keys", data={"name": "x"}).status_code, 302)
+        self.assertEqual(fcc.SCREEN_SETTINGS["intake_keys"], [])                 # only the QC lead creates keys
+        qc.post("/screening/settings/intake-keys", data={"name": "Onboarding app"})
+        page = qc.get("/screening/settings").data.decode("utf-8")
+        key = page.split('id="intake-new-key"')[1].split("<code>")[1].split("</code>")[0]
+        self.assertTrue(key.startswith("fcc_"))
+        self.assertNotIn(key, qc.get("/screening/settings").data.decode("utf-8"))   # shown once
+        self.assertNotIn(key, str(fcc.SCREEN_SETTINGS["intake_keys"]))           # kept as a fingerprint only
+        api = fcc.app.test_client()                                               # no session: the key is the login
+        self.assertEqual(api.post("/api/v1/cases").status_code, 401)
+        self.assertEqual(api.post("/api/v1/cases", headers={"X-API-Key": "fcc_wrong"}).status_code, 401)
+        read = a_read()
+        result = {"read": read, "model": {"model": "m", "label": "Model", "tokens_in": 1, "tokens_out": 1, "cost": 0.0, "seconds": 1.0},
+                  "checks": id_scan.checks(read), "error": ""}
+        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None: dict(result)), \
+                mock.patch.object(id_screening, "decide", self.decide):
+            r = api.post("/api/v1/cases", headers={"X-API-Key": key}, content_type="multipart/form-data",
+                         data={"image": (io.BytesIO(self.png()), "passport.png"), "reference": "CUST-1042"})
+            self.assertEqual(r.status_code, 201, r.data)
+            body = r.get_json()
+            self.assertEqual((body["reference"], body["uploaded_by"], body["status"], body["screening"]["hits"][0]["ai"]["suggested"]),
+                             ("CUST-1042", "Intake API (Onboarding app)", "open", "False positive"))
+            import base64
+            r = api.post("/api/v1/cases", headers={"Authorization": "Bearer " + key},
+                         json={"image_base64": base64.b64encode(self.png("ivory")).decode(), "reference": "CUST-7"})
+            self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(api.post("/api/v1/cases", headers={"X-API-Key": key}, json={"image_base64": "%%%"}).status_code, 400)
+        sid = body["scan_id"]
+        self.assertEqual(api.get(f"/api/v1/cases/{sid}", headers={"X-API-Key": key}).get_json()["scan_id"], sid)
+        self.assertEqual(api.get("/api/v1/cases/SCAN-none", headers={"X-API-Key": key}).status_code, 404)
+        found = api.get("/api/v1/cases?reference=CUST-1042", headers={"X-API-Key": key}).get_json()["cases"]
+        self.assertEqual([c["scan_id"] for c in found], [sid])
+        self.assertTrue(fcc.SCREEN_SETTINGS["intake_keys"][0]["last_used"])
+        qc.post(f"/screening/settings/intake-keys/{fcc.SCREEN_SETTINGS['intake_keys'][0]['id']}/revoke")
+        self.assertEqual(api.get(f"/api/v1/cases/{sid}", headers={"X-API-Key": key}).status_code, 401)
+
+    def test_didit_verifies_the_id_and_holds_back_a_declined_one(self):
+        from fincrime.adapters import didit
+        fcc.SCREEN_SETTINGS.update(auto_verify=True, auto_qc_pct=0)
+        fcc.SCREEN_SETTINGS["didit"]["api_key"] = "DD-KEY"
+        answer = {"request_id": "R", "id_verification": {"status": "Declined", "document_type": "Passport", "warnings": [
+            {"risk": "SCREEN_CAPTURE_DETECTED", "log_type": "error", "short_description": "Screen capture detected"}]}}
+        import json as _json
+        with mock.patch.object(didit, "_send", lambda req: (200, _json.dumps(answer).encode())):
+            c = self.client()
+            sid = self.upload(c, a_read(name="ZEBEDIAH QUARTERMAINE", surname="QUARTERMAINE", given="ZEBEDIAH"))
+        rec = fcc._scan(sid)
+        self.assertEqual((rec["idv"]["status"], rec["status"]), ("Declined", "open"))   # no hit, but not auto-verified
+        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        for needle in ('id="id-vendor"', "Screen capture detected", "Verify again"):
+            self.assertIn(needle, page)
+        answer["id_verification"].update(status="Approved", warnings=[])
+        with mock.patch.object(didit, "_send", lambda req: (200, _json.dumps(answer).encode())):
+            c.post(f"/scan/{sid}/idv")
+        rec = fcc._scan(sid)
+        self.assertEqual((rec["idv"]["status"], rec["status"], rec["closed"]["by"]), ("Approved", "closed", id_screening.AUTO_ACTOR))
+        with mock.patch.object(didit, "_send", lambda req: (403, b'{"error": "no credits"}')):
+            sid = self.upload(c, a_read(name="ZEBEDIAH QUARTERMAINE", surname="QUARTERMAINE", given="ZEBEDIAH"), "ivory")
+        rec = fcc._scan(sid)
+        self.assertEqual((rec["idv"]["status"], rec["status"]), ("error", "open"))      # not checked: an analyst's
+        self.assertIn("refused the call", rec["idv"]["error"])
+        self.assertEqual(c.get(f"/api/v1/cases/{sid}").status_code, 401)             # the API never takes a session
+
+    def test_azure_reads_and_the_ai_model_stands_in_when_it_cannot(self):
+        from fincrime.adapters import azure_docintel
+        fcc.SCREEN_SETTINGS["azure"].update(endpoint="https://res.cognitiveservices.azure.com", api_key="AZ")
+        fcc.SCREEN_SETTINGS["reader_model"] = "azure-docintel"
+        result = {"pages": [{}], "documents": [{"docType": "idDocument.passport", "fields": {
+            "FirstName": {"valueString": "ASHISH", "confidence": 0.99}, "LastName": {"valueString": "UPADHYAY", "confidence": 0.99},
+            "DateOfBirth": {"valueDate": "1962-06-29", "confidence": 0.99}, "DocumentNumber": {"valueString": "S3321051", "confidence": 0.99},
+            "CountryRegion": {"valueCountryRegion": "IND", "confidence": 0.99}}}]}
+        c = self.client()
+        self.assertIn("Azure AI Document Intelligence", c.get("/scan").data.decode("utf-8"))   # offered as a reader
+        with mock.patch.object(azure_docintel, "analyze", lambda cfg, jpeg, sleep=None: result), \
+                mock.patch.object(id_screening, "decide", self.decide):
+            r = c.post("/scan", data={"image": (io.BytesIO(self.png()), "id.png")}, content_type="multipart/form-data")
+        rec = fcc._scan(r.headers["Location"].rsplit("/", 1)[-1])
+        self.assertEqual((rec["model"]["model"], rec["read"]["fields"]["full_name"], rec["screening"]["hits"][0]["uid"]),
+                         ("azure-docintel", "ASHISH UPADHYAY", "WC-675768"))
+
+        def refused(cfg, jpeg, sleep=None):
+            raise azure_docintel.AzureError("Azure refused the key (401)")
+        sid = self.upload(c, a_read(), "ivory")                                      # stands the AI model in
+        with mock.patch.object(azure_docintel, "analyze", refused):
+            sid = self.upload(c, a_read(), "linen")
+        rec = fcc._scan(sid)
+        self.assertEqual(rec["model"]["model"], "m")
+        self.assertIn("Azure refused the key", rec["fallback"])
+        self.assertIn("reader-fallback", c.get(f"/scan/{sid}").data.decode("utf-8"))
+        self.assertIn("Azure key entered", c.get("/architecture").data.decode("utf-8"))
+
     def test_ai_assessment_sends_the_alerts_again(self):
         c = self.client()
         sid = self.upload(c, a_read())

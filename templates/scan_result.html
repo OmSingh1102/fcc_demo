@@ -83,6 +83,7 @@
     {# ── Overview: who the ID names, and the check on the read ── #}
     <div class="tab-panel" role="tabpanel" data-panel="overview">
         {% if s.error %}<div class="verdict-box differs small mb-8">{{ s.error }}</div>{% endif %}
+        {% if s.fallback %}<div class="note warn small mb-8" id="reader-fallback">{{ s.fallback }}</div>{% endif %}
         <div class="fact-cards">
             <div class="card">
                 <div class="card-head"><div class="card-title">Identity</div></div>
@@ -122,6 +123,28 @@
                     </div>
                 </div>
             </div>
+            {% set v = s.idv %}
+            {% if v or didit_ready %}
+            <div class="card" id="id-vendor">
+                <div class="card-head"><div class="card-title">ID vendor check</div>
+                    {% if v %}<span class="badge {{ {'Approved': 'emerald', 'Declined': 'rose', 'pending': 'blue'}.get(v.status, 'amber') }}">{{ {'pending': 'Checking…', 'error': 'Not checked'}.get(v.status, v.status) }}</span>{% endif %}</div>
+                <div class="card-body fact-list">
+                    <div><span class="l">Vendor</span><span class="v">Didit</span></div>
+                    {% if v and v.status == 'error' %}<div><span class="l">Reason</span><span class="v">{{ v.error }}</span></div>
+                    {% elif v and v.status != 'pending' %}
+                    <div><span class="l">Document</span><span class="v">{{ v.document_type or '-' }}{% if v.issuing_state %} · {{ v.issuing_state }}{% endif %}</span></div>
+                    <div><span class="l">Read by Didit</span><span class="v">{{ v.full_name or '-' }}{% if v.date_of_birth %} · {{ v.date_of_birth }}{% endif %}{% if v.document_number %} · <span class="mono">{{ v.document_number }}</span>{% endif %}</span></div>
+                    <div><span class="l">Warnings</span><span class="v">{% for w in v.warnings %}<span class="badge {{ 'rose' if w.declines else 'slate' }}" title="{{ w.risk }}">{{ w.text }}</span> {% else %}none{% endfor %}</span></div>
+                    {% if v.quality %}<div><span class="l">Photo quality</span><span class="v">{{ v.quality.overall_score }}/100{% if v.quality.is_document_fully_visible == false %} · not fully visible{% endif %}</span></div>{% endif %}
+                    <div><span class="l">Checked</span><span class="v">{{ v.at }}{% if v.cost %} · ${{ '%.2f'|format(v.cost) }}{% endif %}</span></div>
+                    {% elif v %}<div><span class="l">Status</span><span class="v">Sent to Didit; this page refreshes when it answers.</span></div>
+                    {% else %}<div><span class="l">Status</span><span class="v">Not checked yet.</span></div>{% endif %}
+                    {% if didit_ready and not closed and (not v or v.status != 'pending') %}
+                    <div class="fact-actions"><form method="post" action="{{ url_for('scan_idv', scan_id=s.id) }}" style="margin:0"><button class="btn btn-outline btn-xs" type="submit">{{ 'Verify again' if v else 'Verify with Didit' }}</button></form></div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 
