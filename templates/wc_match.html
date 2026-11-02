@@ -86,6 +86,34 @@
             </div>
         </div>
 
+        {% if m.ai is defined %}
+        {% set ai = m.ai %}
+        <div class="wc-panel mt-12" id="wc-ai">
+            <h4>AI suggestion <span class="tiny muted" style="text-transform:none;letter-spacing:0;font-weight:400">· a suggestion under the screening SOP; the analyst resolves</span></h4>
+            {% if ai.status == 'pending' %}
+                <div class="small"><span class="spin"></span> The AI is reviewing this match under the screening SOP, with the resolved cases most like it… <span class="muted">this page refreshes when it answers</span></div>
+            {% elif ai.status == 'failed' %}
+                <div class="small"><b>The AI gave no decision.</b> {{ ai.error }}</div>
+            {% elif ai.status == 'done' %}
+                <div class="row between">
+                    <div>{{ outcome_badge(ai.suggested_wc) }} <span class="small strong">{{ ai.label }}</span>{% if ai.confidence is not none %} <span class="tiny muted">· confidence {{ ai.confidence }}%</span>{% endif %}</div>
+                    <div class="tiny muted">{{ ai.model_label }} · SOP {{ ai.sop }} · {{ ai.examples|length }} example case{{ 's' if ai.examples|length != 1 }}{% if ai.at %} · {{ ai.at }}{% endif %}</div>
+                </div>
+                {% if ai.dob_finding %}<div class="small mt-8"><span class="muted">Date of birth:</span> {{ ai.dob_finding }}</div>{% endif %}
+                {% if ai.reasons %}<ul class="small screen-reasons">{% for x in ai.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+                {% if ai.request %}<div class="small"><span class="muted">Ask the customer for:</span> <b>{{ ai.request }}</b></div>{% endif %}
+                {% if ai.name_variance or ai.address_variance %}<div class="tiny muted mt-8">Name discrepancy: {{ ai.name_variance or '—' }} · address discrepancy: {{ ai.address_variance or '—' }}</div>{% endif %}
+            {% else %}
+                <div class="small muted">Not sent to the AI.</div>
+            {% endif %}
+            {% if case_open and r.status == 'Unresolved' and ai.status != 'pending' %}
+            <form method="post" action="{{ url_for('scan_hit_ai', scan_id=wc.id, uid=m.id) }}" style="margin:0">
+                <input type="hidden" name="back" value="wc">
+                <button type="submit" class="btn btn-sm mt-8" style="background:#2a2e37;color:#e6e8ec;border:1px solid #3a3f4a">{{ icon('refresh-cw') }} Ask the AI again</button></form>
+            {% endif %}
+        </div>
+        {% endif %}
+
         <div class="wc-panel mt-12">
             <h4>Comparison data <span class="strength" style="float:right;width:80px"><i style="width:{{ (m.strength * 100)|round|int }}%"></i></span></h4>
             <table class="wc-compare">

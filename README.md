@@ -297,7 +297,10 @@ Start from an ID document, with no CSV: every uploaded ID becomes a case.
    is the file's record, built as that book builds it), the audit and the
    export PDF. Resolving a match there (true positive, potential match, false
    positive, with risk, reason and comment) confirms the hit on the case, and
-   a hit confirmed on the case shows as resolved there.
+   a hit confirmed on the case shows as resolved there. The AI's suggestion
+   is shown there too: an *AI suggestion* column in the matches list, and on
+   each record its verdict, confidence, date-of-birth finding and reasons,
+   with *Ask the AI again* while the match is unresolved.
 Saving a new SOP version (the QC lead) sends every open case's unconfirmed
 hits to the model again under it. Settings (the QC lead) holds the models,
 the examples per hit, the stand-in's name-score floor and the hits kept, and

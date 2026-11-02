@@ -863,6 +863,8 @@ class FlowTestCase(unittest.TestCase):
         aid = self.K["sidorov"]["screening"]["alert_case_id"]
         page = self.c.get(f"/wc/{aid}/match/{wc['matches'][0]['id']}").data.decode("utf-8")
         self.assertIn("&#10003;</span> Cyprus", page)
+        self.assertNotIn('id="wc-ai"', page)                       # the AI's suggestion is the ID screening's
+        self.assertNotIn("AI suggestion", self.c.get(f"/wc/{aid}").data.decode("utf-8"))
 
     def test_wc_pagination_and_facets(self):
         self.login("amara.iyer")

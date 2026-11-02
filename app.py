@@ -1227,7 +1227,7 @@ def _wc_page(wc_case_id):
     wc = id_screening.wc_view(rec)
     is_open = rec.get("status") != "closed"
     return wc, {"wc": wc, "alert": None, "back_url": url_for("scan_result", scan_id=rec["id"]),
-                "can_resolve": is_open and bool(_levels() & {"L1", "L2"}), "wc_statuses": list(id_screening.FROM_WC_STATUS),
+                "can_resolve": is_open and bool(_levels() & {"L1", "L2"}), "case_open": is_open, "wc_statuses": list(id_screening.FROM_WC_STATUS),
                 "resolve_hint": "The case is closed" if not is_open else "An L1 or L2 analyst resolves matches"}, rec
 
 
@@ -2060,6 +2060,8 @@ def scan_hit_ai(scan_id, uid):
     _scan(scan_id)
     n = _screen_queue(scan_id, [uid], why="asked again")
     flash("Sent to the AI again." if n else "That hit is confirmed already, or the case is closed.", "success" if n else "error")
+    if request.form.get("back") == "wc":
+        return redirect(url_for("wc_match", wc_case_id=scan_id, match_id=uid))
     return redirect(url_for("scan_result", scan_id=scan_id) + f"#hit-{uid}")
 
 

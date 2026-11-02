@@ -284,12 +284,18 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertIn(f'href="/wc/{sid}" target="_blank"', page)
         self.assertIn(f'href="/wc/{sid}/match/{uid}" target="_blank"', page)
         page = c.get(f"/wc/{sid}").data.decode("utf-8")
-        for needle in ("World-Check console", "UPADHYAY, Ashish", "UNRESOLVED", "Stand-in (reconciliation log)"):
+        for needle in ("World-Check console", "UPADHYAY, Ashish", "UNRESOLVED", "Stand-in (reconciliation log)",
+                       "<th>AI suggestion</th>", '<span class="badge emerald">False positive</span> <span class="tiny muted">80%</span>'):
             self.assertIn(needle, page)
         page = c.get(f"/wc/{sid}/match/{uid}").data.decode("utf-8")
-        for needle in ("Comparison data", "Potential match", "Patna", "ponzi"):
+        for needle in ("Comparison data", "Potential match", "Patna", "ponzi",
+                       'id="wc-ai"', "Clear (false positive)", "confidence 80%", "Different date of birth", "Ask the AI again"):
             self.assertIn(needle, page)
         self.assertNotIn('value="Unspecified"', page)              # the three verdicts a hit can take
+        with mock.patch.object(id_screening, "decide", self.decide):
+            r = c.post(f"/scan/{sid}/hits/{uid}/ai", data={"back": "wc"})
+        self.assertTrue(r.headers["Location"].endswith(f"/wc/{sid}/match/{uid}"))
+        self.assertEqual(len(self.calls), 2)
         bad = c.post(f"/wc/{sid}/match/{uid}/resolve", data={"status": "True positive", "risk": "High", "reason": "", "comment": "x"},
                      follow_redirects=True)
         self.assertIn("Select a reason", bad.data.decode("utf-8"))

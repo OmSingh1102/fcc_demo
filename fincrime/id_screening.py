@@ -315,7 +315,9 @@ def _wc_match(hit, key, matched_at):
                           dobs=[listed] if listed and listed != "Not listed" else [],
                           citizenship=hit["places"].split(";")[0].split(" (")[0], country=hit["places"],
                           category=(hit["category"] or "").upper(), bio=hit["narrative"], aliases=hit.get("aka") or [])
-    m.update(id=hit["uid"], strength=hit["score"] / 100, matched=matched_at, resolution=_wc_resolution(hit))
+    ai = hit.get("ai") or {}
+    m.update(id=hit["uid"], strength=hit["score"] / 100, matched=matched_at, resolution=_wc_resolution(hit),
+             ai=dict(ai, status=ai.get("status") or "none", suggested_wc=WC_STATUS.get(ai.get("suggested"), "")))
     return m
 
 

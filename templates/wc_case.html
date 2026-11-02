@@ -60,10 +60,11 @@
             <span class="small">Showing <b>{{ page.start }}–{{ page.end }}</b> of <b>{{ page.total }}</b> matches for <b>{{ wc.primary_name }}</b></span>
             <span class="row"><span class="wc-subtab active" style="cursor:default">Resolution</span></span>
         </div>
+        {% set ai_col = wc.matches and wc.matches[0].ai is defined %}
         <div class="tbl-scroll">
             <table class="tbl dense">
                 <thead><tr>
-                    <th>Name</th><th>Matched Alias</th><th>Match Strength</th><th>Type</th><th>Gender</th><th>Date(s) of Birth</th><th>Place of Birth</th><th>Citizenship</th><th>Country Location</th>
+                    <th>Name</th>{% if ai_col %}<th>AI suggestion</th>{% endif %}<th>Matched Alias</th><th>Match Strength</th><th>Type</th><th>Gender</th><th>Date(s) of Birth</th><th>Place of Birth</th><th>Citizenship</th><th>Country Location</th>
                     <th>World-Check ID</th><th>Entered Date</th><th>Updated Date</th><th>Matched Date</th><th>Last Alert Date</th><th>Last Resolved/ Reviewed On</th><th>Last Resolved/ Reviewed By</th><th>Risk Level</th><th></th>
                 </tr></thead>
                 <tbody>
@@ -71,6 +72,11 @@
                 {% set r = m.resolution %}
                 <tr>
                     <td class="nowrap"><a href="{{ url_for('wc_match', wc_case_id=wc.id, match_id=m.id, status=status, type=mtype) }}">{{ m.name }}</a></td>
+                    {% if ai_col %}<td class="nowrap">
+                        {%- if m.ai.status == 'done' %}{{ outcome_badge(m.ai.suggested_wc) }}{% if m.ai.confidence is not none %} <span class="tiny muted">{{ m.ai.confidence }}%</span>{% endif %}
+                        {%- elif m.ai.status == 'pending' %}<span class="spin"></span> <span class="tiny muted">deciding…</span>
+                        {%- elif m.ai.status == 'failed' %}<span class="tiny muted">no decision</span>
+                        {%- else %}<span class="tiny muted">—</span>{% endif %}</td>{% endif %}
                     <td class="nowrap">{{ m.matched_alias }}</td>
                     <td>{{ strength_bar(m.strength) }}</td>
                     <td class="nowrap">{{ type_badges(m.types) }}</td>
@@ -90,7 +96,7 @@
                     <td>{% if r.remark %}<span title="Resolution Remark: {{ r.remark }}" style="cursor:help">{{ icon('file-text') }}</span>{% endif %}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="18"><div class="no-data">{{ icon('search') }}No matches for this filter.</div></td></tr>
+                <tr><td colspan="{{ 19 if ai_col else 18 }}"><div class="no-data">{{ icon('search') }}No matches for this filter.</div></td></tr>
                 {% endfor %}
                 </tbody>
             </table>
