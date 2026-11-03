@@ -78,6 +78,9 @@ def verify(cfg, jpeg, reference=""):
         status, raw = _send(req)
     except (urllib.error.URLError, OSError) as exc:
         raise DiditError(f"Didit did not answer ({type(exc).__name__}): {str(exc)[:160]}") from exc
+    if status == 403 and b"enough credits" in raw:
+        raise DiditError("Didit accepted the key, but the account has no credits left (403): top up in the Business Console, "
+                         "Settings > Organization > Billing and plan > Top up ($50 minimum; a check is about $0.20).")
     if status in _REFUSED:
         raise DiditError(_REFUSED[status] + f" {raw[:160].decode('utf-8', 'replace')}")
     if status == 400:

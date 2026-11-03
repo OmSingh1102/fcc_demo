@@ -106,6 +106,10 @@ class DiditTests(unittest.TestCase):
                 with self.assertRaisesRegex(didit.DiditError, words):
                     didit.verify(DD, b"x")
         self.assertFalse(didit.configured(didit.DEFAULTS))
+        no_credit = b'{"error":"You don\'t have enough credits to perform this request. Please top up at https://business.didit.me"}'
+        with mock.patch.object(didit, "_send", lambda req: (403, no_credit)):
+            with self.assertRaisesRegex(didit.DiditError, "accepted the key, but the account has no credits"):
+                didit.verify(DD, b"x")
 
 
 if __name__ == "__main__":
