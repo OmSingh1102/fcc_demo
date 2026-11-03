@@ -101,7 +101,7 @@ class DiditTests(unittest.TestCase):
         self.assertFalse(didit.summary(self.answer(), 0.2)["sandbox"])
 
     def test_refusals_are_said_plainly(self):
-        for code, words in ((403, "refused the call"), (401, "expired"), (400, "could not use the image")):
+        for code, words in ((403, "refused the call"), (401, "does not accept the API key"), (400, "could not use the image")):
             with mock.patch.object(didit, "_send", lambda req, code=code: (code, b'{"error": "x"}')):
                 with self.assertRaisesRegex(didit.DiditError, words):
                     didit.verify(DD, b"x")

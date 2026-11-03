@@ -59,7 +59,8 @@ def multipart(fields, files):
     return b"".join(out), f"multipart/form-data; boundary={boundary}"
 
 
-_REFUSED = {401: "Didit says the API key has expired (401): create a new one in the Business Console.",
+_REFUSED = {401: ("Didit does not accept the API key (401): it is wrong, revoked or expired. In the Business Console, "
+                  "Developers > API keys of the live application: create a key, copy it at once, and save it on Settings."),
             403: "Didit refused the call (403): a wrong or revoked key, a key without access to sessions, or no credits left.",
             429: "Didit's rate limit (429): try again in a minute."}
 
