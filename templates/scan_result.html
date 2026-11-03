@@ -197,12 +197,18 @@
                     </div>
                 </div>
                 <div class="card mt-12" id="scan-mrz">
-                    <div class="card-head"><div class="card-title">Machine-readable zone</div><div class="card-sub">as the model transcribed it</div></div>
+                    <div class="card-head"><div class="card-title">Machine-readable zone</div><div class="card-sub">{{ 'as OCR read it' if r.mrz_by else 'as the model transcribed it' }}</div></div>
                     <div class="card-body small">
                         {% if r.mrz %}<pre class="ocr-mrz">{{ r.mrz|join('\n') }}</pre>{% else %}<div class="muted">None on the document, or none read.</div>{% endif %}
                     </div>
                 </div>
-                {% if s.model %}<div class="small muted mt-8" id="scan-cost">Read: {{ s.model.label }}, {{ s.model.seconds }} s, {{ s.model.tokens_in }} tokens in / {{ s.model.tokens_out }} out, ${{ '%.4f'|format(s.model.cost) }} at list price.</div>{% endif %}
+                {% if r and r.ocr_text is defined %}
+                <div class="card mt-12" id="scan-ocr-text">
+                    <div class="card-head"><div class="card-title">Text OCR read</div><div class="card-sub">the whole page, as Tesseract read it</div></div>
+                    <div class="card-body small">{% if r.ocr_text %}<pre class="ocr-mrz" style="white-space:pre-wrap">{{ r.ocr_text }}</pre>{% else %}<div class="muted">No text found.</div>{% endif %}</div>
+                </div>
+                {% endif %}
+                {% if s.model %}<div class="small muted mt-8" id="scan-cost">Read: {{ s.model.label }}, {{ s.model.seconds }} s{% if s.model.tokens_in is defined %}, {{ s.model.tokens_in }} tokens in / {{ s.model.tokens_out }} out{% endif %}, {% if s.model.model == 'tesseract-ocr' %}free (on this machine){% else %}${{ '%.4f'|format(s.model.cost) }} at list price{% endif %}.</div>{% endif %}
             </div>
         </div>
     </div>

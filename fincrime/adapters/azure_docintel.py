@@ -132,7 +132,7 @@ def to_read(result, field_keys, min_confidence=0.8):
     kind = (doc.get("docType") or "").split(".")[-1].lower()
     return {"document_type": _DOC_TYPES.get(kind, kind or "ID document"), "issuing_country": _value(f.get("CountryRegion")),
             "readable": bool(fields["full_name"] or fields["document_number"]), "problems": [], "fields": fields,
-            "mrz": mrz, "uncertain": unsure, "note": ""}
+            "mrz": mrz, "uncertain": unsure, "note": "", "photo_judged": False}
 
 
 def read(cfg, jpeg, field_keys, sleep=time.sleep):

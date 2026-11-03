@@ -25,7 +25,11 @@
                 </select>
                 <div class="tiny muted">{% if model_ready %}Through Straive's LLM Foundry gateway; the default is set on <a href="{{ url_for('screening_settings') }}">Settings</a>.{% else %}No model is configured (LLM_FOUNDRY_KEY): the image cannot be read.{% endif %}</div>
                 <div class="tiny muted" id="scan-source">Screened on: <b>{{ source }}</b> (<a href="{{ url_for('screening_settings') }}">change</a>).</div>
-                <button type="submit" class="btn btn-primary mt-8" id="scan-submit"{% if not model_ready %} disabled{% endif %}>{{ icon('zoom-in') }} Read and screen</button>
+                <div class="row mt-8" style="gap:8px">
+                    <button type="submit" name="via" value="ai" class="btn btn-primary" id="scan-submit"{% if not model_ready %} disabled{% endif %}>{{ icon('zoom-in') }} Read with AI</button>
+                    <button type="submit" name="via" value="ocr" class="btn btn-outline" id="scan-submit-ocr"{% if not ocr_ready %} disabled title="Tesseract is not installed on this machine"{% endif %}>{{ icon('file-text') }} Read with OCR</button>
+                </div>
+                <div class="tiny muted" id="scan-via-note"><b>AI</b>: the model above reads the ID and judges the photo. <b>OCR</b>: Tesseract on this machine, free; it reads the text, takes the fields from a passport's machine-readable zone, and does not judge the photo.</div>
             </div>
         </form>
     </div>
@@ -80,9 +84,12 @@
         ev.preventDefault();
         if (ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; name.textContent = input.files[0].name; }
     });
-    document.getElementById('scan-upload').addEventListener('submit', function () {
-        var b = document.getElementById('scan-submit');
-        b.disabled = true; b.textContent = 'Reading the document and searching World-Check…';
+    var sent = false;
+    document.getElementById('scan-upload').addEventListener('submit', function (ev) {
+        if (sent) { ev.preventDefault(); return; }
+        sent = true;
+        var b = ev.submitter || document.getElementById('scan-submit');
+        b.textContent = (b.value === 'ocr' ? 'OCR is reading' : 'The AI is reading') + ' the document and searching World-Check…';
     });
 })();
 </script>

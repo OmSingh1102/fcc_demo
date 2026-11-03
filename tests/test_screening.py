@@ -524,6 +524,31 @@ class ScreeningBookPageTests(unittest.TestCase):
         rec = fcc._scan(sid)
         self.assertEqual((id_screening.idv_differences(rec), rec["status"]), ([], "closed"))   # the same, in another order
 
+    def test_read_with_ai_or_with_ocr(self):
+        from fincrime.documents import ocr
+        fcc.SCREEN_SETTINGS.update(auto_verify=True, auto_qc_pct=0)
+        c = self.client()
+        with mock.patch.object(ocr, "available", lambda: True):
+            page = c.get("/scan").data.decode("utf-8")
+            self.assertIn('id="scan-submit-ocr"', page)
+            self.assertIn("Read with AI", page)
+            zeb = a_read(name="ZEBEDIAH QUARTERMAINE", surname="QUARTERMAINE", given="ZEBEDIAH")
+            zeb.update(ocr_text="PASSPORT QUARTERMAINE", photo_judged=False, mrz_by="OCR's reading", fields_from_mrz=True)
+            used = dict(ocr.MODEL, cost=0.0, seconds=9.1)
+            with mock.patch.object(ocr, "id_read", lambda data, keys: (dict(zeb), dict(used))), \
+                    mock.patch.object(id_scan, "scan", lambda *a, **k: self.fail("the AI must not read an OCR upload")):
+                r = c.post("/scan", data={"image": (io.BytesIO(self.png()), "id.png"), "via": "ocr"}, content_type="multipart/form-data")
+        rec = fcc._scan(r.headers["Location"].rsplit("/", 1)[-1])
+        self.assertEqual((rec["model"]["model"], rec["verdict"], rec["status"]), ("tesseract-ocr", "Check", "open"))   # never auto-verified
+        page = c.get(f"/scan/{rec['id']}").data.decode("utf-8")
+        for needle in ('id="scan-ocr-text"', "PASSPORT QUARTERMAINE", "free (on this machine)", "Not judged"):
+            self.assertIn(needle, page)
+        with mock.patch.object(ocr, "available", lambda: False):
+            self.assertIn('id="scan-submit-ocr" disabled', c.get("/scan").data.decode("utf-8"))
+            r = c.post("/scan", data={"image": (io.BytesIO(self.png("ivory")), "id.png"), "via": "ocr"}, content_type="multipart/form-data")
+        rec = fcc._scan(r.headers["Location"].rsplit("/", 1)[-1])
+        self.assertIn("not installed", rec["error"])
+
     def test_a_middle_name_left_out_is_the_same_name(self):
         case = {"idv": {"status": "Approved", "full_name": "Margaret Wallace", "date_of_birth": "1965-09-08", "document_number": "623 984 704"},
                 "read": {"fields": {"full_name": "WALLACE MARGARET MARIE", "date_of_birth": "1965-09-08", "document_number": "623984704"}}}

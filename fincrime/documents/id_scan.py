@@ -184,7 +184,10 @@ def checks(read, today=None):
     if read is not None:
         if read.get("document_type") == "Not an identity document":
             add("Identity document", "fail", "The model does not take this for an identity document.")
-        if not read.get("readable", True):
+        if read.get("photo_judged") is False:     # a reader that returns text only (OCR, Azure)
+            add("Photo", "warn", "Not judged: this reader returns the text only, not whether the photo is covered, "
+                                 "blurred or cut off. Look at the image.")
+        elif not read.get("readable", True):
             add("Photo", "fail", "Too poor to read the main fields" + (f": {', '.join(read['problems'])}." if read.get("problems") else "."))
         elif read.get("problems"):
             add("Photo", "warn", f"Readable, but {', '.join(read['problems'])}.")
@@ -214,10 +217,13 @@ def checks(read, today=None):
                 add("MRZ", "info", "Transcribed below, but not as a passport zone's two 44-character lines: its check digits are not tested.")
             else:
                 bad = [k for k, v in parsed["checks"].items() if not v]
-                add("MRZ check digits (the model's transcription)", "ok" if parsed["valid"] else "warn",
+                by = read.get("mrz_by") or "the model's transcription"
+                add(f"MRZ check digits ({by})", "ok" if parsed["valid"] else "warn",
                     "All five add up." if parsed["valid"] else f"Do not add up: {', '.join(bad)} (a misread character, or a forged zone).")
                 agree, differ = _mrz_vs(read, parsed, "MRZ")
-                if differ:
+                if read.get("fields_from_mrz"):         # the fields are the zone's: nothing printed to hold to it
+                    pass
+                elif differ:
                     add("Printed fields against the MRZ", "fail", "; ".join(differ) + ".")
                 elif agree:
                     add("Printed fields against the MRZ", "ok", f"{len(agree)} agree: {', '.join(agree)}.")

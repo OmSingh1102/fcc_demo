@@ -15,12 +15,18 @@ right; the agent then holds Claude's read to it (ai_agent checks,
 I and 1 ...) are put right only where the field can hold one of them, never
 guessed until a check digit happens to agree.
 
+id_read(image) is OCR as Scan ID's reader (the upload page's "Read with
+OCR", beside the AI): the fields come from the passport's zone, since OCR
+alone does not know which printed line is the name or which date is the
+birth date; the page's text is kept beside them.
+
 Tesseract is found from TESSERACT_CMD, the PATH, or its usual Windows
 folders. Without it available() is False and nothing here runs: the
 agent's checks say OCR is not available and block nothing."""
 import io
 import os
 import shutil
+import time
 
 from PIL import Image, ImageFilter, ImageOps
 
@@ -56,6 +62,37 @@ def command():
 
 def available():
     return pytesseract is not None and bool(command())
+
+
+MODEL = {"model": "tesseract-ocr", "label": "OCR (Tesseract)"}
+_UNSURE = (("document_number", "number"), ("date_of_birth", "dob"), ("date_of_expiry", "expiry"))
+
+
+def id_read(data, field_keys):
+    """(read, used): an uploaded ID read by OCR alone, in Scan ID's shape.
+    With a passport zone found, its fields (a field whose check digit does
+    not add up marked unsure); with none, no field: the case says so and
+    goes to an analyst. OCR does not judge the photo (photo_judged False).
+    OcrError when Tesseract fails."""
+    started = time.monotonic()
+    page_text, zone = text(data), mrz(data)
+    fields = {k: "" for k in field_keys}
+    read = {"document_type": "ID document", "issuing_country": "", "readable": bool(page_text), "problems": [],
+            "fields": fields, "mrz": [], "uncertain": [], "note": "", "ocr_text": page_text[:4000],
+            "photo_judged": False, "mrz_by": "OCR's reading", "fields_from_mrz": True}
+    if zone:
+        z = zone["fields"]
+        found = {"surname": z["surname"], "given_names": z["given_names"],
+                 "full_name": " ".join(x for x in (z["given_names"], z["surname"]) if x), "date_of_birth": z["dob"],
+                 "sex": z["sex"], "nationality": z["nationality"], "document_number": z["number"], "date_of_expiry": z["expiry"]}
+        fields.update({k: v for k, v in found.items() if k in fields})
+        read.update(document_type="Passport", issuing_country=z["issuer"], mrz=list(zone["lines"]),
+                    uncertain=[k for k, c in _UNSURE if not zone["checks"][c]],
+                    note="Fields from the passport's machine-readable zone; OCR does not tell which printed line is which field.")
+    else:
+        read["note"] = ("OCR found no passport machine-readable zone, and on its own it cannot tell which printed line is the "
+                        "name or which date is the birth date: no field is filled. The text it read is below.")
+    return read, dict(MODEL, cost=0.0, seconds=round(time.monotonic() - started, 1))
 
 
 def _run(image, config):

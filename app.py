@@ -2019,7 +2019,8 @@ def scan_id():
         kind = lambda s: ("open" if s.get("status", "open") == "open"                       # noqa: E731
                           else "auto" if (s.get("closed") or {}).get("auto") else "closed")
         shown = [s for s in scans if not status or kind(s) == status]
-        return render_template("scan.html", models=_readers(), default_model=SCREEN_SETTINGS["reader_model"],
+        return render_template("scan.html", models=[m for m in _readers() if m["id"] != OCR_READER["id"]],
+                               default_model=SCREEN_SETTINGS["reader_model"], ocr_ready=ocr.available(),
                                model_ready=id_scan.model_ready(), scans=shown, status=status,
                                counts={k: sum(1 for s in scans if kind(s) == k) for k in ("open", "auto", "closed")} | {"all": len(scans)},
                                auto_on=SCREEN_SETTINGS.get("auto_verify"),
@@ -2028,7 +2029,8 @@ def scan_id():
     if not f or not f.filename:
         flash("Choose a photo or scan of the ID document.", "error")
         return redirect(url_for("scan_id"))
-    ok, record = _run_action(_new_scan, f.read(), f.filename, request.form.get("model") or None, _actor())
+    reader = OCR_READER["id"] if request.form.get("via") == "ocr" else (request.form.get("model") or None)
+    ok, record = _run_action(_new_scan, f.read(), f.filename, reader, _actor())
     if not ok:
         return redirect(url_for("scan_id"))
     for message in (record.get("fallback"), record["error"], (record.get("screening") or {}).get("error")):
@@ -2038,21 +2040,34 @@ def scan_id():
 
 
 AZURE_READER = {"id": azure_docintel.MODEL["model"], "label": azure_docintel.MODEL["label"], "price": None}
+OCR_READER = {"id": ocr.MODEL["model"], "label": ocr.MODEL["label"], "price": None, "free": True}
 
 
 def _readers():
-    """What can read an uploaded ID: the AI models, and Azure AI Document
-    Intelligence once its endpoint and key are on Settings."""
+    """What can read an uploaded ID: the AI models, Azure AI Document
+    Intelligence once its endpoint and key are on Settings, and OCR
+    (Tesseract) when this machine has it."""
     out = list(id_scan.models())
     if azure_docintel.configured(SCREEN_SETTINGS["azure"]):
         out.append(dict(AZURE_READER, per_page=SCREEN_SETTINGS["azure"].get("price_per_page")))
+    if ocr.available():
+        out.append(OCR_READER)
     return out
 
 
 def _read_id(jpeg, reader):
     """Scan ID's result for one image, read by `reader`. Azure's read gets
     the same checks; when Azure cannot read it, the AI model does, and the
-    case says so (result["fallback"])."""
+    case says so (result["fallback"]). OCR's read is OCR's alone: when it
+    cannot run, the case says why and nothing else reads it."""
+    if reader == OCR_READER["id"]:
+        if not ocr.available():
+            return {"read": None, "model": None, "checks": [], "error": "OCR (Tesseract) is not installed on this machine: the image was not read."}
+        try:
+            read, used = ocr.id_read(jpeg, [k for k, _ in id_scan.FIELDS])
+        except ocr.OcrError as exc:
+            return {"read": None, "model": None, "checks": [], "error": str(exc)[:300]}
+        return {"read": read, "model": used, "checks": id_scan.checks(read), "error": ""}
     if reader != AZURE_READER["id"]:
         return id_scan.scan(jpeg, reader)
     cfg = SCREEN_SETTINGS["azure"]

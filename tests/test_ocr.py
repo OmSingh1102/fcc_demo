@@ -78,6 +78,37 @@ class MrzParserTestCase(unittest.TestCase):
         self.assertIsNone(ocr.find("NO MACHINE READABLE ZONE HERE\n1234"))
 
 
+class OcrReaderTestCase(unittest.TestCase):
+    """OCR as Scan ID's reader ("Read with OCR"), Tesseract stood in for."""
+
+    KEYS = ("full_name", "surname", "given_names", "date_of_birth", "sex", "nationality", "document_number", "date_of_expiry", "address")
+
+    def test_the_fields_are_the_zones(self):
+        zone = ocr.parse(*SPECIMEN)
+        with mock.patch.object(ocr, "text", lambda data: "UTOPIA PASSPORT ERIKSSON"), mock.patch.object(ocr, "mrz", lambda data: zone):
+            read, used = ocr.id_read(b"img", self.KEYS)
+        self.assertEqual((read["fields"]["full_name"], read["fields"]["date_of_birth"], read["fields"]["document_number"], read["fields"]["address"]),
+                         ("ANNA MARIA ERIKSSON", "1974-08-12", "L898902C3", ""))
+        self.assertEqual((read["document_type"], read["issuing_country"], read["mrz"], read["uncertain"]),
+                         ("Passport", "UTO", list(SPECIMEN), []))
+        self.assertEqual((used["model"], used["cost"], read["ocr_text"]), ("tesseract-ocr", 0.0, "UTOPIA PASSPORT ERIKSSON"))
+        from fincrime.documents import id_scan
+        checks = {c["label"]: c["state"] for c in id_scan.checks(read, today=__import__("datetime").date(2011, 1, 1))}
+        self.assertEqual(checks["Photo"], "warn")                                  # OCR does not judge the photo
+        self.assertEqual(checks["MRZ check digits (OCR's reading)"], "ok")
+        self.assertNotIn("Printed fields against the MRZ", checks)                 # the fields are the zone's
+
+    def test_no_zone_no_field(self):
+        broken = ocr.parse(SPECIMEN[0], SPECIMEN[1][:9] + "4" + SPECIMEN[1][10:])
+        with mock.patch.object(ocr, "text", lambda data: "DRIVER LICENSE"), mock.patch.object(ocr, "mrz", lambda data: broken):
+            read, _ = ocr.id_read(b"img", self.KEYS)
+        self.assertIn("document_number", read["uncertain"])                        # its check digit does not add up
+        with mock.patch.object(ocr, "text", lambda data: "DRIVER LICENSE"), mock.patch.object(ocr, "mrz", lambda data: None):
+            read, _ = ocr.id_read(b"img", self.KEYS)
+        self.assertEqual((set(read["fields"].values()), read["mrz"]), ({""}, []))
+        self.assertIn("no passport machine-readable zone", read["note"])
+
+
 class OcrCheckTestCase(unittest.TestCase):
 
     @classmethod
