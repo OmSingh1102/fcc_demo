@@ -48,11 +48,13 @@ SYSTEM = """You read one photo or scan of an identity document for a KYC onboard
 - mrz: the machine-readable lines exactly as printed, one string per line, with every < filler; [] when there is none.
 - uncertain: the names of the fields you read but are not sure of (a character you could not make out, glare over a digit).
 - readable: false when the photo is too poor to read the document's main fields. problems: what spoils the photo, from the list; [] for a good photo. A slight angle or a scan is fine.
+- specimen: true when the document is a specimen, sample, template or test document rather than one issued to a real person: marked SPECIMEN, SAMPLE, VOID or TEST, or carrying placeholder data (a holder called SAMPLE or SPECIMEN, a number such as 123456789, an address such as 1234 Example St, a silhouette or blank where the photo goes). specimen_reason: what shows it, in a few words; else empty.
 - note: one short sentence on anything an analyst should know (a field crossed out, a handwritten change, a second document in the picture); else empty."""
 
 SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["document_type", "issuing_country", "readable", "problems", "fields", "mrz", "uncertain", "note"],
+    "required": ["document_type", "issuing_country", "readable", "problems", "fields", "mrz", "uncertain", "specimen",
+                 "specimen_reason", "note"],
     "properties": {
         "document_type": {"type": "string", "enum": list(DOC_TYPES)},
         "issuing_country": {"type": "string"},
@@ -62,6 +64,8 @@ SCHEMA = {
                    "properties": {k: {"type": "string"} for k, _ in FIELDS}},
         "mrz": {"type": "array", "items": {"type": "string"}},
         "uncertain": {"type": "array", "items": {"type": "string"}},
+        "specimen": {"type": "boolean"},
+        "specimen_reason": {"type": "string"},
         "note": {"type": "string"},
     },
 }
@@ -184,6 +188,9 @@ def checks(read, today=None):
     if read is not None:
         if read.get("document_type") == "Not an identity document":
             add("Identity document", "fail", "The model does not take this for an identity document.")
+        if read.get("specimen"):
+            add("Specimen or sample", "fail", "Not a document issued to a real person"
+                + (f": {read['specimen_reason'].rstrip('.')}." if read.get("specimen_reason") else "."))
         if read.get("photo_judged") is False:     # a reader that returns text only (OCR, Azure)
             add("Photo", "warn", "Not judged: this reader returns the text only, not whether the photo is covered, "
                                  "blurred or cut off. Look at the image.")
