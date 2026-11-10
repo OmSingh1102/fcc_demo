@@ -315,12 +315,6 @@ Settings, nothing of it in the code):
   has its own key (`X-API-Key`, or `Authorization: Bearer`), created by the
   QC lead on Settings, shown once, kept as its SHA-256 only, revocable. The
   case is made exactly as an upload is (`_new_scan`). Working.
-- *Specimen or sample IDs*: the AI reader also says whether the document is
-  a specimen, sample, template or test document (marked SPECIMEN or SAMPLE,
-  or placeholder data such as 123456789 or 1234 Example St) and why; the
-  *Specimen or sample* check then fails, so the case can never be
-  auto-verified, whatever the ID vendor says (Didit approved a sample
-  driving licence in a live check).
 - *OCR (Tesseract)* (`documents/ocr.id_read`): the upload page has two
   buttons, *Read with AI* (the model chosen above them) and *Read with OCR*
   (Tesseract on this machine, free, enabled when it is installed). OCR's

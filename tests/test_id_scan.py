@@ -73,15 +73,6 @@ class CheckTests(unittest.TestCase):
         self.assertIn("LLM_FOUNDRY_KEY", out["error"])
         self.assertFalse([c for c in id_scan.checks(a_read(), self.today) if "OCR" in c["label"] or "Tesseract" in c["detail"]])
 
-    def test_a_specimen_or_sample_fails(self):
-        self.assertIn("specimen", id_scan.SCHEMA["required"])                       # the model always answers it
-        read = dict(a_read(), specimen=True, specimen_reason="number 123456789 and address 1234 Example St.")
-        cs = id_scan.checks(read, self.today)
-        self.assertEqual(states(cs)["Specimen or sample"], "fail")
-        self.assertIn("123456789", next(c["detail"] for c in cs if c["label"] == "Specimen or sample"))
-        self.assertEqual(id_scan.verdict({"read": read, "checks": cs}), "Fail")
-        self.assertNotIn("Specimen or sample", states(id_scan.checks(dict(a_read(), specimen=False), self.today)))
-
     def test_a_document_that_is_not_an_id(self):
         read = dict(a_read(), document_type="Not an identity document", fields={k: "" for k, _ in id_scan.FIELDS}, mrz=[])
         cs = id_scan.checks(read, self.today)

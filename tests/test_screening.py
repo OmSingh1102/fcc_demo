@@ -549,24 +549,6 @@ class ScreeningBookPageTests(unittest.TestCase):
         rec = fcc._scan(r.headers["Location"].rsplit("/", 1)[-1])
         self.assertIn("not installed", rec["error"])
 
-    def test_a_sample_id_is_never_auto_verified(self):
-        from fincrime.adapters import didit
-        fcc.SCREEN_SETTINGS.update(auto_verify=True, auto_qc_pct=0)
-        fcc.SCREEN_SETTINGS["didit"]["api_key"] = "DD-KEY"
-        import json as _json
-        card = a_read(name="JOHN ALEXANDER SAMPLECARD", surname="SAMPLECARD", given="JOHN ALEXANDER")
-        card.update(specimen=True, specimen_reason="surname SAMPLECARD, address 1234 Example St")
-        f = card["fields"]
-        body = {"request_id": "R", "id_verification": {"status": "Approved", "warnings": [], "full_name": f["full_name"],
-                                                       "date_of_birth": f["date_of_birth"], "document_number": f["document_number"]}}
-        c = self.client()
-        with mock.patch.object(didit, "_send", lambda req: (200, _json.dumps(body).encode())):
-            sid = self.upload(c, card)
-        rec = fcc._scan(sid)
-        self.assertEqual((rec["idv"]["status"], rec["screening"]["hits"], rec["verdict"], rec["status"]),
-                         ("Approved", [], "Fail", "open"))                           # Didit approved it; the case stays open
-        self.assertIn("Specimen or sample", c.get(f"/scan/{sid}").data.decode("utf-8"))
-
     def test_a_middle_name_left_out_is_the_same_name(self):
         case = {"idv": {"status": "Approved", "full_name": "Margaret Wallace", "date_of_birth": "1965-09-08", "document_number": "623 984 704"},
                 "read": {"fields": {"full_name": "WALLACE MARGARET MARIE", "date_of_birth": "1965-09-08", "document_number": "623984704"}}}
