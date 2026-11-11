@@ -32,6 +32,7 @@ It writes fincrime/data/benchmark.json, which /architecture shows.
 import argparse
 import json
 import os
+import random
 import statistics
 import sys
 import threading
@@ -141,6 +142,15 @@ def _render(case, doc):
     return recon_book.render(case, doc) or svg_cards.render(case, doc)
 
 
+BUSY = (429, 500, 502, 503, 504, 529)       # the gateway busy or down for a moment: worth another try
+
+
+def _wait(attempt):
+    """Before trying again: longer each time, and out of step with the other
+    workers, so they do not all knock at once again."""
+    time.sleep(10 * (attempt + 1) + random.uniform(0, 5))
+
+
 def _call_anthropic(model, content, system=None, schema=None):
     import anthropic
     client = anthropic.Anthropic(base_url=llm.GATEWAY + "/anthropic", auth_token=llm.KEY, api_key=None,
@@ -151,7 +161,15 @@ def _call_anthropic(model, content, system=None, schema=None):
     if not model.get("no_thinking"):
         kwargs["thinking"] = {"type": "adaptive"}
         kwargs["output_config"]["effort"] = "medium"
-    r = client.messages.create(**kwargs)
+    for attempt in range(4):                    # the SDK's own retries are seconds apart; the gateway's "Too many requests" outlasts them
+        try:
+            r = client.messages.create(**kwargs)
+            break
+        except anthropic.APIStatusError as exc:
+            if exc.status_code in BUSY and attempt < 3:
+                _wait(attempt)
+                continue
+            raise
     text = next((b.text for b in r.content if b.type == "text"), "")
     return _json(text), r.usage.input_tokens, r.usage.output_tokens
 
@@ -177,8 +195,8 @@ def _call_openai_like(model, content, system=None, schema=None):
                 data = json.loads(r.read())
             break
         except urllib.error.HTTPError as exc:
-            if exc.code in (429, 500, 502, 503, 504) and attempt < 3:
-                time.sleep(10 * (attempt + 1))
+            if exc.code in BUSY and attempt < 3:
+                _wait(attempt)
                 continue
             raise RuntimeError(f"{exc.code}: {exc.read()[:200].decode('utf-8', 'replace')}") from None
     usage = data.get("usage") or {}

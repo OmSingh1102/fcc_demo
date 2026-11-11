@@ -135,7 +135,7 @@
                     {% if v and v.status == 'error' %}<div><span class="l">Reason</span><span class="v">{{ v.error }}</span></div>
                     {% elif v and v.status != 'pending' %}
                     {% if idv_sandbox %}<div class="note warn small" id="idv-sandbox">The key is a Didit <b>sandbox</b> key: Didit answered "{{ v.status }}" with its fixed sample without looking at this ID. Nothing is closed on it; a live key from the Didit console checks the document.</div>
-                    {% elif idv_diffs %}<div class="note warn small" id="idv-differs">Didit's read is not this ID's, so its "{{ v.status }}" does not count: the case stays with an analyst.</div>{% endif %}
+                    {% elif idv_diffs %}<div class="note warn small" id="idv-differs">{% if v.status == 'Approved' %}Didit's read is not this ID's, so its "Approved" does not count: the case stays with an analyst.{% else %}Didit answered "{{ v.status }}", and what it read differs from the ID (below): the case stays with an analyst.{% endif %}</div>{% endif %}
                     <div><span class="l">Document</span><span class="v">{{ v.document_type or '-' }}{% if v.issuing_state %} · {{ v.issuing_state }}{% endif %}</span></div>
                     <div><span class="l">Read by Didit</span><span class="v">{{ v.full_name or '-' }}{% if v.date_of_birth %} · {{ v.date_of_birth }}{% endif %}{% if v.document_number %} · <span class="mono">{{ v.document_number }}</span>{% endif %}</span></div>
                     {% for what, theirs, ours in idv_diffs %}<div><span class="l">{{ what }} differs</span><span class="v">Didit {{ theirs }} · the ID {{ ours }}</span></div>{% endfor %}

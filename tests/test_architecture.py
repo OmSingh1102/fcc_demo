@@ -66,6 +66,22 @@ class ArchitectureTestCase(unittest.TestCase):
         self.assertEqual(summary["cost_per_case"], 5.0)                  # $5 per million input tokens
         self.assertEqual(summary["field_accuracy"], 90.0)                # nine of ten fields
 
+    def test_a_busy_gateway_is_waited_for(self):
+        import anthropic
+        import httpx2
+        busy = anthropic.RateLimitError("Too many requests", body=None,
+                                        response=httpx2.Response(429, request=httpx2.Request("POST", "https://gateway")))
+        answer = mock.Mock(content=[mock.Mock(type="text", text='{"ok": true}')], usage=mock.Mock(input_tokens=3, output_tokens=2))
+        create, waits = mock.Mock(side_effect=[busy, busy, answer]), []
+        claude = {"id": "claude-x", "provider": "anthropic"}
+        with mock.patch.object(anthropic, "Anthropic", lambda **k: mock.Mock(messages=mock.Mock(create=create))),                 mock.patch.object(benchmark.time, "sleep", waits.append):
+            self.assertEqual(benchmark.call(claude, []), ({"ok": True}, 3, 2))
+            self.assertEqual(len(waits), 2)
+            self.assertTrue(10 <= waits[0] <= 15 and 20 <= waits[1] <= 25)          # longer each time
+            create.side_effect = [busy] * 4
+            with self.assertRaises(anthropic.RateLimitError):                          # three more tries, then the error
+                benchmark.call(claude, [])
+
 
 if __name__ == "__main__":
     unittest.main()

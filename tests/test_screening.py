@@ -518,6 +518,11 @@ class ScreeningBookPageTests(unittest.TestCase):
         page = c.get(f"/scan/{sid}").data.decode("utf-8")
         self.assertIn('id="idv-differs"', page)
         self.assertIn("Approved a different document", page)
+        with answered(status="Declined", full_name="ZEBEDIAH OTHERNAME", document_number=zeb["fields"]["document_number"]):
+            sid = self.upload(c, zeb, "beige")
+        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        self.assertIn('Didit answered "Declined", and what it read differs from the ID', page)   # the decline counts
+        self.assertNotIn("does not count", page)
         with answered(full_name="QUARTERMAINE ZEBEDIAH", date_of_birth=zeb["fields"]["date_of_birth"],
                       document_number=zeb["fields"]["document_number"]):
             sid = self.upload(c, zeb, "linen")
