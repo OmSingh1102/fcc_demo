@@ -143,12 +143,13 @@ def _render(case, doc):
 
 
 BUSY = (429, 500, 502, 503, 504, 529)       # the gateway busy or down for a moment: worth another try
+RETRY = {"tries": 3, "wait": 10}            # tries after a busy answer, and the first wait in seconds (Settings set them)
 
 
 def _wait(attempt):
     """Before trying again: longer each time, and out of step with the other
     workers, so they do not all knock at once again."""
-    time.sleep(10 * (attempt + 1) + random.uniform(0, 5))
+    time.sleep(RETRY["wait"] * (attempt + 1) + random.uniform(0, 5))
 
 
 def _call_anthropic(model, content, system=None, schema=None):
@@ -161,12 +162,12 @@ def _call_anthropic(model, content, system=None, schema=None):
     if not model.get("no_thinking"):
         kwargs["thinking"] = {"type": "adaptive"}
         kwargs["output_config"]["effort"] = "medium"
-    for attempt in range(4):                    # the SDK's own retries are seconds apart; the gateway's "Too many requests" outlasts them
+    for attempt in range(RETRY["tries"] + 1):   # the SDK's own retries are seconds apart; the gateway's "Too many requests" outlasts them
         try:
             r = client.messages.create(**kwargs)
             break
         except anthropic.APIStatusError as exc:
-            if exc.status_code in BUSY and attempt < 3:
+            if exc.status_code in BUSY and attempt < RETRY["tries"]:
                 _wait(attempt)
                 continue
             raise
@@ -189,13 +190,13 @@ def _call_openai_like(model, content, system=None, schema=None):
     body["max_completion_tokens" if model["provider"] == "openai" else "max_tokens"] = 16000
     req = urllib.request.Request(llm.GATEWAY + route, data=json.dumps(body).encode(), method="POST",
                                  headers={"Authorization": f"Bearer {llm.KEY}", "Content-Type": "application/json"})
-    for attempt in range(4):
+    for attempt in range(RETRY["tries"] + 1):
         try:
             with urllib.request.urlopen(req, timeout=240) as r:
                 data = json.loads(r.read())
             break
         except urllib.error.HTTPError as exc:
-            if exc.code in BUSY and attempt < 3:
+            if exc.code in BUSY and attempt < RETRY["tries"]:
                 _wait(attempt)
                 continue
             raise RuntimeError(f"{exc.code}: {exc.read()[:200].decode('utf-8', 'replace')}") from None

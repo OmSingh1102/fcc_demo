@@ -50,6 +50,44 @@
     </div>
 </div>
 
+<div class="card mt-12 pad-0" id="settings-catalogue">
+    <input type="hidden" name="models_form" value="1"><input type="hidden" name="m_rows" value="{{ s.models|length }}">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">AI models</div>
+        <div class="card-sub">the models the LLM Foundry gateway serves: which may read the ID, which may decide a hit, and their price per million tokens (input / output) for the cost columns. Add one in the last row with its gateway ID</div></div></div>
+    <table class="tbl" id="model-catalogue">
+        <thead><tr><th>Gateway ID</th><th>Name</th><th>Provider</th><th>$ in / M</th><th>$ out / M</th><th>Reads the ID</th><th>Decides hits</th><th title="Claude only: adaptive thinking">Thinking</th><th>Remove</th></tr></thead>
+        <tbody>
+        {% for m in s.models + [{}] %}{% set i = loop.index0 %}
+        <tr>
+            <td><input class="input input-sm mono" name="m_id_{{ i }}" value="{{ m.id or '' }}"{% if not m %} placeholder="new model's ID"{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td><input class="input input-sm" name="m_label_{{ i }}" value="{{ m.label or '' }}"{% if not can_edit %} disabled{% endif %}></td>
+            <td><select class="input input-sm" name="m_provider_{{ i }}"{% if not can_edit %} disabled{% endif %}>{% for k, v in providers.items() %}<option value="{{ k }}"{% if m.provider == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></td>
+            <td><input class="input input-sm" type="number" step="0.01" min="0" name="m_in_{{ i }}" value="{{ m.price[0] if m else '' }}" style="width:80px"{% if not can_edit %} disabled{% endif %}></td>
+            <td><input class="input input-sm" type="number" step="0.01" min="0" name="m_out_{{ i }}" value="{{ m.price[1] if m else '' }}" style="width:80px"{% if not can_edit %} disabled{% endif %}></td>
+            <td><input type="checkbox" name="m_reads_{{ i }}" value="1"{% if m.reads %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td><input type="checkbox" name="m_decides_{{ i }}" value="1"{% if m.decides %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td><input type="checkbox" name="m_thinking_{{ i }}" value="1"{% if m and not m.no_thinking %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td>{% if m %}<input type="checkbox" name="m_remove_{{ i }}" value="1"{% if not can_edit %} disabled{% endif %}>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="card-body settings-grid">
+        <label>Tries again when the gateway is busy
+            <input class="input" type="number" name="llm_retries" min="0" max="6" value="{{ s.llm_retries }}"{% if not can_edit %} disabled{% endif %}>
+            <span class="tiny muted">on "Too many requests" or a server error</span></label>
+        <label>First wait before trying again (seconds)
+            <input class="input" type="number" name="llm_retry_wait" min="1" max="120" value="{{ s.llm_retry_wait }}"{% if not can_edit %} disabled{% endif %}>
+            <span class="tiny muted">then twice, three times as long</span></label>
+        <label>Hits the AI decides at once
+            <input class="input" type="number" name="screen_workers" min="1" max="8" value="{{ s.screen_workers }}"{% if not can_edit %} disabled{% endif %}>
+            <span class="tiny muted">fewer if the gateway answers "Too many requests"; lowering it takes a restart</span></label>
+        <label style="grid-column:1/-1">Instructions to the model that reads the ID
+            <textarea class="textarea mono small" name="reader_instructions" rows="10"{% if not can_edit %} disabled{% endif %}>{{ reader_instructions }}</textarea>
+            <span class="tiny muted">what it transcribes and how; empty it to go back to the default. The fields it answers with are fixed: the checks read them</span></label>
+    </div>
+</div>
+
 <div class="card mt-12" id="settings-azure">
     <input type="hidden" name="services_form" value="1">
     <div class="card-head"><div><div class="card-title">ID reading service: Azure AI Document Intelligence</div>

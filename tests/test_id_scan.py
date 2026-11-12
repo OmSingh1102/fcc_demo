@@ -110,7 +110,7 @@ class PageTests(unittest.TestCase):
                   "error": ""}
         result["checks"] = id_scan.checks(result["read"])
         no_call = lambda case_id, who, hit, sop, settings: {"status": "failed", "error": "no call in the suite", "sop": sop["version"]}
-        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None, min_age=18: dict(result)),                 mock.patch.object(fcc.id_screening, "decide", no_call):
+        with mock.patch.object(id_scan, "scan", lambda jpeg, *a, **k: dict(result)),                 mock.patch.object(fcc.id_screening, "decide", no_call):
             r = c.post("/scan", data={"image": (io.BytesIO(self.png()), "id.png"), "model": "gemini-2.5-flash"},
                        content_type="multipart/form-data")
         self.assertEqual(r.status_code, 302)

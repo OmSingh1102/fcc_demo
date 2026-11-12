@@ -367,8 +367,12 @@ hits to the model again under it. Settings (the QC lead) holds the models,
 the examples per hit, the stand-in's name-score floor and the hits kept, the
 age under which the ID check warns (0: none), the name scores of an Exact,
 Strong and Medium stand-in hit, the reasons and risk levels an analyst picks
-from for a hit's outcome, and the World-Check One account; the secret is
-never shown back. Download gives
+from for a hit's outcome, the AI models (the gateway ID, name, provider and
+price of each, and whether it may read the ID and decide hits; a model is
+added or removed there), how often and how long a call waits on a busy
+gateway, how many hits the AI decides at once, the instructions the reading
+model is given (empty: the default in `id_scan.SYSTEM`), and the World-Check
+One account; the secret is never shown back. Download gives
 a case as JSON; Delete removes it and its image (real IDs: `uploads/scans/`,
 gitignored).
 

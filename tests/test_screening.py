@@ -243,7 +243,7 @@ class ScreeningBookPageTests(unittest.TestCase):
     def upload(self, c, read, colour="white"):
         result = {"read": read, "model": {"model": "m", "label": "Model", "tokens_in": 1, "tokens_out": 1, "cost": 0.0, "seconds": 1.0},
                   "checks": id_scan.checks(read), "error": ""}
-        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None, min_age=18: dict(result)), \
+        with mock.patch.object(id_scan, "scan", lambda jpeg, *a, **k: dict(result)), \
                 mock.patch.object(id_screening, "decide", self.decide):
             r = c.post("/scan", data={"image": (io.BytesIO(self.png(colour)), "id.png")}, content_type="multipart/form-data")
         self.assertEqual(r.status_code, 302)
@@ -441,7 +441,7 @@ class ScreeningBookPageTests(unittest.TestCase):
         read = a_read()
         result = {"read": read, "model": {"model": "m", "label": "Model", "tokens_in": 1, "tokens_out": 1, "cost": 0.0, "seconds": 1.0},
                   "checks": id_scan.checks(read), "error": ""}
-        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None, min_age=18: dict(result)), \
+        with mock.patch.object(id_scan, "scan", lambda jpeg, *a, **k: dict(result)), \
                 mock.patch.object(id_screening, "decide", self.decide):
             r = api.post("/api/v1/cases", headers={"X-API-Key": key}, content_type="multipart/form-data",
                          data={"image": (io.BytesIO(self.png()), "passport.png"), "reference": "CUST-1042"})
@@ -651,7 +651,7 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertEqual(s["strength_bands"]["Medium"], 85)                       # nothing saved
         # the age limit goes to the reader's checks
         seen = []
-        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None, min_age=18: seen.append(min_age) or
+        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None, min_age=18, *a: seen.append(min_age) or
                                {"read": None, "model": None, "checks": [], "error": "not read"}):
             self.client().post("/scan", data={"image": (io.BytesIO(self.png()), "id.png")}, content_type="multipart/form-data")
         self.assertEqual(seen, [70])
@@ -666,6 +666,46 @@ class ScreeningBookPageTests(unittest.TestCase):
         page = self.client().get(f"/scan/{sid}/screening").data.decode("utf-8")
         self.assertIn("<option>Same person</option>", page)
         self.assertNotIn("Nationality mismatch", page)
+
+    def test_the_models_are_settings(self):
+        self.addCleanup(benchmark.RETRY.update, dict(benchmark.RETRY))
+        qc = self.client("leah.fernandez")
+        self.assertIn('id="model-catalogue"', qc.get("/screening/settings").data.decode("utf-8"))
+        cat, form = fcc.SCREEN_SETTINGS["models"], {"models_form": "1", "llm_retries": "1", "llm_retry_wait": "5", "screen_workers": "2",
+                                                    "reader_instructions": "", "examples": "6", "name_threshold": "65", "max_hits": "5"}
+        for i, m in enumerate(cat):                                          # the table as the page sends it back
+            form.update({f"m_id_{i}": m["id"], f"m_label_{i}": m["label"], f"m_provider_{i}": m["provider"],
+                         f"m_in_{i}": str(m["price"][0]), f"m_out_{i}": str(m["price"][1])})
+            form.update({f"m_{k}_{i}": "1" for k, on in (("reads", m["reads"]), ("decides", m["decides"]),
+                                                          ("thinking", not m["no_thinking"])) if on})
+        n = len(cat)
+        form.update({"m_rows": str(n), f"m_id_{n}": "gemini-3-flash", f"m_label_{n}": "Gemini 3 Flash", f"m_provider_{n}": "gemini",
+                     f"m_in_{n}": "0.5", f"m_out_{n}": "3", f"m_reads_{n}": "1", f"m_decides_{n}": "1", "m_remove_0": "1"})
+        qc.post("/screening/settings", data=dict(form, reader_model="gemini-3-flash", decision_model="gemini-3-flash"))
+        s = fcc.SCREEN_SETTINGS
+        self.assertNotIn("claude-opus-4-8", [m["id"] for m in s["models"]])            # removed
+        new = s["models"][-1]
+        self.assertEqual((new["id"], new["price"], new["reads"], new["decides"], new["no_thinking"]),
+                         ("gemini-3-flash", [0.5, 3.0], True, True, True))
+        self.assertEqual((s["reader_model"], s["decision_model"], s["screen_workers"]), ("gemini-3-flash", "gemini-3-flash", 2))
+        self.assertEqual(benchmark.RETRY, {"tries": 1, "wait": 5})
+        # the reader and the decider are the catalogue's, the reader told the instructions on Settings
+        text = "Read the identity document in the picture and transcribe every printed field exactly as printed. " * 2
+        qc.post("/screening/settings", data=dict(form, m_rows=str(n + 1), reader_instructions=text, **{f"m_id_{n + 1}": ""}))
+        self.assertEqual(s["reader_instructions"], text.strip())
+        seen = []
+
+        def call(model, content, system=None, schema=None):
+            seen.append((model["id"], system))
+            return (dict(a_read(), fields=a_read()["fields"]) if schema is id_scan.SCHEMA else dict(ANSWER)), 10, 10
+        with mock.patch.object(llm, "KEY", "x"), mock.patch.object(benchmark, "call", call):
+            fcc._read_id(b"jpeg", "gemini-3-flash")
+            id_screening.decide("SCAN-1", WHO, watchlist.search(WHO)[0], id_screening.sop_current([]), s)
+        self.assertEqual([(m, x == text.strip()) for m, x in seen], [("gemini-3-flash", True), ("gemini-3-flash", False)])
+        # a catalogue with no decider is refused
+        no_decider = {k: v for k, v in form.items() if not k.startswith("m_decides_")}
+        page = qc.post("/screening/settings", data=no_decider, follow_redirects=True).data.decode("utf-8")
+        self.assertIn("Keep at least one model that reads the ID and one that decides hits", page)
 
     def test_reset_deletes_the_cases_only(self):
         c = self.client()

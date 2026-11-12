@@ -25,8 +25,9 @@ from fincrime import benchmark
 from fincrime.documents import ocr
 from fincrime.filebook import llm, similarity
 
-# The models offered on the page: the document benchmark's that read every
-# field right, and Gemini 2.5 Flash, the cheapest (benchmark.MODELS has the prices).
+# The models that read an ID when Settings' catalogue starts: the document
+# benchmark's that read every field right, and Gemini 2.5 Flash, the cheapest
+# (benchmark.MODELS has the prices). The catalogue on Settings rules after that.
 MODEL_IDS = ("claude-opus-4-8", "claude-sonnet-5-5", "gemini-2.5-pro", "gemini-2.5-flash", "gpt-5", "gpt-5-mini")
 DEFAULT_MODEL = llm.MODEL if llm.MODEL in MODEL_IDS else MODEL_IDS[0]
 
@@ -67,22 +68,25 @@ SCHEMA = {
 }
 
 
-def models():
-    """The models the page offers, with their list prices."""
-    by_id = {m["id"]: m for m in benchmark.MODELS}
-    return [by_id[i] for i in MODEL_IDS if i in by_id]
+def models(catalogue=None):
+    """The models that can read an ID, with their prices: those of the
+    catalogue on Settings marked to read; without one, MODEL_IDS."""
+    if catalogue is None:
+        by_id = {m["id"]: m for m in benchmark.MODELS}
+        return [by_id[i] for i in MODEL_IDS if i in by_id]
+    return [m for m in catalogue if m.get("reads")]
 
 
 def model_ready():
     return bool(llm.KEY)
 
 
-def _model_read(jpeg, model):
+def _model_read(jpeg, model, system=None):
     content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                             "data": base64.b64encode(jpeg).decode("ascii")}},
                {"type": "text", "text": "Read this document."}]
     started = time.monotonic()
-    read, t_in, t_out = benchmark.call(model, content, SYSTEM, SCHEMA)
+    read, t_in, t_out = benchmark.call(model, content, system or SYSTEM, SCHEMA)
     fields = read.get("fields") or {}
     read["fields"] = {k: str(fields.get(k) or "").strip() for k, _ in FIELDS}
     read["mrz"] = [str(x).replace(" ", "").strip() for x in (read.get("mrz") or []) if str(x).strip()]
@@ -92,17 +96,19 @@ def _model_read(jpeg, model):
                   "seconds": round(time.monotonic() - started, 1)}
 
 
-def scan(jpeg, model_id=None, min_age=18):
-    """The model's read of one prepared image, and the checks.
-    Returns {read, model, checks, error}: read is None when no model ran
-    (no key) or its call failed (error says why)."""
-    model = next((m for m in models() if m["id"] == (model_id or DEFAULT_MODEL)), models()[0])
+def scan(jpeg, model_id=None, min_age=18, catalogue=None, instructions=""):
+    """The model's read of one prepared image, and the checks. The model is
+    one of the catalogue's readers (Settings), told `instructions` (Settings;
+    empty: SYSTEM). Returns {read, model, checks, error}: read is None when
+    no model ran (no key) or its call failed (error says why)."""
+    offered = models(catalogue)
+    model = next((m for m in offered if m["id"] == (model_id or DEFAULT_MODEL)), offered[0])
     read, used, error = None, None, ""
     if not model_ready():
         error = "No model is configured (LLM_FOUNDRY_KEY): the image was not read."
     else:
         try:
-            read, used = _model_read(jpeg, model)
+            read, used = _model_read(jpeg, model, instructions)
         except Exception as exc:            # the page shows the reason
             error = f"{model['label']} could not read the image: {type(exc).__name__}: {str(exc)[:200]}"
     return {"read": read, "model": used, "checks": checks(read, min_age=min_age), "error": error}

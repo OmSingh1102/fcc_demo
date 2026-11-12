@@ -329,6 +329,18 @@ def _rebuild_indexes():
     ANALYST_BY_EMAIL.clear(); ANALYST_BY_EMAIL.update({a["email"]: a for a in ANALYSTS})
 
 
+def _apply_settings():
+    """What Settings rules outside its record: the model calls' retries."""
+    benchmark.RETRY.update(tries=int(SCREEN_SETTINGS.get("llm_retries", 3)), wait=int(SCREEN_SETTINGS.get("llm_retry_wait", 10)))
+
+
+def _model_labels():
+    """Every model's name by its ID: the benchmark's, then Settings' catalogue."""
+    out = {m["id"]: m["label"] for m in benchmark.MODELS}
+    out.update({m["id"]: m["label"] for m in SCREEN_SETTINGS.get("models") or []})
+    return out
+
+
 def _load_seed():
     """Rebuild the case lists from the seed, then lay stored actions back on
     top. Rebinds the lists in place so every reference stays valid — including
@@ -388,6 +400,7 @@ def _load_seed():
     SCREEN_SETTINGS.clear()
     SCREEN_SETTINGS.update(id_screening.settings_from(
         next((r for r in StateStore.records("settings") if r.get("id") == id_screening.SETTINGS_ID), None)))
+    _apply_settings()
     if restored:
         app.logger.info("Restored %d stored record(s) onto the seed.", restored)
         relabelled = relabel(KYC_CASES, ALERT_CASES, WC_CASES, ANALYSTS)
@@ -1876,7 +1889,7 @@ def routing_capacity():
 # ─── Architecture: what the console is built of, and the models evaluated ───
 @app.route("/architecture")
 def architecture():
-    labels = {m["id"]: m["label"] for m in benchmark.MODELS}
+    labels = _model_labels()
     reader, decider = SCREEN_SETTINGS["reader_model"], SCREEN_SETTINGS["decision_model"]
     t = upload_eval.totals(_scans())
     headline = (f"{t['read']} uploaded ID{'s' if t['read'] != 1 else ''} read, {t['decided']} hit{'s' if t['decided'] != 1 else ''} "
@@ -1899,8 +1912,7 @@ def architecture():
 # analyst confirms another hit loses neither.
 _SCREEN_LOCK = threading.Lock()
 _SCREEN_JOBS = queue.Queue()
-_SCREEN_WORKERS = []
-SCREEN_WORKERS = 3
+_SCREEN_WORKERS = []          # their number is Settings' (screen_workers); lowered, it takes a restart
 
 
 def _scans():
@@ -1979,7 +1991,7 @@ def _screen_queue(scan_id, uids=None, why=""):
         for j in jobs:
             _screen_job(j)
         return len(jobs)
-    while len(_SCREEN_WORKERS) < SCREEN_WORKERS:
+    while len(_SCREEN_WORKERS) < int(SCREEN_SETTINGS.get("screen_workers") or 1):
         t = threading.Thread(target=_screen_worker, name=f"screening-{len(_SCREEN_WORKERS) + 1}", daemon=True)
         _SCREEN_WORKERS.append(t)
         t.start()
@@ -2051,7 +2063,7 @@ def _readers():
     """What can read an uploaded ID: the AI models, Azure AI Document
     Intelligence once its endpoint and key are on Settings, and OCR
     (Tesseract) when this machine has it."""
-    out = list(id_scan.models())
+    out = list(id_scan.models(SCREEN_SETTINGS.get("models")))
     if azure_docintel.configured(SCREEN_SETTINGS["azure"]):
         out.append(dict(AZURE_READER, per_page=SCREEN_SETTINGS["azure"].get("price_per_page")))
     if ocr.available():
@@ -2073,7 +2085,8 @@ def _read_id(jpeg, reader):
             return {"read": None, "model": None, "checks": [], "error": str(exc)[:300]}
         return {"read": read, "model": used, "checks": id_scan.checks(read, min_age=SCREEN_SETTINGS["min_age"]), "error": ""}
     if reader != AZURE_READER["id"]:
-        return id_scan.scan(jpeg, reader, SCREEN_SETTINGS["min_age"])
+        return id_scan.scan(jpeg, reader, SCREEN_SETTINGS["min_age"], SCREEN_SETTINGS.get("models"),
+                            SCREEN_SETTINGS.get("reader_instructions"))
     cfg = SCREEN_SETTINGS["azure"]
     why = "its endpoint and key are not on Settings"
     if azure_docintel.configured(cfg):
@@ -2082,7 +2095,8 @@ def _read_id(jpeg, reader):
             return {"read": read, "model": used, "checks": id_scan.checks(read, min_age=SCREEN_SETTINGS["min_age"]), "error": ""}
         except azure_docintel.AzureError as exc:
             why = str(exc)
-    result = id_scan.scan(jpeg, id_scan.DEFAULT_MODEL, SCREEN_SETTINGS["min_age"])
+    result = id_scan.scan(jpeg, None, SCREEN_SETTINGS["min_age"], SCREEN_SETTINGS.get("models"),
+                          SCREEN_SETTINGS.get("reader_instructions"))
     result["fallback"] = f"Azure AI Document Intelligence did not read the ID ({why}): the AI model read it instead."
     return result
 
@@ -2428,8 +2442,13 @@ def screening_settings():
             flash("Only the QC lead changes the settings.", "error")
             return redirect(url_for("screening_settings"))
         f = request.form
+        if f.get("models_form"):                    # the models card was on the page: the catalogue first, the choices below from it
+            err = _models_update(s, f)
+            if err:
+                flash(err, "error")
+                return redirect(url_for("screening_settings"))
         reader_ids = {m["id"] for m in _readers()}
-        decision_ids = {m["id"] for m in id_screening.decision_models()}
+        decision_ids = {m["id"] for m in id_screening.decision_models(s)}
         try:
             examples = int(f.get("examples", s["examples"]))
             threshold = int(f.get("name_threshold", s["name_threshold"]))
@@ -2460,6 +2479,10 @@ def screening_settings():
         s.update(reader_model=f.get("reader_model") if f.get("reader_model") in reader_ids else s["reader_model"],
                  decision_model=f.get("decision_model") if f.get("decision_model") in decision_ids else s["decision_model"],
                  examples=examples, name_threshold=threshold, max_hits=max_hits)
+        if s["reader_model"] not in reader_ids:     # a model taken off the catalogue: its first reader instead
+            s["reader_model"] = id_scan.models(s["models"])[0]["id"]
+        if s["decision_model"] not in decision_ids:
+            s["decision_model"] = id_screening.decision_models(s)[0]["id"]
         wc = s["world_check"]
         for key in ("api_key", "group_id", "host", "base_path", "screen_path", "groups_path", "profile_path"):
             if key in f:
@@ -2474,6 +2497,7 @@ def screening_settings():
                 flash(err, "error")
                 return redirect(url_for("screening_settings"))
         _save("settings", s)
+        _apply_settings()
         flash("Settings saved. World-Check: " + id_screening.source_label(s) + ".", "success")
         return redirect(url_for("screening_settings"))
     return render_template("screening_settings.html", s=s, wc=s["world_check"], secret_shown=_masked(s["world_check"]["api_secret"]),
@@ -2481,9 +2505,51 @@ def screening_settings():
                            dd=s["didit"], dd_key_shown=_masked(s["didit"]["api_key"]), dd_live=didit.configured(s["didit"]),
                            intake_keys=s.get("intake_keys") or [], new_key=session.pop("new_intake_key", None),
                            api_base=request.url_root.rstrip("/") + "/api/v1",
-                           readers=_readers(), deciders=id_screening.decision_models(), live=id_screening.live(s),
+                           readers=_readers(), deciders=id_screening.decision_models(s), live=id_screening.live(s),
+                           providers=MODEL_PROVIDERS, reader_instructions=s.get("reader_instructions") or id_scan.SYSTEM,
                            source=id_screening.source_label(s), can_edit="QC" in _levels(), model_ready=id_scan.model_ready(),
                            qc_names=_analysts_with(["QC"], _tenant()), watchlist_size=len(watchlist.profiles()))
+
+
+MODEL_PROVIDERS = {"anthropic": "Anthropic (Claude)", "openai": "OpenAI (GPT)", "gemini": "Google (Gemini)"}   # the gateway's routes
+
+
+def _models_update(s, f):
+    """The model catalogue, the retries, the workers and the reader's
+    instructions from the form ("" when saved, else what is wrong)."""
+    out = []
+    for i in range(int(f.get("m_rows") or 0) + 1):          # the catalogue's rows, and the blank one for a new model
+        mid = f.get(f"m_id_{i}", "").strip()[:80]
+        if not mid or f.get(f"m_remove_{i}"):
+            continue
+        if any(m["id"] == mid for m in out):
+            return f"{mid} is in the list twice."
+        if f.get(f"m_provider_{i}") not in MODEL_PROVIDERS:
+            return f"{mid}: choose its provider."
+        try:
+            price = [float(f.get(f"m_in_{i}") or 0), float(f.get(f"m_out_{i}") or 0)]
+        except ValueError:
+            return f"{mid}: the prices are numbers."
+        if min(price) < 0:
+            return f"{mid}: the prices are 0 or more."
+        out.append({"id": mid, "label": f.get(f"m_label_{i}", "").strip()[:80] or mid, "provider": f[f"m_provider_{i}"],
+                    "price": price, "reads": bool(f.get(f"m_reads_{i}")), "decides": bool(f.get(f"m_decides_{i}")),
+                    "no_thinking": not f.get(f"m_thinking_{i}")})
+    if not any(m["reads"] for m in out) or not any(m["decides"] for m in out):
+        return "Keep at least one model that reads the ID and one that decides hits."
+    try:
+        retries, wait, workers = (int(f.get("llm_retries", s["llm_retries"])), int(f.get("llm_retry_wait", s["llm_retry_wait"])),
+                                  int(f.get("screen_workers", s["screen_workers"])))
+    except ValueError:
+        return "The tries, the wait and the workers are whole numbers."
+    if not (0 <= retries <= 6 and 1 <= wait <= 120 and 1 <= workers <= 8):
+        return "Tries 0-6, the first wait 1-120 seconds, workers 1-8."
+    text = f.get("reader_instructions", "").replace("\r\n", "\n").strip()
+    if text and len(text) < 100:
+        return "The reader's instructions are too short to read an ID from: keep the whole text (empty: the default)."
+    s.update(models=out, llm_retries=retries, llm_retry_wait=wait, screen_workers=workers,
+             reader_instructions="" if text == id_scan.SYSTEM.strip() else text)
+    return ""
 
 
 def _lines(text):
@@ -2535,7 +2601,7 @@ def _services_update(s, f):
         if f.get(forget):
             cfg["api_key"] = ""
     if s["reader_model"] == AZURE_READER["id"] and not azure_docintel.configured(az):
-        s["reader_model"] = id_scan.DEFAULT_MODEL
+        s["reader_model"] = id_scan.models(s["models"])[0]["id"]
     return ""
 
 
@@ -2611,7 +2677,7 @@ def model_evaluation():
     """The Screening cases flow's two models, measured on the IDs uploaded in
     the console as they are read and decided (fincrime/upload_eval)."""
     scans = _scans()
-    labels = {m["id"]: m["label"] for m in benchmark.MODELS}
+    labels = _model_labels()
     reader, decider = SCREEN_SETTINGS["reader_model"], SCREEN_SETTINGS["decision_model"]
     danger = lambda t, c: t != "False positive" and c == "False positive"      # noqa: E731
     deciding = [dict(m, view=decision_model.matrix_view(m["matrix"], None, danger)) for m in upload_eval.deciding(scans)]

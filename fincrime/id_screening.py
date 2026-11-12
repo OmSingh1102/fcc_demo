@@ -57,7 +57,20 @@ def default_settings():
             "auto_verify": True, "auto_no_hit": True, "auto_min_confidence": 90, "auto_dob_differs": True,
             "auto_person_lists": "Sanctions, PEP", "auto_qc_pct": 5,
             # the services connected by API (adapters/): reading the ID, verifying it; the client's system sending IDs
-            "azure": dict(azure_docintel.DEFAULTS), "didit": dict(didit.DEFAULTS), "intake_keys": []}
+            "azure": dict(azure_docintel.DEFAULTS), "didit": dict(didit.DEFAULTS), "intake_keys": [],
+            # the models the gateway serves, which read and which decide, their prices; the reader's instructions
+            # (empty: id_scan.SYSTEM); tries after a busy answer and the first wait; the threads deciding hits
+            "models": default_models(), "reader_instructions": "", "llm_retries": 3, "llm_retry_wait": 10,
+            "screen_workers": 3}
+
+
+def default_models():
+    """The model catalogue Settings starts from: the benchmark's models, each
+    marked whether it reads the ID (id_scan.MODEL_IDS) and decides hits
+    (DECISION_MODELS)."""
+    return [{"id": m["id"], "label": m["label"], "provider": m["provider"], "price": list(m["price"]),
+             "reads": m["id"] in id_scan.MODEL_IDS, "decides": m["id"] in DECISION_MODELS,
+             "no_thinking": bool(m.get("no_thinking"))} for m in benchmark.MODELS]
 
 
 def settings_from(stored):
@@ -70,9 +83,13 @@ def settings_from(stored):
     return s
 
 
-def decision_models():
-    by_id = {m["id"]: m for m in benchmark.MODELS}
-    return [by_id[i] for i in DECISION_MODELS if i in by_id]
+def decision_models(settings=None):
+    """The models that can decide a hit: the catalogue's on Settings marked
+    to decide; without one, DECISION_MODELS."""
+    if not (settings or {}).get("models"):
+        by_id = {m["id"]: m for m in benchmark.MODELS}
+        return [by_id[i] for i in DECISION_MODELS if i in by_id]
+    return [m for m in settings["models"] if m.get("decides")]
 
 
 def live(settings):
@@ -220,7 +237,8 @@ def prompt(case_id, who, hit, k):
 def decide(case_id, who, hit, sop, settings):
     """The model's answer on one hit under one SOP version (an "ai" record);
     status "failed" with the reason when there is no answer."""
-    model = next((m for m in decision_models() if m["id"] == settings["decision_model"]), decision_models()[0])
+    offered = decision_models(settings)
+    model = next((m for m in offered if m["id"] == settings["decision_model"]), offered[0])
     base = {"model": model["id"], "model_label": model["label"], "sop": sop["version"], "at": dates.now_str()}
     if not llm.KEY:
         return dict(base, status="failed", error="No model is configured (LLM_FOUNDRY_KEY): decide this hit yourself.")
