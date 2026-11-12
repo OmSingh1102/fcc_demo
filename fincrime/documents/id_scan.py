@@ -92,7 +92,7 @@ def _model_read(jpeg, model):
                   "seconds": round(time.monotonic() - started, 1)}
 
 
-def scan(jpeg, model_id=None):
+def scan(jpeg, model_id=None, min_age=18):
     """The model's read of one prepared image, and the checks.
     Returns {read, model, checks, error}: read is None when no model ran
     (no key) or its call failed (error says why)."""
@@ -105,7 +105,7 @@ def scan(jpeg, model_id=None):
             read, used = _model_read(jpeg, model)
         except Exception as exc:            # the page shows the reason
             error = f"{model['label']} could not read the image: {type(exc).__name__}: {str(exc)[:200]}"
-    return {"read": read, "model": used, "checks": checks(read), "error": error}
+    return {"read": read, "model": used, "checks": checks(read, min_age=min_age), "error": error}
 
 
 # ── the checks ───────────────────────────────────────────────────────────────
@@ -173,8 +173,9 @@ def _td3(lines):
     return tuple(_fillers_to(x) for x in lines)
 
 
-def checks(read, today=None):
-    """[{label, state: ok | warn | fail | info, detail}] for a scan."""
+def checks(read, today=None, min_age=18):
+    """[{label, state: ok | warn | fail | info, detail}] for a scan. Under
+    `min_age` (Settings; 0 for none) the age warns."""
     today = today or date.today()
     out = []
 
@@ -209,7 +210,7 @@ def checks(read, today=None):
         dob = _iso(f.get("date_of_birth"))
         if dob:
             age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-            add("Age", "warn" if age < 18 else "ok", f"{age} years old" + (": a minor." if age < 18 else "."))
+            add("Age", "warn" if age < min_age else "ok", f"{age} years old" + (f": under {min_age}." if age < min_age else "."))
         printed = read.get("mrz") or []
         if len(printed) == 2:
             parsed = ocr.parse(*_td3(printed))

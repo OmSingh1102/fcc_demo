@@ -602,6 +602,9 @@ def _inject_nav():
         "switch_users": ANALYSTS if (DEMO_MODE and signed_in) else [],
         "all_analysts": ANALYSTS,
         "status_tone": vocab.STATUS_TONE,
+        # what an analyst picks from for a hit's outcome: Settings' lists on the screening book
+        "alert_reasons": (CASE_BOOK == "screening" and SCREEN_SETTINGS.get("alert_reasons")) or vocab.WC_REASONS,
+        "risk_levels": (CASE_BOOK == "screening" and SCREEN_SETTINGS.get("risk_levels")) or vocab.WC_RISKS,
         "state_version": STATE_VERSION,
         # The line-icon macro, delivered to every template including the
         # standalone auth pages. Fetched per render so editing _icon.html
@@ -1270,7 +1273,8 @@ def wc_resolve(wc_case_id, match_id):
     if rec:
         status, risk, reason, comment = f.get("status", ""), f.get("risk", ""), f.get("reason", ""), f.get("comment", "").strip()
         problem = ("The case is closed." if not ctx["can_resolve"] else "Pick a status." if status not in id_screening.FROM_WC_STATUS
-                   else "Pick a risk level." if risk not in vocab.WC_RISKS else "Select a reason." if reason not in vocab.WC_REASONS
+                   else "Pick a risk level." if risk not in SCREEN_SETTINGS["risk_levels"]
+                   else "Select a reason." if reason not in SCREEN_SETTINGS["alert_reasons"]
                    else "A review comment is required." if not comment else "")
         err = [problem] if problem else []
 
@@ -2067,18 +2071,18 @@ def _read_id(jpeg, reader):
             read, used = ocr.id_read(jpeg, [k for k, _ in id_scan.FIELDS])
         except ocr.OcrError as exc:
             return {"read": None, "model": None, "checks": [], "error": str(exc)[:300]}
-        return {"read": read, "model": used, "checks": id_scan.checks(read), "error": ""}
+        return {"read": read, "model": used, "checks": id_scan.checks(read, min_age=SCREEN_SETTINGS["min_age"]), "error": ""}
     if reader != AZURE_READER["id"]:
-        return id_scan.scan(jpeg, reader)
+        return id_scan.scan(jpeg, reader, SCREEN_SETTINGS["min_age"])
     cfg = SCREEN_SETTINGS["azure"]
     why = "its endpoint and key are not on Settings"
     if azure_docintel.configured(cfg):
         try:
             read, used = azure_docintel.read(cfg, jpeg, [k for k, _ in id_scan.FIELDS])
-            return {"read": read, "model": used, "checks": id_scan.checks(read), "error": ""}
+            return {"read": read, "model": used, "checks": id_scan.checks(read, min_age=SCREEN_SETTINGS["min_age"]), "error": ""}
         except azure_docintel.AzureError as exc:
             why = str(exc)
-    result = id_scan.scan(jpeg, id_scan.DEFAULT_MODEL)
+    result = id_scan.scan(jpeg, id_scan.DEFAULT_MODEL, SCREEN_SETTINGS["min_age"])
     result["fallback"] = f"Azure AI Document Intelligence did not read the ID ({why}): the AI model read it instead."
     return result
 
@@ -2436,6 +2440,11 @@ def screening_settings():
         if not (0 <= examples <= 12 and 50 <= threshold <= 100 and 1 <= max_hits <= 20):
             flash("Examples 0-12, name score 50-100, hits 1-20.", "error")
             return redirect(url_for("screening_settings"))
+        if f.get("checks_form"):                    # the checks and lists card was on the page
+            err = _checks_update(s, f)
+            if err:
+                flash(err, "error")
+                return redirect(url_for("screening_settings"))
         if f.get("auto_form"):                      # the auto-verify card was on the page: unticked boxes are off
             try:
                 confidence, qc_pct = int(f.get("auto_min_confidence", 0)), int(f.get("auto_qc_pct", 0))
@@ -2475,6 +2484,34 @@ def screening_settings():
                            readers=_readers(), deciders=id_screening.decision_models(), live=id_screening.live(s),
                            source=id_screening.source_label(s), can_edit="QC" in _levels(), model_ready=id_scan.model_ready(),
                            qc_names=_analysts_with(["QC"], _tenant()), watchlist_size=len(watchlist.profiles()))
+
+
+def _lines(text):
+    """The non-empty lines of a text box, each once, in order."""
+    out = []
+    for x in (text or "").splitlines():
+        x = x.strip()[:80]
+        if x and x not in out:
+            out.append(x)
+    return out
+
+
+def _checks_update(s, f):
+    """The age limit, the match strengths and the outcome lists from the form ("" when saved, else what is wrong)."""
+    try:
+        min_age = int(f.get("min_age", s["min_age"]))
+        bands = {b: int(f.get(f"band_{b.lower()}", s["strength_bands"][b])) for b in watchlist.BANDS}
+    except ValueError:
+        return "The age and the match strengths are whole numbers."
+    if not 0 <= min_age <= 100:
+        return "The age limit is 0-100 (0: none)."
+    if not 0 < bands["Medium"] < bands["Strong"] < bands["Exact"] <= 100:
+        return "The match strengths rise: Medium under Strong under Exact, at most 100."
+    reasons, risks = _lines(f.get("alert_reasons", "")), _lines(f.get("risk_levels", ""))
+    if not reasons or not risks:
+        return "Keep at least one reason and one risk level."
+    s.update(min_age=min_age, strength_bands=bands, alert_reasons=reasons[:40], risk_levels=risks[:10])
+    return ""
 
 
 def _services_update(s, f):

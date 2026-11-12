@@ -211,10 +211,10 @@
                 <option value="">Select</option>{% for o in outcomes.values() %}<option>{{ o }}</option>{% endfor %}</select></div>
         <div class="field inline"><label>Reason</label>
             <select class="input" name="reason" id="ao-reason">
-                <option value="">Select</option>{% for x in vocab.WC_REASONS %}<option>{{ x }}</option>{% endfor %}</select></div>
+                <option value="">Select</option>{% for x in alert_reasons %}<option>{{ x }}</option>{% endfor %}</select></div>
         <div class="field inline"><label>RiskLevel</label>
             <select class="input" name="risk" id="ao-risk">
-                <option value="">Select</option>{% for x in vocab.WC_RISKS %}<option>{{ x }}</option>{% endfor %}</select></div>
+                <option value="">Select</option>{% for x in risk_levels %}<option>{{ x }}</option>{% endfor %}</select></div>
         <div class="field inline"><label><span class="req">*</span>Comment</label>
             <div><textarea class="textarea" name="comment" maxlength="2000" required oninput="document.getElementById('ao-count').textContent=this.value.length"></textarea><div class="counter"><span id="ao-count">0</span>/2000</div></div></div>
         <div class="small muted">The outcome is prefilled with the AI's suggestion when it gave one; the decision is yours. The case closes when every alert has an outcome.</div>

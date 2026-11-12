@@ -243,7 +243,7 @@ class ScreeningBookPageTests(unittest.TestCase):
     def upload(self, c, read, colour="white"):
         result = {"read": read, "model": {"model": "m", "label": "Model", "tokens_in": 1, "tokens_out": 1, "cost": 0.0, "seconds": 1.0},
                   "checks": id_scan.checks(read), "error": ""}
-        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None: dict(result)), \
+        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None, min_age=18: dict(result)), \
                 mock.patch.object(id_screening, "decide", self.decide):
             r = c.post("/scan", data={"image": (io.BytesIO(self.png(colour)), "id.png")}, content_type="multipart/form-data")
         self.assertEqual(r.status_code, 302)
@@ -441,7 +441,7 @@ class ScreeningBookPageTests(unittest.TestCase):
         read = a_read()
         result = {"read": read, "model": {"model": "m", "label": "Model", "tokens_in": 1, "tokens_out": 1, "cost": 0.0, "seconds": 1.0},
                   "checks": id_scan.checks(read), "error": ""}
-        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None: dict(result)), \
+        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None, min_age=18: dict(result)), \
                 mock.patch.object(id_screening, "decide", self.decide):
             r = api.post("/api/v1/cases", headers={"X-API-Key": key}, content_type="multipart/form-data",
                          data={"image": (io.BytesIO(self.png()), "passport.png"), "reference": "CUST-1042"})
@@ -636,6 +636,36 @@ class ScreeningBookPageTests(unittest.TestCase):
         with mock.patch.object(world_check, "screen", lambda cfg, who, limit=5: ([], "C-1")) as _:
             sid = self.upload(self.client(), a_read())
         self.assertEqual(fcc._scan(sid)["screening"]["source"], "World-Check One")
+
+    def test_the_checks_strengths_and_lists_are_settings(self):
+        qc = self.client("leah.fernandez")
+        form = {"checks_form": "1", "min_age": "70", "band_exact": "100", "band_strong": "95", "band_medium": "85",
+                "alert_reasons": "Different person\nDifferent person\n  Same person  \n", "risk_levels": "Low\nHigh"}
+        qc.post("/screening/settings", data=form)
+        s = fcc.SCREEN_SETTINGS
+        self.assertEqual((s["min_age"], s["strength_bands"], s["alert_reasons"], s["risk_levels"]),
+                         (70, {"Exact": 100, "Strong": 95, "Medium": 85}, ["Different person", "Same person"], ["Low", "High"]))
+        self.assertIn('id="settings-checks"', qc.get("/screening/settings").data.decode("utf-8"))
+        bad = qc.post("/screening/settings", data=dict(form, band_medium="99"), follow_redirects=True).data.decode("utf-8")
+        self.assertIn("The match strengths rise", bad)
+        self.assertEqual(s["strength_bands"]["Medium"], 85)                       # nothing saved
+        # the age limit goes to the reader's checks
+        seen = []
+        with mock.patch.object(id_scan, "scan", lambda jpeg, model_id=None, min_age=18: seen.append(min_age) or
+                               {"read": None, "model": None, "checks": [], "error": "not read"}):
+            self.client().post("/scan", data={"image": (io.BytesIO(self.png()), "id.png")}, content_type="multipart/form-data")
+        self.assertEqual(seen, [70])
+        age = next(c for c in id_scan.checks(a_read(), min_age=70) if c["label"] == "Age")    # born 1962
+        self.assertEqual((age["state"], "under 70" in age["detail"]), ("warn", True))
+        self.assertEqual(next(c for c in id_scan.checks(a_read(), min_age=0) if c["label"] == "Age")["state"], "ok")
+        # the bands name the stand-in's hits
+        self.assertEqual((watchlist.strength(96, s["strength_bands"]), watchlist.strength(94, s["strength_bands"]),
+                          watchlist.strength(94)), ("Strong", "Medium", "Strong"))
+        # the lists are what the analyst picks from
+        sid = self.upload(self.client(), a_read())
+        page = self.client().get(f"/scan/{sid}/screening").data.decode("utf-8")
+        self.assertIn("<option>Same person</option>", page)
+        self.assertNotIn("Nationality mismatch", page)
 
     def test_reset_deletes_the_cases_only(self):
         c = self.client()

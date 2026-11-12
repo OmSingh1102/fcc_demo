@@ -22,7 +22,7 @@ from functools import lru_cache
 
 from fincrime.filebook import loader, parse, similarity
 
-STRENGTHS = ((99, "Exact"), (90, "Strong"), (80, "Medium"), (0, "Weak"))
+BANDS = {"Exact": 99, "Strong": 90, "Medium": 80}      # the lowest name score of each strength; under Medium, Weak (Settings)
 _cache = {}
 
 
@@ -119,8 +119,8 @@ def name_score(a, b):
     return round(100 * total / (len(short) + 0.25 * (len(long_) - len(short))))
 
 
-def strength(score):
-    return next(label for floor, label in STRENGTHS if score >= floor)
+def strength(score, bands=None):
+    return next((label for label, floor in sorted((bands or BANDS).items(), key=lambda b: -b[1]) if score >= floor), "Weak")
 
 
 def _dob_result(dob_iso, dob):
@@ -155,7 +155,7 @@ def _country_result(countries, person):
     return "Matched" if mine & {_country_key(c) for c in countries} else "Not matched"
 
 
-def search(person, threshold=65, limit=5):
+def search(person, threshold=65, limit=5, bands=None):
     """The records whose name scores `threshold` or more against the name on
     the ID, best first, at most `limit`: each with its name score and
     strength, and the date of birth and country reported beside it. Among
@@ -177,6 +177,6 @@ def search(person, threshold=65, limit=5):
     rank = {"Matched": 0, "Unknown": 1, "Not matched": 2}
     found.sort(key=lambda t: (-t[0], rank[t[1]], rank[t[2]], t[3]["uid"]))
     return [{"uid": p["uid"], "name": p["name"], "aka": p["aka"], "dob_text": p["dob_text"], "places": p["places"],
-             "category": p["category"], "narrative": p["narrative"], "score": score, "strength": strength(score),
+             "category": p["category"], "narrative": p["narrative"], "score": score, "strength": strength(score, bands),
              "dob_result": dob, "country_result": country, "source": "stand-in", "row": p["row"]}
             for score, dob, country, p in found[:limit]]

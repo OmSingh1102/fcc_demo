@@ -89,6 +89,26 @@
     </div>
 </div>
 
+<div class="card mt-12" id="settings-checks">
+    <input type="hidden" name="checks_form" value="1">
+    <div class="card-head"><div><div class="card-title">Checks, match strengths and outcome lists</div>
+        <div class="card-sub">the ID check's age limit, how strong a stand-in hit is by its name score, and what an analyst picks from for a hit's outcome</div></div></div>
+    <div class="card-body settings-grid">
+        <label>Age under which the ID check warns
+            <input class="input" type="number" name="min_age" min="0" max="100" value="{{ s.min_age }}"{% if not can_edit %} disabled{% endif %}>
+            <span class="tiny muted">0 = no age limit</span></label>
+        <label>Name score for an Exact / Strong / Medium hit
+            <span class="row" style="gap:6px">{% for b in ('Exact', 'Strong', 'Medium') %}<input class="input" type="number" name="band_{{ b|lower }}" min="1" max="100" value="{{ s.strength_bands[b] }}" title="{{ b }}" style="width:80px"{% if not can_edit %} disabled{% endif %}>{% endfor %}</span>
+            <span class="tiny muted">the stand-in's hits; under Medium, Weak. World-Check One gives its own</span></label>
+        <label>Reasons for an outcome
+            <textarea class="textarea" name="alert_reasons" rows="6"{% if not can_edit %} disabled{% endif %}>{{ s.alert_reasons|join('\n') }}</textarea>
+            <span class="tiny muted">one a line</span></label>
+        <label>Risk levels
+            <textarea class="textarea" name="risk_levels" rows="3"{% if not can_edit %} disabled{% endif %}>{{ s.risk_levels|join('\n') }}</textarea>
+            <span class="tiny muted">one a line</span></label>
+    </div>
+</div>
+
 <div class="card mt-12" id="settings-auto">
     <div class="card-head"><div><div class="card-title">Auto-verify: the AI closes the safe cases</div>
         <div class="card-sub">what the AI may close without an analyst; everything else goes to an analyst. Applies as the AI answers from now on</div></div>

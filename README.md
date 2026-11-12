@@ -364,8 +364,11 @@ cleared and why; Model evaluation counts the rule's clears apart and does
 not score them (no analyst gave them an answer).
 Saving a new SOP version (the QC lead) sends every open case's unconfirmed
 hits to the model again under it. Settings (the QC lead) holds the models,
-the examples per hit, the stand-in's name-score floor and the hits kept, and
-the World-Check One account; the secret is never shown back. Download gives
+the examples per hit, the stand-in's name-score floor and the hits kept, the
+age under which the ID check warns (0: none), the name scores of an Exact,
+Strong and Medium stand-in hit, the reasons and risk levels an analyst picks
+from for a hit's outcome, and the World-Check One account; the secret is
+never shown back. Download gives
 a case as JSON; Delete removes it and its image (real IDs: `uploads/scans/`,
 gitignored).
 

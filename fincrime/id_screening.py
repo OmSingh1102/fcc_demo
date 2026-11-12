@@ -30,6 +30,7 @@ import time
 
 from fincrime import benchmark, decision_model, watchlist
 from fincrime.adapters import azure_docintel, didit, world_check
+from fincrime.data import vocab
 from fincrime.documents import id_scan
 from fincrime.filebook import llm, loader, similarity
 from fincrime.utils import dates
@@ -48,6 +49,10 @@ DECISION_MODELS = ("claude-opus-4-8", "claude-sonnet-5-5", "gpt-5", "gemini-2.5-
 def default_settings():
     return {"id": SETTINGS_ID, "reader_model": id_scan.DEFAULT_MODEL, "decision_model": "claude-opus-4-8", "examples": 6,
             "name_threshold": 65, "max_hits": 5, "world_check": dict(world_check.DEFAULTS),
+            # the age under which the ID check warns (0: none); the stand-in's match strengths by name score
+            "min_age": 18, "strength_bands": dict(watchlist.BANDS),
+            # what an analyst picks from when giving a hit its outcome
+            "alert_reasons": list(vocab.WC_REASONS), "risk_levels": list(vocab.WC_RISKS),
             # auto-verify (auto_verify below): which cases the AI closes without an analyst
             "auto_verify": True, "auto_no_hit": True, "auto_min_confidence": 90, "auto_dob_differs": True,
             "auto_person_lists": "Sanctions, PEP", "auto_qc_pct": 5,
@@ -101,7 +106,8 @@ def search(who, settings):
             return hits, "World-Check One", "", csid
         except world_check.WorldCheckError as exc:
             return [], "World-Check One", str(exc), ""
-    return (watchlist.search(who, int(settings["name_threshold"]), int(settings["max_hits"])), "stand-in", "", "")
+    return (watchlist.search(who, int(settings["name_threshold"]), int(settings["max_hits"]), settings.get("strength_bands")),
+            "stand-in", "", "")
 
 
 # ── the SOP ──────────────────────────────────────────────────────────────────
