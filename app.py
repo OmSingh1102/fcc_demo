@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 
 from flask import (Flask, Response, abort, flash, g, jsonify, redirect, render_template, request,
                    session, url_for)
+from werkzeug.security import check_password_hash, generate_password_hash
 
 try:  # A deployed copy reads .env (see .env.example); a dev checkout has none.
     from dotenv import load_dotenv
@@ -49,6 +50,7 @@ from fincrime import benchmark, decision_model, id_screening, upload_eval, watch
 from fincrime.data import vocab
 from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
+from fincrime.data.seed import analyst as seed_analyst
 from fincrime.data.state_store import StateStore
 from fincrime.documents import id_scan, ocr, svg_cards, uploads
 from fincrime.engines import (ai_agent, ai_review, ai_screening, case_documents, investigation, qc, recommendation, routing, screening,
@@ -147,7 +149,14 @@ def _analysts_with(levels, tenant) -> str:
     return ", ".join(names[:-1]) + " or " + names[-1]
 
 
+def _password_hash() -> str:
+    """The password set on Settings (a hash), on the screening book; "" for the demo password."""
+    return SCREEN_SETTINGS.get("password_hash", "") if CASE_BOOK == "screening" else ""
+
+
 def _check_password(password: str) -> bool:
+    if _password_hash():
+        return check_password_hash(_password_hash(), password or "")
     return hmac.compare_digest((password or "").encode("utf-8"), DEMO_PASSWORD.encode("utf-8"))
 
 
@@ -330,8 +339,14 @@ def _rebuild_indexes():
 
 
 def _apply_settings():
-    """What Settings rules outside its record: the model calls' retries."""
+    """What Settings rules outside its record: the model calls' retries and,
+    on the screening book, the team who sign in."""
     benchmark.RETRY.update(tries=int(SCREEN_SETTINGS.get("llm_retries", 3)), wait=int(SCREEN_SETTINGS.get("llm_retry_wait", 10)))
+    if CASE_BOOK == "screening" and SCREEN_SETTINGS.get("team"):
+        ANALYSTS[:] = [dict(seed_analyst(p["email"].split("@")[0], p["name"], p["roles"], list(vocab.TENANTS),
+                                         scripts=("latin", "cyrillic", "arabic"), kyb=True), email=p["email"])
+                       for p in SCREEN_SETTINGS["team"]]
+        _rebuild_indexes()
 
 
 def _model_labels():
@@ -641,7 +656,7 @@ def portal():
 
 def _login_page(error="", selected="", next_url="", status=200):
     return render_template("login.html", error=error, selected=selected or ANALYSTS[0]["key"], next=next_url,
-                           analysts=ANALYSTS, demo_password=DEMO_PASSWORD if _SHOW_DEMO_HINT else ""), status
+                           analysts=ANALYSTS, demo_password=DEMO_PASSWORD if _SHOW_DEMO_HINT and not _password_hash() else ""), status
 
 
 def _sign_in(analyst: dict):
@@ -2459,8 +2474,8 @@ def screening_settings():
         if not (0 <= examples <= 12 and 50 <= threshold <= 100 and 1 <= max_hits <= 20):
             flash("Examples 0-12, name score 50-100, hits 1-20.", "error")
             return redirect(url_for("screening_settings"))
-        if f.get("checks_form"):                    # the checks and lists card was on the page
-            err = _checks_update(s, f)
+        if f.get("checks_form") or f.get("team_form"):  # the checks and lists card, the team card
+            err = (f.get("checks_form") and _checks_update(s, f)) or (f.get("team_form") and _team_update(s, f))
             if err:
                 flash(err, "error")
                 return redirect(url_for("screening_settings"))
@@ -2499,6 +2514,9 @@ def screening_settings():
         _save("settings", s)
         _apply_settings()
         flash("Settings saved. World-Check: " + id_screening.source_label(s) + ".", "success")
+        if not _analyst():                          # the QC lead took themselves off the team
+            session.clear()
+            return redirect(url_for("login"))
         return redirect(url_for("screening_settings"))
     return render_template("screening_settings.html", s=s, wc=s["world_check"], secret_shown=_masked(s["world_check"]["api_secret"]),
                            az=s["azure"], az_key_shown=_masked(s["azure"]["api_key"]), az_live=azure_docintel.configured(s["azure"]),
@@ -2507,6 +2525,8 @@ def screening_settings():
                            api_base=request.url_root.rstrip("/") + "/api/v1",
                            readers=_readers(), deciders=id_screening.decision_models(s), live=id_screening.live(s),
                            providers=MODEL_PROVIDERS, reader_instructions=s.get("reader_instructions") or id_scan.SYSTEM,
+                           team=s.get("team") or [{"name": a["name"], "email": a["email"], "roles": a["roles"]} for a in ANALYSTS],
+                           team_roles=TEAM_ROLES,
                            source=id_screening.source_label(s), can_edit="QC" in _levels(), model_ready=id_scan.model_ready(),
                            qc_names=_analysts_with(["QC"], _tenant()), watchlist_size=len(watchlist.profiles()))
 
@@ -2549,6 +2569,37 @@ def _models_update(s, f):
         return "The reader's instructions are too short to read an ID from: keep the whole text (empty: the default)."
     s.update(models=out, llm_retries=retries, llm_retry_wait=wait, screen_workers=workers,
              reader_instructions="" if text == id_scan.SYSTEM.strip() else text)
+    return ""
+
+
+TEAM_ROLES = {"L1": "analyst", "L2": "senior analyst", "EDD": "enhanced due diligence", "QC": "QC lead: Settings and the SOP"}
+
+
+def _team_update(s, f):
+    """The team and the sign-in password from the form ("" when saved, else what is wrong)."""
+    team = []
+    for i in range(int(f.get("t_rows") or 0) + 1):          # the team's rows, and the blank one for a new person
+        name, email = f.get(f"t_name_{i}", "").strip()[:80], f.get(f"t_email_{i}", "").strip().lower()[:120]
+        if not (name or email) or f.get(f"t_remove_{i}"):
+            continue
+        if not name or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            return f"{name or email}: give a name and an email address."
+        roles = [r for r in TEAM_ROLES if f.get(f"t_role_{r}_{i}")]
+        if not roles:
+            return f"{name}: tick at least one role."
+        if any(p["email"].split("@")[0] == email.split("@")[0] for p in team):
+            return f"Two people would sign in as {email.split('@')[0]}: give one of them another email address."
+        team.append({"name": name, "email": email, "roles": roles})
+    if not any("QC" in p["roles"] for p in team):
+        return "Keep at least one QC lead: only a QC lead changes the settings."
+    password = f.get("new_password", "")
+    if password and len(password) < 4:
+        return "The password is at least 4 characters."
+    s["team"] = team
+    if password:
+        s.update(password_hash=generate_password_hash(password), password_changed_at=dates.now_str(), password_changed_by=_actor())
+    elif f.get("demo_password"):
+        s.update(password_hash="", password_changed_at="", password_changed_by="")
     return ""
 
 

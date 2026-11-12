@@ -171,6 +171,31 @@
     </div>
 </div>
 
+<div class="card mt-12 pad-0" id="settings-team">
+    <input type="hidden" name="team_form" value="1"><input type="hidden" name="t_rows" value="{{ team|length }}">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Team and sign-in</div>
+        <div class="card-sub">who signs in to the console and what each may do; add someone in the last row</div></div></div>
+    <table class="tbl" id="team-table">
+        <thead><tr><th>Name</th><th>Email</th>{% for r, label in team_roles.items() %}<th title="{{ label }}">{{ r }}</th>{% endfor %}<th>Remove</th></tr></thead>
+        <tbody>
+        {% for p in team + [{}] %}{% set i = loop.index0 %}
+        <tr>
+            <td><input class="input input-sm" name="t_name_{{ i }}" value="{{ p.name or '' }}"{% if not p %} placeholder="new person's name"{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td><input class="input input-sm" name="t_email_{{ i }}" value="{{ p.email or '' }}"{% if not can_edit %} disabled{% endif %}></td>
+            {% for r in team_roles %}<td><input type="checkbox" name="t_role_{{ r }}_{{ i }}" value="1"{% if p and r in p.roles %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>{% endfor %}
+            <td>{% if p %}<input type="checkbox" name="t_remove_{{ i }}" value="1"{% if not can_edit %} disabled{% endif %}>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="card-body settings-grid">
+        <label>New sign-in password for everyone
+            <input class="input" type="password" name="new_password" value="" autocomplete="new-password" placeholder="leave blank to keep it"{% if not can_edit %} disabled{% endif %}>
+            <span class="tiny muted">{% if s.password_hash %}Set {{ s.password_changed_at }} by {{ s.password_changed_by|who }}; kept as a hash only. <label class="tiny"><input type="checkbox" name="demo_password" value="1"{% if not can_edit %} disabled{% endif %}> back to the demo password</label>{% else %}Now the demo password, shown on the sign-in page.{% endif %}</span></label>
+        <div class="small muted">{% for r, label in team_roles.items() %}<b>{{ r }}</b> {{ label }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    </div>
+</div>
+
 {% if can_edit %}
 <div class="row mt-12">
     <button class="btn btn-primary" type="submit">{{ icon('check') }} Save settings</button>

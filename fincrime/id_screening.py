@@ -61,7 +61,9 @@ def default_settings():
             # the models the gateway serves, which read and which decide, their prices; the reader's instructions
             # (empty: id_scan.SYSTEM); tries after a busy answer and the first wait; the threads deciding hits
             "models": default_models(), "reader_instructions": "", "llm_retries": 3, "llm_retry_wait": 10,
-            "screen_workers": 3}
+            "screen_workers": 3,
+            # who signs in (empty: the seeded profiles) and the password (a hash; empty: the demo password)
+            "team": [], "password_hash": "", "password_changed_at": "", "password_changed_by": ""}
 
 
 def default_models():

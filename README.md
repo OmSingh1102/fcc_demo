@@ -371,8 +371,10 @@ from for a hit's outcome, the AI models (the gateway ID, name, provider and
 price of each, and whether it may read the ID and decide hits; a model is
 added or removed there), how often and how long a call waits on a busy
 gateway, how many hits the AI decides at once, the instructions the reading
-model is given (empty: the default in `id_scan.SYSTEM`), and the World-Check
-One account; the secret is never shown back. Download gives
+model is given (empty: the default in `id_scan.SYSTEM`), the team who sign
+in (name, email, roles L1 / L2 / EDD / QC; at least one QC lead), the
+sign-in password (kept as a hash; until one is set, the demo password), and
+the World-Check One account; the secret is never shown back. Download gives
 a case as JSON; Delete removes it and its image (real IDs: `uploads/scans/`,
 gitignored).
 

@@ -707,6 +707,32 @@ class ScreeningBookPageTests(unittest.TestCase):
         page = qc.post("/screening/settings", data=no_decider, follow_redirects=True).data.decode("utf-8")
         self.assertIn("Keep at least one model that reads the ID and one that decides hits", page)
 
+    def test_the_team_and_the_password_are_settings(self):
+        before = list(fcc.ANALYSTS)
+        self.addCleanup(lambda: (fcc.ANALYSTS.__setitem__(slice(None), before), fcc._rebuild_indexes()))
+        qc = self.client("leah.fernandez")
+        self.assertIn('id="team-table"', qc.get("/screening/settings").data.decode("utf-8"))
+        form = {"team_form": "1", "t_rows": "1", "t_name_0": "Leah Fernandez", "t_email_0": "leah.fernandez@straive.com",
+                "t_role_QC_0": "1", "t_name_1": "Priya Shah", "t_email_1": "Priya.Shah@client.example", "t_role_L1_1": "1",
+                "new_password": "s3cret-pass", "examples": "6", "name_threshold": "65", "max_hits": "5"}
+        qc.post("/screening/settings", data=form)
+        s = fcc.SCREEN_SETTINGS
+        self.assertEqual([(a["key"], a["email"], a["roles"]) for a in fcc.ANALYSTS],
+                         [("leah.fernandez", "leah.fernandez@straive.com", ["QC"]), ("priya.shah", "priya.shah@client.example", ["L1"])])
+        self.assertTrue(s["password_hash"])
+        self.assertNotIn("s3cret-pass", json.dumps(s))                               # a hash only
+        c = fcc.app.test_client()
+        self.assertNotIn("Demo password for every profile", c.get("/login").data.decode("utf-8"))
+        self.assertEqual(c.post("/login", data={"analyst": "priya.shah", "password": "1234"}).status_code, 401)
+        self.assertEqual(c.post("/login", data={"analyst": "amara.iyer", "password": "s3cret-pass"}).status_code, 400)   # not on the team
+        self.assertEqual(c.post("/login", data={"analyst": "priya.shah", "password": "s3cret-pass"}).status_code, 302)
+        page = qc.post("/screening/settings", data=dict(form, t_role_QC_0="", t_role_L1_0="1", new_password=""),
+                       follow_redirects=True).data.decode("utf-8")
+        self.assertIn("Keep at least one QC lead", page)
+        qc.post("/screening/settings", data=dict(form, new_password="", demo_password="1"))
+        self.assertEqual(s["password_hash"], "")
+        self.assertEqual(fcc.app.test_client().post("/login", data={"analyst": "priya.shah", "password": "1234"}).status_code, 302)
+
     def test_reset_deletes_the_cases_only(self):
         c = self.client()
         self.upload(c, a_read())
