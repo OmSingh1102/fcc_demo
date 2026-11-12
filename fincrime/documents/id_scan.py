@@ -96,7 +96,7 @@ def _model_read(jpeg, model, system=None):
                   "seconds": round(time.monotonic() - started, 1)}
 
 
-def scan(jpeg, model_id=None, min_age=18, catalogue=None, instructions=""):
+def scan(jpeg, model_id=None, min_age=18, catalogue=None, instructions="", rules=None):
     """The model's read of one prepared image, and the checks. The model is
     one of the catalogue's readers (Settings), told `instructions` (Settings;
     empty: SYSTEM). Returns {read, model, checks, error}: read is None when
@@ -111,10 +111,30 @@ def scan(jpeg, model_id=None, min_age=18, catalogue=None, instructions=""):
             read, used = _model_read(jpeg, model, instructions)
         except Exception as exc:            # the page shows the reason
             error = f"{model['label']} could not read the image: {type(exc).__name__}: {str(exc)[:200]}"
-    return {"read": read, "model": used, "checks": checks(read, min_age=min_age), "error": error}
+    return {"read": read, "model": used, "checks": checks(read, min_age=min_age, rules=rules), "error": error}
 
 
 # ── the checks ───────────────────────────────────────────────────────────────
+# The code measures (is the ID expired, do the MRZ digits add up); what each
+# finding does to the ID check is a rule, and Settings may change any of them:
+# "fail" fails the check, "warn" sends the case to an analyst (the check says
+# Check), "info" only notes it (the check can still pass).
+
+RULES = (
+    ("not_id", "Not an identity document", "fail"),
+    ("photo_not_judged", "Photo not judged (a reader that returns text only)", "warn"),
+    ("photo_unreadable", "Photo too poor to read the main fields", "fail"),
+    ("photo_problem", "Photo readable, but blurred, glare, cut off or covered", "warn"),
+    ("fields_missing", "Name, date of birth or document number not read", "warn"),
+    ("uncertain", "A field the reader is unsure of", "warn"),
+    ("expired", "The document has expired", "fail"),
+    ("expiry_unreadable", "The expiry date is not a readable date", "warn"),
+    ("under_age", "The holder is under the age limit", "warn"),
+    ("mrz_digits", "The MRZ check digits do not add up", "warn"),
+    ("mrz_differs", "The printed fields differ from the MRZ", "fail"),
+)
+CHECK_RULES = {k: state for k, _, state in RULES}
+SEVERITIES = (("fail", "Fail"), ("warn", "Check: an analyst looks"), ("info", "Note only"))
 
 def _iso(text):
     try:
@@ -179,44 +199,46 @@ def _td3(lines):
     return tuple(_fillers_to(x) for x in lines)
 
 
-def checks(read, today=None, min_age=18):
+def checks(read, today=None, min_age=18, rules=None):
     """[{label, state: ok | warn | fail | info, detail}] for a scan. Under
-    `min_age` (Settings; 0 for none) the age warns."""
+    `min_age` (Settings; 0 for none) the age is a finding; what each finding
+    does is `rules` (Settings; CHECK_RULES for the ones not given)."""
     today = today or date.today()
     out = []
+    rule = dict(CHECK_RULES, **{k: v for k, v in (rules or {}).items() if k in CHECK_RULES and v in dict(SEVERITIES)})
 
     def add(label, state, detail):
         out.append({"label": label, "state": state, "detail": detail})
 
     if read is not None:
         if read.get("document_type") == "Not an identity document":
-            add("Identity document", "fail", "The model does not take this for an identity document.")
+            add("Identity document", rule["not_id"], "The model does not take this for an identity document.")
         if read.get("photo_judged") is False:     # a reader that returns text only (OCR, Azure)
-            add("Photo", "warn", "Not judged: this reader returns the text only, not whether the photo is covered, "
+            add("Photo", rule["photo_not_judged"], "Not judged: this reader returns the text only, not whether the photo is covered, "
                                  "blurred or cut off. Look at the image.")
         elif not read.get("readable", True):
-            add("Photo", "fail", "Too poor to read the main fields" + (f": {', '.join(read['problems'])}." if read.get("problems") else "."))
+            add("Photo", rule["photo_unreadable"], "Too poor to read the main fields" + (f": {', '.join(read['problems'])}." if read.get("problems") else "."))
         elif read.get("problems"):
-            add("Photo", "warn", f"Readable, but {', '.join(read['problems'])}.")
+            add("Photo", rule["photo_problem"], f"Readable, but {', '.join(read['problems'])}.")
         else:
             add("Photo", "ok", "Clear: nothing spoils it.")
         f = read["fields"]
         missing = [FIELD_LABEL[k] for k in ("full_name", "date_of_birth", "document_number") if not f.get(k)]
-        add("Main fields", "warn" if missing else "ok",
+        add("Main fields", rule["fields_missing"] if missing else "ok",
             f"Not read: {', '.join(missing)}." if missing else "Name, date of birth and document number read.")
         if read.get("uncertain"):
             names = [FIELD_LABEL.get(u, u) for u in read["uncertain"]]
-            add("Fields the model is unsure of", "warn", ", ".join(names) + ": check them against the image.")
+            add("Fields the model is unsure of", rule["uncertain"], ", ".join(names) + ": check them against the image.")
         exp = _iso(f.get("date_of_expiry"))
         if exp:
-            add("Expiry", "fail" if exp < today else "ok",
+            add("Expiry", rule["expired"] if exp < today else "ok",
                 f"Expired on {exp.isoformat()}." if exp < today else f"Valid until {exp.isoformat()}.")
         elif f.get("date_of_expiry"):
-            add("Expiry", "warn", f"Printed as {f['date_of_expiry']}: not a date the check can read.")
+            add("Expiry", rule["expiry_unreadable"], f"Printed as {f['date_of_expiry']}: not a date the check can read.")
         dob = _iso(f.get("date_of_birth"))
         if dob:
             age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-            add("Age", "warn" if age < min_age else "ok", f"{age} years old" + (f": under {min_age}." if age < min_age else "."))
+            add("Age", rule["under_age"] if age < min_age else "ok", f"{age} years old" + (f": under {min_age}." if age < min_age else "."))
         printed = read.get("mrz") or []
         if len(printed) == 2:
             parsed = ocr.parse(*_td3(printed))
@@ -225,13 +247,13 @@ def checks(read, today=None, min_age=18):
             else:
                 bad = [k for k, v in parsed["checks"].items() if not v]
                 by = read.get("mrz_by") or "the model's transcription"
-                add(f"MRZ check digits ({by})", "ok" if parsed["valid"] else "warn",
+                add(f"MRZ check digits ({by})", "ok" if parsed["valid"] else rule["mrz_digits"],
                     "All five add up." if parsed["valid"] else f"Do not add up: {', '.join(bad)} (a misread character, or a forged zone).")
                 agree, differ = _mrz_vs(read, parsed, "MRZ")
                 if read.get("fields_from_mrz"):         # the fields are the zone's: nothing printed to hold to it
                     pass
                 elif differ:
-                    add("Printed fields against the MRZ", "fail", "; ".join(differ) + ".")
+                    add("Printed fields against the MRZ", rule["mrz_differs"], "; ".join(differ) + ".")
                 elif agree:
                     add("Printed fields against the MRZ", "ok", f"{len(agree)} agree: {', '.join(agree)}.")
         elif len(printed) == 3:

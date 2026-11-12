@@ -39,7 +39,8 @@ SETTINGS_ID = "screening"
 SOP_KIND = "screen_sop"
 RESOLUTIONS = ("True match", "Possible match", "False positive")
 SUGGESTION = {"clear": "False positive", "true_match": "True match", "request_documents": "Possible match",
-              "escalate": "Possible match"}
+              "escalate": "Possible match"}          # the defaults: Settings holds the rule (ai_suggestion)
+IDV_FIELDS = (("Name", "full_name"), ("Date of birth", "date_of_birth"), ("Document number", "document_number"))
 DECISION_MODELS = ("claude-opus-4-8", "claude-sonnet-5-5", "gpt-5", "gemini-2.5-pro", "gemini-2.5-flash", "claude-haiku-4-5",
                    "gpt-5-mini")
 
@@ -56,6 +57,10 @@ def default_settings():
             # auto-verify (auto_verify below): which cases the AI closes without an analyst
             "auto_verify": True, "auto_no_hit": True, "auto_min_confidence": 90, "auto_dob_differs": True,
             "auto_person_lists": "Sanctions, PEP", "auto_qc_pct": 5,
+            # the rules: what each ID check finding does, what each AI answer suggests for a hit, whether
+            # auto-verify needs the ID verification's approval and what its read must agree on with the ID's
+            "check_rules": dict(id_scan.CHECK_RULES), "ai_suggestion": dict(SUGGESTION),
+            "auto_needs_idv": True, "idv_must_agree": [w for w, _ in IDV_FIELDS],
             # the services connected by API (adapters/): reading the ID, verifying it; the client's system sending IDs
             "azure": dict(azure_docintel.DEFAULTS), "didit": dict(didit.DEFAULTS), "intake_keys": [],
             # the models the gateway serves, which read and which decide, their prices; the reader's instructions
@@ -82,7 +87,15 @@ def settings_from(stored):
     s.update({k: v for k, v in stored.items() if k not in ("world_check", "azure", "didit")})
     for service in ("world_check", "azure", "didit"):
         s[service].update(stored.get(service) or {})
+    for rules in ("check_rules", "ai_suggestion"):  # a rule added since keeps its default
+        s[rules] = dict(default_settings()[rules], **(stored.get(rules) or {}))
     return s
+
+
+def suggestion(outcome, settings=None):
+    """The hit outcome an AI answer suggests (the rule on Settings)."""
+    chosen = ((settings or {}).get("ai_suggestion") or {}).get(outcome)
+    return chosen if chosen in RESOLUTIONS else SUGGESTION[outcome]
 
 
 def decision_models(settings=None):
@@ -257,7 +270,7 @@ def decide(case_id, who, hit, sop, settings):
     if outcome not in decision_model.OUTCOME_KEYS:
         return dict(base, status="failed", error=f"The model answered {outcome!r}, not one of the four outcomes.")
     price_in, price_out = model["price"]
-    return dict(base, status="done", outcome=outcome, label=decision_model.OUTCOME_LABEL[outcome], suggested=SUGGESTION[outcome],
+    return dict(base, status="done", outcome=outcome, label=decision_model.OUTCOME_LABEL[outcome], suggested=suggestion(outcome, settings),
                 confidence=ans.get("confidence"), reasons=[str(x)[:300] for x in (ans.get("reasons") or [])][:4],
                 dob_finding=str(ans.get("dob_finding", ""))[:300], request=str(ans.get("request", ""))[:300],
                 name_variance=decision_model._closest(ans.get("name_variance"), ref["name"]),
@@ -343,9 +356,11 @@ def progress(case):
 # What counts as safe is on the Settings page, not in code: whether a case
 # with no World-Check hit closes by itself, the AI's confidence a "false
 # positive" needs, whether the record's date of birth must differ, the lists
-# (words of the record's category) that always go to a person, and the share
-# of the cases the rule would close that still go to an analyst as a QC
-# sample. Nothing is closed while an ID check warns or fails.
+# (words of the record's category) that always go to a person, whether the ID
+# verification must approve the document and what its read must agree on,
+# and the share of the cases the rule would close that still go to an analyst
+# as a QC sample. Nothing is closed while an ID check says Fail or Check; what
+# makes a finding one or the other is the check rules, on Settings too.
 
 AUTO_ACTOR = "AI screening rule"
 
@@ -358,24 +373,28 @@ def _name_words(text):
     return {similarity.squash(p) for t in similarity.tokens(text or "") for p in t.split("-")} - {""}
 
 
-def idv_differences(case):
+def idv_differences(case, settings=None):
     """[(what, the ID verification's, the ID's)]: where the ID verification read
     the document differently from the ID (a different document, or the
-    sandbox's sample). A name with a word fewer (a middle name left out) is the
-    same name; a value missing on either side is not compared."""
+    sandbox's sample), on the fields Settings says must agree. A name with a
+    word fewer (a middle name left out) is the same name; a value missing on
+    either side is not compared."""
     idv, f = case.get("idv") or {}, (case.get("read") or {}).get("fields") or {}
+    agree = (settings or {}).get("idv_must_agree", [w for w, _ in IDV_FIELDS])
     out = []
     theirs, ours = _name_words(idv.get("full_name")), _name_words(f.get("full_name"))
-    if theirs and ours and not (theirs <= ours or ours <= theirs):
+    if "Name" in agree and theirs and ours and not (theirs <= ours or ours <= theirs):
         out.append(("Name", idv["full_name"], f["full_name"]))
-    for what, key in (("Date of birth", "date_of_birth"), ("Document number", "document_number")):
+    for what, key in IDV_FIELDS[1:]:
+        if what not in agree:
+            continue
         a, b = (similarity.squash(str(x or "").upper()) for x in (idv.get(key), f.get(key)))
         if a and b and a != b:
             out.append((what, idv[key], f[key]))
     return out
 
 
-def idv_approved(case):
+def idv_approved(case, settings=None):
     """(approved, why not): did the ID verification approve this very document?
     None set up (no result kept) counts as approved."""
     idv = case.get("idv") or {}
@@ -386,7 +405,7 @@ def idv_approved(case):
         return False, f"{who} did not approve the document"
     if didit.is_sandbox(idv):
         return False, f"{who}'s sandbox answered with its sample, not a check of the document"
-    diff = idv_differences(case)
+    diff = idv_differences(case, settings)
     if diff:
         return False, f"{who} read a different " + ", ".join(d[0].lower() for d in diff) + " from the ID's"
     return True, ""
@@ -399,11 +418,11 @@ def hit_is_safe(case, hit, settings):
     listed = next((x for x in _person_lists(settings) if x.lower() in (hit.get("category") or "").lower()), None)
     if case.get("verdict") != "Pass":
         return False, "an ID check did not pass"
-    idv = case.get("idv") or {}
-    approved, why = idv_approved(case)
-    if not approved:
+    idv, needs_idv = case.get("idv") or {}, settings.get("auto_needs_idv", True)
+    approved, why = idv_approved(case, settings)
+    if needs_idv and not approved:
         return False, why
-    if ai.get("status") != "done" or ai.get("outcome") != "clear":
+    if ai.get("status") != "done" or ai.get("suggested", SUGGESTION.get(ai.get("outcome"))) != "False positive":
         return False, "the AI did not say false positive"
     if not isinstance(conf, (int, float)) or conf < bar:
         return False, f"the AI was {conf}% sure, under the {bar}% bar"
@@ -412,7 +431,7 @@ def hit_is_safe(case, hit, settings):
     if listed:
         return False, f"a {listed} record always goes to an analyst"
     return True, (f"the AI said false positive at {conf}% (bar {bar}%)"
-                  + (f"; {idv['provider']} approved the document" if idv else "")
+                  + (f"; {idv['provider']} approved the document" if idv and needs_idv else "")
                   + ("; the record's date of birth differs from the ID's" if settings.get("auto_dob_differs") else "")
                   + (f"; not a {' or '.join(_person_lists(settings))} record" if _person_lists(settings) else "")
                   + "; every ID check passed")
@@ -436,12 +455,12 @@ def auto_verify(case, settings):
     pending = open_hits(case)
     if any((h.get("ai") or {}).get("status") not in ("done", "failed") for h in pending):
         return ""                                   # the AI has not answered on every hit yet
-    idv = case.get("idv") or {}
-    if idv.get("status") == "pending":
+    idv, needs_idv = case.get("idv") or {}, settings.get("auto_needs_idv", True)
+    if needs_idv and idv.get("status") == "pending":
         return ""                                   # nor the ID verification
     hits = sc.get("hits") or []
     if not hits:
-        if not settings.get("auto_no_hit") or case.get("verdict") != "Pass" or not idv_approved(case)[0]:
+        if not settings.get("auto_no_hit") or case.get("verdict") != "Pass" or (needs_idv and not idv_approved(case, settings)[0]):
             return ""
         whole, safe = True, []
     else:

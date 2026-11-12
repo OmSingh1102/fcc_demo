@@ -707,6 +707,52 @@ class ScreeningBookPageTests(unittest.TestCase):
         page = qc.post("/screening/settings", data=no_decider, follow_redirects=True).data.decode("utf-8")
         self.assertIn("Keep at least one model that reads the ID and one that decides hits", page)
 
+    def test_the_rules_are_settings(self):
+        # what each ID check finding does: an expired ID fails by default, a rule can make it a note only
+        old = dict(a_read(), fields=dict(a_read()["fields"], date_of_expiry="2020-01-01"))
+        self.assertEqual(id_scan.verdict({"read": old, "checks": id_scan.checks(old)}), "Fail")
+        noted = id_scan.checks(old, rules={"expired": "info", "nonsense": "fail", "under_age": "maybe"})
+        self.assertEqual((next(c for c in noted if c["label"] == "Expiry")["state"], id_scan.verdict({"read": old, "checks": noted})),
+                         ("info", "Pass"))
+        # Settings keeps the rules; a wrong value saves nothing
+        qc = self.client("leah.fernandez")
+        page = qc.get("/screening/settings").data.decode("utf-8")
+        for needle in ('id="settings-rules"', 'name="rule_expired"', 'name="suggest_escalate"', 'name="auto_needs_idv"',
+                       'name="idv_agree_date_of_birth"'):
+            self.assertIn(needle, page)
+        form = {"rules_form": "1", "rule_expired": "warn", "suggest_escalate": "True match"}
+        qc.post("/screening/settings", data=form)
+        s = fcc.SCREEN_SETTINGS
+        self.assertEqual((s["check_rules"]["expired"], s["check_rules"]["mrz_differs"], s["ai_suggestion"]["escalate"]),
+                         ("warn", "fail", "True match"))
+        bad = qc.post("/screening/settings", data=dict(form, rule_expired="ignore"), follow_redirects=True).data.decode("utf-8")
+        self.assertIn("Each ID check finding", bad)
+        self.assertEqual(s["check_rules"]["expired"], "warn")
+        self.assertEqual(id_screening.settings_from({"check_rules": {"expired": "info"}})["check_rules"]["mrz_differs"], "fail")
+        # the reader's checks follow them
+        with mock.patch.object(id_scan, "model_ready", lambda: True), \
+                mock.patch.object(id_scan, "_model_read", lambda jpeg, model, system=None: (old, {"model": model["id"]})):
+            result = fcc._read_id(b"jpeg", s["reader_model"])
+        self.assertEqual(id_scan.verdict(result), "Check")
+        # the AI's answer suggests what the rule says
+        self.assertEqual((id_screening.suggestion("escalate", s), id_screening.suggestion("clear", s)), ("True match", "False positive"))
+        # Didit: what its read must agree on, and whether auto-verify needs it at all
+        case = {"id": "SCAN-1", "verdict": "Pass", "status": "open", "read": a_read(),
+                "idv": {"provider": "Didit", "status": "Approved", "full_name": "ASHISH UPADHYAY", "date_of_birth": "1970-01-01"}}
+        hit = {"uid": "WC-1", "category": "Adverse Media", "dob_result": "Not matched",
+               "ai": {"status": "done", "outcome": "clear", "suggested": "False positive", "confidence": 95}}
+        self.assertIn("date of birth", id_screening.hit_is_safe(case, hit, s)[1])
+        self.assertTrue(id_screening.hit_is_safe(case, hit, dict(s, idv_must_agree=["Name", "Document number"]))[0])
+        declined = dict(case, idv=dict(case["idv"], status="Declined"))
+        self.assertFalse(id_screening.hit_is_safe(declined, hit, s)[0])
+        self.assertTrue(id_screening.hit_is_safe(declined, hit, dict(s, auto_needs_idv=False))[0])
+        self.assertFalse(id_screening.hit_is_safe(case, dict(hit, ai=dict(hit["ai"], suggested="Possible match")),
+                                                  dict(s, idv_must_agree=[]))[0])
+        # the auto-verify card saves Didit's part
+        qc.post("/screening/settings", data={"auto_form": "1", "auto_min_confidence": "90", "auto_qc_pct": "5",
+                                             "idv_agree_full_name": "1"})
+        self.assertEqual((s["auto_needs_idv"], s["idv_must_agree"]), (False, ["Name"]))
+
     def test_the_team_and_the_password_are_settings(self):
         before = list(fcc.ANALYSTS)
         self.addCleanup(lambda: (fcc.ANALYSTS.__setitem__(slice(None), before), fcc._rebuild_indexes()))

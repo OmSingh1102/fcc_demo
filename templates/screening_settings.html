@@ -147,6 +147,33 @@
     </div>
 </div>
 
+<div class="card mt-12 pad-0" id="settings-rules">
+    <input type="hidden" name="rules_form" value="1">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Rules: what each finding does</div>
+        <div class="card-sub">the code only measures (is the ID expired, do the MRZ digits add up, what the AI answered); what that does to the case is set here. Applies to IDs read and hits decided from now on</div></div></div>
+    <table class="tbl" id="check-rules">
+        <thead><tr><th>When the ID check finds</th><th>the ID check</th></tr></thead>
+        <tbody>
+        {% for key, label, default in check_rules %}
+        <tr><td>{{ label }}</td>
+            <td><select class="input input-sm" name="rule_{{ key }}"{% if not can_edit %} disabled{% endif %}>{% for v, text in severities %}<option value="{{ v }}"{% if s.check_rules[key] == v %} selected{% endif %}>{{ text }}</option>{% endfor %}</select>
+                {% if s.check_rules[key] != default %}<span class="tiny muted">default: {{ severity_label[default] }}</span>{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <table class="tbl mt-12" id="suggestion-rules">
+        <thead><tr><th>When the AI answers on a hit</th><th>it suggests</th></tr></thead>
+        <tbody>
+        {% for key, label in ai_answers %}
+        <tr><td>{{ label }}</td>
+            <td><select class="input input-sm" name="suggest_{{ key }}"{% if not can_edit %} disabled{% endif %}>{% for r in resolutions %}<option{% if s.ai_suggestion[key] == r %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>
+                {% if s.ai_suggestion[key] != default_suggestion[key] %}<span class="tiny muted">default: {{ default_suggestion[key] }}</span>{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="card-body small muted"><b>Fail</b>: the ID check fails and the case is never auto-verified. <b>Check</b>: an analyst looks at the ID before the case closes. <b>Note only</b>: shown on the case; the check can still pass. Auto-verify clears a hit only when the AI's answer suggests <b>False positive</b>.</div>
+</div>
+
 <div class="card mt-12" id="settings-auto">
     <div class="card-head"><div><div class="card-title">Auto-verify: the AI closes the safe cases</div>
         <div class="card-sub">what the AI may close without an analyst; everything else goes to an analyst. Applies as the AI answers from now on</div></div>
@@ -162,6 +189,11 @@
             <span class="tiny muted">or more, and every ID check passed</span></label>
         <label><span><input type="checkbox" name="auto_dob_differs" value="1"{% if s.auto_dob_differs %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> and the record's date of birth differs from the ID's</span>
             <span class="tiny muted">a record with no date, or the same date or year, goes to an analyst</span></label>
+        <label><span><input type="checkbox" name="auto_needs_idv" value="1"{% if s.auto_needs_idv %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> and Didit approved this very document</span>
+            <span class="tiny muted">when Didit is on; off: Didit's answer is shown but does not hold a case</span></label>
+        <div class="field">Didit's read must agree with the ID's on
+            <span class="row" style="gap:12px;font-weight:400">{% for what, key in idv_fields %}<span><input type="checkbox" name="idv_agree_{{ key }}" value="1" id="idv-agree-{{ key }}"{% if what in s.idv_must_agree %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> <label for="idv-agree-{{ key }}">{{ what }}</label></span>{% endfor %}</span>
+            <span class="tiny muted" style="font-weight:400">or Didit's "Approved" is of another document; a field missing on either side is not compared</span></div>
         <label>Lists that always go to an analyst
             <input class="input" name="auto_person_lists" value="{{ s.auto_person_lists }}"{% if not can_edit %} disabled{% endif %}>
             <span class="tiny muted">words of the record's category, comma-separated (Sanctions, PEP)</span></label>

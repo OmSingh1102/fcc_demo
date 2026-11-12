@@ -2098,20 +2098,20 @@ def _read_id(jpeg, reader):
             read, used = ocr.id_read(jpeg, [k for k, _ in id_scan.FIELDS])
         except ocr.OcrError as exc:
             return {"read": None, "model": None, "checks": [], "error": str(exc)[:300]}
-        return {"read": read, "model": used, "checks": id_scan.checks(read, min_age=SCREEN_SETTINGS["min_age"]), "error": ""}
+        return {"read": read, "model": used, "checks": id_scan.checks(read, min_age=SCREEN_SETTINGS["min_age"], rules=SCREEN_SETTINGS.get("check_rules")), "error": ""}
     if reader != AZURE_READER["id"]:
         return id_scan.scan(jpeg, reader, SCREEN_SETTINGS["min_age"], SCREEN_SETTINGS.get("models"),
-                            SCREEN_SETTINGS.get("reader_instructions"))
+                            SCREEN_SETTINGS.get("reader_instructions"), SCREEN_SETTINGS.get("check_rules"))
     cfg = SCREEN_SETTINGS["azure"]
     why = "its endpoint and key are not on Settings"
     if azure_docintel.configured(cfg):
         try:
             read, used = azure_docintel.read(cfg, jpeg, [k for k, _ in id_scan.FIELDS])
-            return {"read": read, "model": used, "checks": id_scan.checks(read, min_age=SCREEN_SETTINGS["min_age"]), "error": ""}
+            return {"read": read, "model": used, "checks": id_scan.checks(read, min_age=SCREEN_SETTINGS["min_age"], rules=SCREEN_SETTINGS.get("check_rules")), "error": ""}
         except azure_docintel.AzureError as exc:
             why = str(exc)
     result = id_scan.scan(jpeg, None, SCREEN_SETTINGS["min_age"], SCREEN_SETTINGS.get("models"),
-                          SCREEN_SETTINGS.get("reader_instructions"))
+                          SCREEN_SETTINGS.get("reader_instructions"), SCREEN_SETTINGS.get("check_rules"))
     result["fallback"] = f"Azure AI Document Intelligence did not read the ID ({why}): the AI model read it instead."
     return result
 
@@ -2256,7 +2256,8 @@ def scan_result(scan_id):
     rec = _scan(scan_id)
     return render_template("scan_result.html", s=rec, fields=id_scan.FIELDS, points=id_screening.progress(rec),
                            didit_ready=didit.configured(SCREEN_SETTINGS["didit"]), idv_sandbox=didit.is_sandbox(rec.get("idv") or {}),
-                           idv_diffs=id_screening.idv_differences(rec),
+                           idv_diffs=id_screening.idv_differences(rec, SCREEN_SETTINGS),
+                           idv_counts=SCREEN_SETTINGS.get("auto_needs_idv", True),
                            outcomes=id_screening.ALERT_OUTCOME, sop=id_screening.sop_current(_sop_stored()))
 
 
@@ -2397,9 +2398,9 @@ def _scan_export(rec):
             "closed": rec.get("closed"), "reference": rec.get("reference", ""), "uploaded_by": rec.get("by", ""),
             "auto_verified": bool((rec.get("closed") or {}).get("auto")), "qc_sample": bool(rec.get("qc_sample")),
             "id_verification": rec.get("idv") and dict(rec["idv"], sandbox=didit.is_sandbox(rec["idv"]),
-                                                       approved=id_screening.idv_approved(rec)[0],
+                                                       approved=id_screening.idv_approved(rec, SCREEN_SETTINGS)[0],
                                                        differs=[{"field": w, "verification": a, "id": b}
-                                                                for w, a, b in id_screening.idv_differences(rec)]),
+                                                                for w, a, b in id_screening.idv_differences(rec, SCREEN_SETTINGS)]),
             "reader_fallback": rec.get("fallback", "")}
     return body
 
@@ -2474,8 +2475,9 @@ def screening_settings():
         if not (0 <= examples <= 12 and 50 <= threshold <= 100 and 1 <= max_hits <= 20):
             flash("Examples 0-12, name score 50-100, hits 1-20.", "error")
             return redirect(url_for("screening_settings"))
-        if f.get("checks_form") or f.get("team_form"):  # the checks and lists card, the team card
-            err = (f.get("checks_form") and _checks_update(s, f)) or (f.get("team_form") and _team_update(s, f))
+        if f.get("checks_form") or f.get("team_form") or f.get("rules_form"):  # the checks and lists, team, rules cards
+            err = ((f.get("checks_form") and _checks_update(s, f)) or (f.get("team_form") and _team_update(s, f))
+                   or (f.get("rules_form") and _rules_update(s, f)))
             if err:
                 flash(err, "error")
                 return redirect(url_for("screening_settings"))
@@ -2488,6 +2490,8 @@ def screening_settings():
             if not (50 <= confidence <= 100 and 0 <= qc_pct <= 100):
                 flash("Confidence 50-100, QC sample 0-100%.", "error")
                 return redirect(url_for("screening_settings"))
+            s.update(auto_needs_idv=bool(f.get("auto_needs_idv")),
+                     idv_must_agree=[w for w, key in id_screening.IDV_FIELDS if f.get("idv_agree_" + key)])
             s.update(auto_verify=bool(f.get("auto_verify")), auto_no_hit=bool(f.get("auto_no_hit")),
                      auto_dob_differs=bool(f.get("auto_dob_differs")), auto_min_confidence=confidence, auto_qc_pct=qc_pct,
                      auto_person_lists=", ".join(x.strip() for x in f.get("auto_person_lists", "").split(",") if x.strip()))
@@ -2527,6 +2531,9 @@ def screening_settings():
                            providers=MODEL_PROVIDERS, reader_instructions=s.get("reader_instructions") or id_scan.SYSTEM,
                            team=s.get("team") or [{"name": a["name"], "email": a["email"], "roles": a["roles"]} for a in ANALYSTS],
                            team_roles=TEAM_ROLES,
+                           check_rules=id_scan.RULES, severities=id_scan.SEVERITIES, severity_label=dict(id_scan.SEVERITIES),
+                           ai_answers=decision_model.OUTCOMES, default_suggestion=id_screening.SUGGESTION,
+                           resolutions=id_screening.RESOLUTIONS, idv_fields=id_screening.IDV_FIELDS,
                            source=id_screening.source_label(s), can_edit="QC" in _levels(), model_ready=id_scan.model_ready(),
                            qc_names=_analysts_with(["QC"], _tenant()), watchlist_size=len(watchlist.profiles()))
 
@@ -2600,6 +2607,18 @@ def _team_update(s, f):
         s.update(password_hash=generate_password_hash(password), password_changed_at=dates.now_str(), password_changed_by=_actor())
     elif f.get("demo_password"):
         s.update(password_hash="", password_changed_at="", password_changed_by="")
+    return ""
+
+
+def _rules_update(s, f):
+    """What each ID check finding does and what each AI answer suggests, from the form ("" when saved, else what is wrong)."""
+    rules = {k: f.get(f"rule_{k}", s["check_rules"].get(k, default)) for k, _, default in id_scan.RULES}
+    if any(v not in dict(id_scan.SEVERITIES) for v in rules.values()):
+        return "Each ID check finding fails the check, sends the case to an analyst, or is a note only."
+    suggest = {k: f.get(f"suggest_{k}", s["ai_suggestion"].get(k)) for k in id_screening.SUGGESTION}
+    if any(v not in id_screening.RESOLUTIONS for v in suggest.values()):
+        return "Each AI answer suggests a true match, a possible match or a false positive."
+    s.update(check_rules=rules, ai_suggestion=suggest)
     return ""
 
 

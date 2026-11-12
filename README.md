@@ -356,9 +356,20 @@ when the AI said false positive at the confidence set (90% by default), the
 record's date of birth differs from the ID's, and the record's category is
 not one of the lists that always go to an analyst (Sanctions, PEP); the case
 closes when every hit is cleared. Nothing is closed while an ID check warns
-or fails. A share of the cases the rule would close (5% by default, fixed by
-the case ID) is left for an analyst as a QC sample. All of it is on
-Settings. The case list has *Needs an analyst*, *Auto-verified* and *Closed
+or fails, nor (unless Settings says otherwise) while Didit has not approved
+this very document. A share of the cases the rule would close (5% by
+default, fixed by the case ID) is left for an analyst as a QC sample. All of
+it is on Settings.
+**Rules, not code.** The code only measures (is the ID expired, do the MRZ
+check digits add up, what the AI answered); what each finding does is a rule
+on Settings (*Rules: what each finding does*): for each of the eleven ID
+check findings (`id_scan.RULES`) whether it fails the check, sends the case
+to an analyst, or is a note only; for each of the AI's four answers which
+hit outcome it suggests (auto-verify clears only a suggested false
+positive); and, on the auto-verify card, whether Didit must approve the
+document and which fields its read must agree on (name, date of birth,
+document number). Today's behaviour is the default; a change applies to IDs
+read and hits decided from then on. The case list has *Needs an analyst*, *Auto-verified* and *Closed
 by an analyst*; the case and the name-screening page say what the rule
 cleared and why; Model evaluation counts the rule's clears apart and does
 not score them (no analyst gave them an answer).

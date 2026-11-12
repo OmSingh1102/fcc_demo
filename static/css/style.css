@@ -1077,6 +1077,6 @@ table.screen-compare td:last-child { width: 110px; text-align: right; }
 .sop-version { padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
 .sop-version summary { cursor: pointer; }
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 16px; }
-.settings-grid > label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; }
+.settings-grid > label, .settings-grid > .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; }
 .settings-grid > label .input { font-weight: 400; }
 @media (max-width: 700px) { table.screen-compare td:first-child { width: auto; } }
