@@ -30,7 +30,8 @@ if StateStore.path != os.environ["FCC_STATE_DB"]:
     StateStore.path = os.environ["FCC_STATE_DB"]
 import app as fcc  # noqa: E402
 from fincrime import benchmark, decision_model, id_screening, upload_eval, watchlist  # noqa: E402
-from fincrime.adapters import world_check  # noqa: E402
+from fincrime.adapters import didit, world_check  # noqa: E402
+import json as _json  # noqa: E402
 from fincrime.documents import id_scan  # noqa: E402
 from fincrime.filebook import llm  # noqa: E402
 
@@ -48,6 +49,24 @@ def a_read(name="ASHISH UPADHYAY", surname="UPADHYAY", given="ASHISH", dob="1962
                   document_number="S3321051", date_of_expiry="2033-06-02")
     return {"document_type": "Passport", "issuing_country": "India", "readable": True, "problems": [], "fields": fields,
             "mrz": [], "uncertain": [], "note": ""}
+
+
+def an_aml_answer(dob_score=100, scenario_hits=None):
+    """Didit's AML answer, as its API reference shows it (trimmed)."""
+    hits = scenario_hits if scenario_hits is not None else [
+        {"id": "hit-002", "match_score": 88.0, "risk_score": 47.5, "caption": "Ashish K. Upadhyay", "datasets": ["PEP Level 2"],
+         "review_status": "False Positive", "properties": {"name": ["Ashish K. Upadhyay"], "birthDate": ["1961"]},
+         "pep_matches": [{"list_name": ["Every Politician"], "pep_position": "Member of a state assembly"}],
+         "score_breakdown": {"name_score": 80, "name_weight_normalized": 60.0, "dob_score": 50, "dob_weight_normalized": 25.0,
+                             "country_score": 100, "country_weight_normalized": 15.0, "document_number_match_type": "NEUTRAL"}},
+        {"id": "hit-001", "url": "https://sanctions.example.org/entry/123", "match_score": 97.0, "risk_score": 86.0,
+         "caption": "ASHISH UPADHYAY", "datasets": ["Sanctions"], "review_status": "Unreviewed",
+         "properties": {"name": ["ASHISH UPADHYAY"], "alias": ["A. Upadhyay"], "birthDate": ["1970-01-01"], "nationality": ["India"]},
+         "sanction_matches": [{"list_name": ["Example Sanctions List"], "reason": "Fraud.", "sanction_program": "Example"}],
+         "score_breakdown": {"name_score": 95, "name_weight_normalized": 60.0, "dob_score": dob_score, "dob_weight_normalized": 25.0,
+                             "country_score": 100, "country_weight_normalized": 15.0, "document_number_match_type": "NEUTRAL"}}]
+    return {"request_id": "a1b2c3d4", "aml": {"status": "In Review" if hits else "Approved", "total_hits": len(hits), "hits": hits,
+                                              "score": 86.0 if hits else 0, "warnings": [{"short_description": "Possible match found in AML screening"}] if hits else []}}
 
 
 class WatchlistTests(unittest.TestCase):
@@ -192,7 +211,7 @@ class WorldCheckOneTests(unittest.TestCase):
                 world_check.groups(self.cfg)
         self.assertIn("401", str(e.exception))
         with mock.patch.object(world_check, "_send", lambda req: (500, b"boom")):
-            hits, source, error, _ = id_screening.search(WHO, {"world_check": self.cfg, "max_hits": 5, "name_threshold": 75})
+            hits, source, error, _, _ = id_screening.search(WHO, {"world_check": self.cfg, "max_hits": 5, "name_threshold": 75})
         self.assertEqual((hits, source), ([], "World-Check One"))
         self.assertIn("500", error)
 
@@ -752,6 +771,84 @@ class ScreeningBookPageTests(unittest.TestCase):
         qc.post("/screening/settings", data={"auto_form": "1", "auto_min_confidence": "90", "auto_qc_pct": "5",
                                              "idv_agree_full_name": "1"})
         self.assertEqual((s["auto_needs_idv"], s["idv_must_agree"]), (False, ["Name"]))
+
+    def test_didit_aml_screening_is_a_third_place_to_screen(self):
+        cfg = dict(didit.DEFAULTS, api_key="key", aml_adverse_media=True)
+        who = id_screening.person(a_read())
+        # what Didit is sent: the ID's name, date of birth, two-letter nationality, number, and the case
+        body = didit.aml_query(who, "SCAN-1", cfg)
+        self.assertEqual(body, {"full_name": "ASHISH UPADHYAY", "entity_type": "person", "save_api_request": True,
+                                "date_of_birth": "1962-06-29", "nationality": "IN", "document_number": "S3321051",
+                                "vendor_data": "SCAN-1", "include_adverse_media": True})
+        self.assertNotIn("nationality", didit.aml_query(dict(who, nationality="INDIAN")))
+        # its answer as console hits, best match first, with Didit's scores beside them
+        sent = []
+        with mock.patch.object(didit, "_send", lambda req: sent.append(req) or (200, _json.dumps(an_aml_answer(-100)).encode())):
+            hits, aml = didit.aml_screen(cfg, who, 5, "SCAN-1")
+        self.assertEqual((sent[0].full_url, sent[0].get_header("X-api-key")), ("https://verification.didit.me/v3/aml/", "key"))
+        top = hits[0]
+        self.assertEqual((top["uid"], top["name"], top["category"], top["score"], top["risk_score"], top["didit_review"]),
+                         ("hit-001", "ASHISH UPADHYAY", "Sanctions", 97, 86.0, "Unreviewed"))
+        self.assertEqual((top["dob_result"], top["country_result"], top["dob_text"], top["aka"], top["source"]),
+                         ("Not matched", "Matched", "1970-01-01", ["A. Upadhyay"], "Didit AML"))
+        self.assertIn("Example Sanctions List", top["narrative"])
+        self.assertEqual((hits[1]["dob_result"], hits[1]["didit_review"]), ("Partly matched", "False Positive"))
+        self.assertEqual((aml["status"], aml["score"], aml["request_id"], aml["cost"], aml["sandbox"]),
+                         ("In Review", 86.0, "a1b2c3d4", 0.2, False))
+        # refusals say why
+        with mock.patch.object(didit, "_send", lambda req: (403, b'{"error": "You don\'t have enough credits"}')):
+            with self.assertRaisesRegex(didit.DiditError, "no credits"):
+                didit.aml_screen(cfg, who)
+        # the free test: an empty name, refused after the key and credits are checked
+        with mock.patch.object(didit, "_send", lambda req: sent.append(req) or (400, b'{"full_name": ["too short"]}')):
+            self.assertIn("ready", didit.aml_test(cfg))
+        self.assertEqual(_json.loads(sent[-1].data), {"full_name": ""})
+        with mock.patch.object(didit, "_send", lambda req: (401, b"expired")):
+            with self.assertRaisesRegex(didit.DiditError, "401"):
+                didit.aml_test(cfg)
+
+        # Settings: where the console screens; without the Didit key, the stand-in
+        s = fcc.SCREEN_SETTINGS
+        qc = self.client("leah.fernandez")
+        qc.post("/screening/settings", data={"screening_source": "didit_aml"})
+        self.assertEqual((s["screening_source"], id_screening.source(s)), ("didit_aml", "stand-in"))
+        self.assertIn("is chosen, but its key is not on Settings", id_screening.source_label(s))
+        s["didit"].update(api_key="key", auto=False)
+        self.assertEqual(id_screening.source(s), "didit_aml")
+        page = qc.get("/screening/settings").data.decode("utf-8")
+        for needle in ('id="screening-source"', 'name="dd_aml_adverse_media"', 'name="dd_aml_sandbox_scenario"', "Live Didit AML",
+                       'id="settings-didit-aml-test"'):
+            self.assertIn(needle, page)
+        with mock.patch.object(didit, "_send", lambda req: (400, b"{}")):
+            self.assertIn("AML screening is ready", qc.post("/screening/settings/didit-aml-test", follow_redirects=True).data.decode("utf-8"))
+        # an upload is screened on Didit; the AI sees Didit's scores; the case page says where it screened
+        with mock.patch.object(didit, "_send", lambda req: (200, _json.dumps(an_aml_answer(-100)).encode())):
+            sid = self.upload(self.client(), a_read())
+        rec = fcc._scan(sid)
+        sc = rec["screening"]
+        self.assertEqual((sc["source"], sc["case_system_id"], [h["uid"] for h in sc["hits"]], sc["hits"][0]["strength"]),
+                         ("Didit AML", "a1b2c3d4", ["hit-001", "hit-002"], "Strong"))
+        self.assertIn("Didit's own scoring: match 97 of 100, risk 86.0 of 100; Didit marked it Unreviewed",
+                      id_screening.facts(sc["person"], sc["hits"][0]))
+        page = self.client().get(f"/scan/{sid}").data.decode("utf-8")
+        self.assertIn('id="didit-aml"', page)
+        self.assertIn("In Review", page)
+        self.assertEqual(self.client().get(f"/scan/{sid}/screening").status_code, 200)
+        # a Didit error is the case's screening error
+        with mock.patch.object(didit, "_send", lambda req: (500, b"down")):
+            sid = self.upload(self.client(), a_read())
+        self.assertIn("Didit answered 500", fcc._scan(sid)["screening"]["error"])
+        # a sandbox scenario's fixed answer never closes a case, even with no hit
+        s.update(auto_verify=True, auto_qc_pct=0)
+        s["didit"]["aml_sandbox_scenario"] = "decline_aml_hit"
+        with mock.patch.object(didit, "_send", lambda req: (200, _json.dumps(an_aml_answer(scenario_hits=[])).encode())):
+            sid = self.upload(self.client(), a_read())
+        rec = fcc._scan(sid)
+        self.assertEqual((rec["screening"]["aml"]["sandbox"], rec["screening"]["aml"]["cost"], rec["status"]), (True, 0.0, "open"))
+        s["didit"]["aml_sandbox_scenario"] = ""
+        with mock.patch.object(didit, "_send", lambda req: (200, _json.dumps(an_aml_answer(scenario_hits=[])).encode())):
+            sid = self.upload(self.client(), a_read())
+        self.assertEqual(fcc._scan(sid)["status"], "closed")                                 # a live answer with no hit does
 
     def test_the_team_and_the_password_are_settings(self):
         before = list(fcc.ANALYSTS)

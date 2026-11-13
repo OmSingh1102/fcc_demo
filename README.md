@@ -266,7 +266,19 @@ Start from an ID document, with no CSV: every uploaded ID becomes a case.
    entered on **Settings**, the same step calls World-Check One instead
    (signed with HMAC-SHA256 as LSEG documents; written from the public
    description and not yet run against the service: the host and paths are
-   settings, and *Test connection* calls the groups list).
+   settings, and *Test connection* calls the groups list). Or, chosen under
+   *Screen on* (Settings), **Didit AML screening** with the Didit key
+   (`didit.aml_screen`, `POST /v3/aml/`): the ID's name, date of birth,
+   two-letter nationality (`fincrime/data/countries.py`) and document
+   number against Didit's sanctions, PEP, warning and (if ticked) news
+   lists. Each Didit hit becomes a console hit with Didit's match and risk
+   scores and its own review status beside it (the date of birth and
+   country results come from Didit's score breakdown), and the AI decides
+   it under the SOP as it does a World-Check hit. About $0.20 a screening
+   (a setting); *Test Didit AML* checks the key and the credits by sending
+   an empty name, which Didit refuses unbilled. A sandbox scenario's fixed
+   answer is free and never closes a case. Checked against the live
+   account with that free test on 2026-11-13; no paid screening run yet.
 3. *Decide.* For each hit, a model decides as the Model evaluation's decision
    model does: the **screening SOP** (the files' v1–v3, then any version
    saved on the Screening SOP page) as instructions, the client's variance

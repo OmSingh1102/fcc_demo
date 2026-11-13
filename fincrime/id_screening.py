@@ -41,6 +41,7 @@ RESOLUTIONS = ("True match", "Possible match", "False positive")
 SUGGESTION = {"clear": "False positive", "true_match": "True match", "request_documents": "Possible match",
               "escalate": "Possible match"}          # the defaults: Settings holds the rule (ai_suggestion)
 IDV_FIELDS = (("Name", "full_name"), ("Date of birth", "date_of_birth"), ("Document number", "document_number"))
+SOURCES = {"stand-in": "Stand-in World-Check", "world_check": "World-Check One", "didit_aml": "Didit AML screening"}
 DECISION_MODELS = ("claude-opus-4-8", "claude-sonnet-5-5", "gpt-5", "gemini-2.5-pro", "gemini-2.5-flash", "claude-haiku-4-5",
                    "gpt-5-mini")
 
@@ -50,6 +51,8 @@ DECISION_MODELS = ("claude-opus-4-8", "claude-sonnet-5-5", "gpt-5", "gemini-2.5-
 def default_settings():
     return {"id": SETTINGS_ID, "reader_model": id_scan.DEFAULT_MODEL, "decision_model": "claude-opus-4-8", "examples": 6,
             "name_threshold": 65, "max_hits": 5, "world_check": dict(world_check.DEFAULTS),
+            # where the console screens (SOURCES; "": World-Check One once its key is entered, else the stand-in)
+            "screening_source": "",
             # the age under which the ID check warns (0: none); the stand-in's match strengths by name score
             "min_age": 18, "strength_bands": dict(watchlist.BANDS),
             # what an analyst picks from when giving a hit its outcome
@@ -107,13 +110,29 @@ def decision_models(settings=None):
     return [m for m in settings["models"] if m.get("decides")]
 
 
+def source(settings):
+    """Where the console screens: the choice on Settings, when its key is
+    entered; the stand-in otherwise."""
+    wc_ready = world_check.configured(settings.get("world_check"))
+    chosen = settings.get("screening_source") or ("world_check" if wc_ready else "stand-in")
+    ready = {"stand-in": True, "world_check": wc_ready, "didit_aml": didit.configured(settings.get("didit"))}
+    return chosen if ready.get(chosen) else "stand-in"
+
+
 def live(settings):
-    return world_check.configured(settings["world_check"])
+    return source(settings) == "world_check"
 
 
 def source_label(settings):
-    return ("World-Check One (live, by its API)" if live(settings)
-            else "Stand-in World-Check: the World-Check records of the reconciliation log's 1,000 cases")
+    src = source(settings)
+    if src == "didit_aml":
+        return ("Didit AML screening (live, by its API: sanctions, PEP, warnings"
+                + (", adverse media" if (settings.get("didit") or {}).get("aml_adverse_media") else "") + ")")
+    if src == "world_check":
+        return "World-Check One (live, by its API)"
+    wanted = settings.get("screening_source")
+    return ("Stand-in World-Check: the World-Check records of the reconciliation log's 1,000 cases"
+            + (f" ({SOURCES[wanted]} is chosen, but its key is not on Settings)" if wanted in ("world_check", "didit_aml") else ""))
 
 
 # ── the person on the ID ─────────────────────────────────────────────────────
@@ -130,16 +149,25 @@ def person(read):
             "mrz1": mrz[0] if mrz else ""}
 
 
-def search(who, settings):
-    """(hits, source, error, case_system_id): the candidates for the person."""
+def search(who, settings, reference=""):
+    """(hits, source, error, case_system_id, Didit's screening or None): the
+    candidates for the person, from where Settings says to screen."""
+    if source(settings) == "didit_aml":
+        try:
+            hits, aml = didit.aml_screen(settings["didit"], who, int(settings["max_hits"]), reference)
+        except didit.DiditError as exc:
+            return [], "Didit AML", str(exc), "", None
+        for h in hits:
+            h["strength"] = watchlist.strength(h["score"], settings.get("strength_bands"))
+        return hits, "Didit AML", "", aml["request_id"], aml
     if live(settings):
         try:
             hits, csid = world_check.screen(settings["world_check"], who, int(settings["max_hits"]))
-            return hits, "World-Check One", "", csid
+            return hits, "World-Check One", "", csid, None
         except world_check.WorldCheckError as exc:
-            return [], "World-Check One", str(exc), ""
+            return [], "World-Check One", str(exc), "", None
     return (watchlist.search(who, int(settings["name_threshold"]), int(settings["max_hits"]), settings.get("strength_bands")),
-            "stand-in", "", "")
+            "stand-in", "", "", None)
 
 
 # ── the SOP ──────────────────────────────────────────────────────────────────
@@ -189,12 +217,16 @@ def facts(who, hit):
         f"  MRZ line 1: {who['mrz1'] or 'none'}",
         "Secondary ID: not provided",
         "Proof of address: not provided",
-        f"World-Check record {hit['uid']}: {hit['name']}" + (f" (AKA: {', '.join(hit['aka'])})" if hit.get("aka") else ""),
+        f"{'Didit AML' if hit.get('source') == 'Didit AML' else 'World-Check'} record {hit['uid']}: {hit['name']}"
+        + (f" (AKA: {', '.join(hit['aka'])})" if hit.get("aka") else ""),
         f"  listed date of birth: {hit['dob_text']}",
         f"  listed places: {hit['places']}",
         f"  category: {hit['category']}; name match {hit['strength']} ({hit['score']}%)",
         f"  trigger: {hit['narrative']}",
     ]
+    if hit.get("source") == "Didit AML":
+        lines.append(f"  Didit's own scoring: match {hit['score']} of 100, risk {hit.get('risk_score')} of 100; Didit marked it "
+                     f"{hit.get('didit_review') or 'Unreviewed'}" + ("; the same document number is on the record" if hit.get("document_match") == "MATCH" else ""))
     return "\n".join(lines)
 
 
@@ -452,6 +484,8 @@ def auto_verify(case, settings):
     sc = case.get("screening") or {}
     if not settings.get("auto_verify") or case.get("status") == "closed" or not sc or sc.get("error"):
         return ""
+    if (sc.get("aml") or {}).get("sandbox"):
+        return ""                                   # a sandbox's fixed answer screened no one
     pending = open_hits(case)
     if any((h.get("ai") or {}).get("status") not in ("done", "failed") for h in pending):
         return ""                                   # the AI has not answered on every hit yet
@@ -551,7 +585,7 @@ def wc_view(case):
             "primary_name": who.get("name", ""), "gender": {"M": "Male", "F": "Female"}.get((who.get("sex") or "").upper()[:1], ""),
             "dob": dob, "group": "ID screening", "assignee": "Case Unassigned", "rating": "Not Rated", "ongoing_screening": "Off",
             "last_updated": max([at] + [h["resolution"]["at"] for h in hits if h.get("resolution")]),
-            "case_details": {"Source": "World-Check One" if sc.get("source") == "World-Check One" else "Stand-in (reconciliation log)",
+            "case_details": {"Source": sc.get("source") if sc.get("source") in ("World-Check One", "Didit AML") else "Stand-in (reconciliation log)",
                              "DocumentType": who.get("document_type", ""), "DocumentNo": who.get("document_number", ""),
                              "Nationality": who.get("nationality", ""), "IssuingCountry": who.get("issuing_country", ""),
                              "UploadedBy": case.get("by", ""), "CaseStatus": "Closed" if case.get("status") == "closed" else "Open"},

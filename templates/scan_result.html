@@ -64,7 +64,8 @@
             <div><span class="l">Uploaded</span><span class="v">{{ s.at }}</span></div>
             <div><span class="l">File</span><span class="v">{{ s.file }}</span></div>
             {% if s.model %}<div><span class="l">Read by</span><span class="v">{{ s.model.label }}</span></div>{% endif %}
-            {% if s.screening %}<div><span class="l">Screened on</span><span class="v">{{ 'World-Check One' if sc.source == 'World-Check One' else 'Stand-in World-Check' }}</span></div>{% endif %}
+            {% if s.screening %}<div><span class="l">Screened on</span><span class="v">{{ sc.source if sc.source in ('World-Check One', 'Didit AML') else 'Stand-in World-Check' }}</span></div>{% endif %}
+            {% if sc and sc.aml %}<div id="didit-aml"><span class="l">Didit AML</span><span class="v">{{ sc.aml.status }}{% if sc.aml.score %} · risk {{ sc.aml.score|round|int }}{% endif %}{% if sc.aml.sandbox %} · sandbox, free{% elif sc.aml.cost %} · ${{ '%.2f'|format(sc.aml.cost) }}{% endif %}</span></div>{% endif %}
             {% if hits %}<div><span class="l">Hits</span><span class="v">{{ hits|length }} · {{ ns.open }} left for review</span></div>{% endif %}
             {% if closed %}<div><span class="l">Closed by</span><span class="v">{{ s.closed.by|who }}</span></div>
             <div><span class="l">Closed</span><span class="v">{{ s.closed.at }}</span></div>{% endif %}
@@ -238,7 +239,7 @@
                     <thead><tr><th>Platform Name</th><th>User Name</th><th>Screen time</th><th>Name screening list</th><th>Screening result</th><th>Alert ID</th></tr></thead>
                     <tbody>
                     <tr>
-                        <td>{{ 'World-Check One' if sc.source == 'World-Check One' else 'World-Check' }}{% if sc.source == 'stand-in' %} <span class="tag" title="{{ sc.source_label }}">stand-in</span>{% endif %}</td>
+                        <td>{{ sc.source if sc.source in ('World-Check One', 'Didit AML') else 'World-Check' }}{% if sc.source == 'stand-in' %} <span class="tag" title="{{ sc.source_label }}">stand-in</span>{% endif %}</td>
                         <td>{{ sc.searched.name }}</td><td class="nowrap">{{ sc.at }}</td>
                         <td>{{ hits|map(attribute='category')|unique|join(' / ') if hits else 'World-Check' }}</td>
                         <td>{{ hit_mark('Hit' if hits else 'No Match') }}</td>
@@ -251,7 +252,7 @@
                 {% if not hits %}
                 <div class="screen-none mt-12" id="screen-none">
                     <div><b>No World-Check record matches the name.</b>
-                        <div class="small muted">No record of {{ 'World-Check One' if sc.source != 'stand-in' else 'the stand-in watchlist' }} scored the name at or above the search's floor ({{ 'set by World-Check' if sc.source != 'stand-in' else 'Settings' }}).</div></div>
+                        <div class="small muted">No record of {{ 'the stand-in watchlist' if sc.source == 'stand-in' else sc.source }} scored the name at or above the search's floor ({{ 'Settings' if sc.source == 'stand-in' else 'set by ' + sc.source }}).{% if sc.aml and sc.aml.sandbox %} <b>Didit's sandbox answered with a fixed result: nobody was screened.</b>{% endif %}</div></div>
                     {% if not closed %}
                     <form method="post" action="{{ url_for('scan_close', scan_id=s.id) }}" class="row">
                         <input class="input input-sm" name="note" placeholder="Note (optional)" style="min-width:240px">

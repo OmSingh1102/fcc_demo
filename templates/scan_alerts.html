@@ -29,7 +29,7 @@
             <div><span class="l">Uploaded by</span><span class="v">{{ s.by|who }}</span></div>
             <div><span class="l">Created Date</span><span class="v">{{ s.at }}</span></div>
             <div><span class="l">Status</span><span class="v">{{ outcome_badge('Closed' if closed else 'Open') }}</span></div>
-            <div><span class="l">Screened on</span><span class="v">{{ 'World-Check One' if sc.source == 'World-Check One' else 'Stand-in World-Check' }}</span></div>
+            <div><span class="l">Screened on</span><span class="v">{{ sc.source if sc.source in ('World-Check One', 'Didit AML') else 'Stand-in World-Check' }}</span></div>
             {% if wc_group %}<div><span class="l">WC Group Name</span><span class="v">{{ wc_group }}</span></div>{% endif %}
             <div><span class="l">Latest Updated Date</span><span class="v">{{ wc.last_updated }}</span></div>
             <div><span class="l">Last Screen Time</span><span class="v">{{ sc.at or '-' }}</span></div>

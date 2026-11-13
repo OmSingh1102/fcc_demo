@@ -1913,6 +1913,7 @@ def architecture():
     labels[AZURE_READER["id"]] = AZURE_READER["label"]
     return render_template("architecture.html", reader_label=labels.get(reader, reader), decider_label=labels.get(decider, decider),
                            llm_ready=ai_review.configured(), wc_live=id_screening.live(SCREEN_SETTINGS), headline=headline,
+                           screen_source=id_screening.source(SCREEN_SETTINGS),
                            az_live=azure_docintel.configured(SCREEN_SETTINGS["azure"]), dd_live=didit.configured(SCREEN_SETTINGS["didit"]),
                            intake_n=len(SCREEN_SETTINGS.get("intake_keys") or []))
 
@@ -2029,13 +2030,13 @@ def _screen_search(rec):
     """The World-Check search for the person the ID names (hits confirmed
     before keep their confirmation)."""
     who = id_screening.person(rec.get("read"))
-    hits, source, error, csid = id_screening.search(who, SCREEN_SETTINGS)
+    hits, source, error, csid, aml = id_screening.search(who, SCREEN_SETTINGS, rec.get("id", ""))
     before = {h["uid"]: h for h in (rec.get("screening") or {}).get("hits") or []}
     for h in hits:
         if before.get(h["uid"], {}).get("resolution"):
             h.update(ai=before[h["uid"]].get("ai"), resolution=before[h["uid"]]["resolution"])
     rec["screening"] = {"person": who, "source": source, "source_label": id_screening.source_label(SCREEN_SETTINGS),
-                        "at": dates.now_str(), "hits": hits, "error": error, "case_system_id": csid,
+                        "at": dates.now_str(), "hits": hits, "error": error, "case_system_id": csid, "aml": aml,
                         "searched": {k: who[k] for k in ("name", "dob", "sex", "nationality")}}
 
 
@@ -2392,6 +2393,7 @@ def _scan_export(rec):
             "fields": read.get("fields", {}), "uncertain": read.get("uncertain", []), "mrz": read.get("mrz", []),
             "checks": rec.get("checks", []), "model": rec.get("model"),
             "screening": sc and {"source": sc.get("source"), "searched": sc.get("searched"), "at": sc.get("at"), "error": sc.get("error"),
+                                 "didit_aml": sc.get("aml"),
                                  "hits": [{k: h.get(k) for k in ("uid", "name", "aka", "dob_text", "places", "category", "score",
                                                                   "strength", "dob_result", "country_result", "ai", "resolution")}
                                           for h in sc.get("hits") or []]},
@@ -2510,6 +2512,8 @@ def screening_settings():
             wc["api_secret"] = f["api_secret"].strip()
         if f.get("forget_secret"):
             wc["api_secret"] = ""
+        if f.get("screening_source") in id_screening.SOURCES:
+            s["screening_source"] = f["screening_source"]
         if f.get("services_form"):                  # the Azure and Didit cards were on the page
             err = _services_update(s, f)
             if err:
@@ -2527,7 +2531,10 @@ def screening_settings():
                            dd=s["didit"], dd_key_shown=_masked(s["didit"]["api_key"]), dd_live=didit.configured(s["didit"]),
                            intake_keys=s.get("intake_keys") or [], new_key=session.pop("new_intake_key", None),
                            api_base=request.url_root.rstrip("/") + "/api/v1",
-                           readers=_readers(), deciders=id_screening.decision_models(s), live=id_screening.live(s),
+                           readers=_readers(), deciders=id_screening.decision_models(s), live=world_check.configured(s["world_check"]),
+                           sources=id_screening.SOURCES, screen_source=id_screening.source(s), aml_scenarios=didit.AML_SCENARIOS,
+                           source_ready={"stand-in": True, "world_check": world_check.configured(s["world_check"]),
+                                         "didit_aml": didit.configured(s["didit"])},
                            providers=MODEL_PROVIDERS, reader_instructions=s.get("reader_instructions") or id_scan.SYSTEM,
                            team=s.get("team") or [{"name": a["name"], "email": a["email"], "roles": a["roles"]} for a in ANALYSTS],
                            team_roles=TEAM_ROLES,
@@ -2657,10 +2664,16 @@ def _services_update(s, f):
         floor, page_price, call_price = (float(f.get("az_min_confidence", az["min_confidence"])),
                                          float(f.get("az_price_per_page", az["price_per_page"]) or 0),
                                          float(f.get("dd_price_per_call", dd["price_per_call"]) or 0))
+        aml_price = float(f.get("dd_aml_price", dd["aml_price"]) or 0)
     except ValueError:
         return "The confidence floor and the prices are numbers."
-    if not (0 <= floor <= 1 and page_price >= 0 and call_price >= 0):
+    if not (0 <= floor <= 1 and page_price >= 0 and call_price >= 0 and aml_price >= 0):
         return "The confidence floor is 0-1; prices are 0 or more."
+    scenario = f.get("dd_aml_sandbox_scenario", dd["aml_sandbox_scenario"])
+    if scenario not in didit.AML_SCENARIOS:
+        return "Choose one of Didit's sandbox scenarios, or none for a live key."
+    dd.update(aml_path=f.get("dd_aml_path", "").strip() or didit.DEFAULTS["aml_path"], aml_price=aml_price,
+              aml_adverse_media=bool(f.get("dd_aml_adverse_media")), aml_sandbox_scenario=scenario)
     az.update(endpoint=f.get("az_endpoint", "").strip(), api_version=f.get("az_api_version", "").strip() or azure_docintel.DEFAULTS["api_version"],
               model_id=f.get("az_model_id", "").strip() or azure_docintel.DEFAULTS["model_id"], min_confidence=floor, price_per_page=page_price)
     dd.update(base_url=f.get("dd_base_url", "").strip() or didit.DEFAULTS["base_url"], path=f.get("dd_path", "").strip() or didit.DEFAULTS["path"],
@@ -2673,6 +2686,20 @@ def _services_update(s, f):
     if s["reader_model"] == AZURE_READER["id"] and not azure_docintel.configured(az):
         s["reader_model"] = id_scan.models(s["models"])[0]["id"]
     return ""
+
+
+@app.route("/screening/settings/didit-aml-test", methods=["POST"])
+def screening_didit_aml_test():
+    """Is Didit's AML screening ready with the saved key? (Free: nobody is screened.)"""
+    cfg = SCREEN_SETTINGS["didit"]
+    if not didit.configured(cfg):
+        flash("Enter and save the Didit API key first.", "error")
+        return redirect(url_for("screening_settings") + "#settings-didit")
+    try:
+        flash(didit.aml_test(cfg), "success")
+    except didit.DiditError as exc:
+        flash(f"Didit AML screening is not ready: {exc}", "error")
+    return redirect(url_for("screening_settings") + "#settings-didit")
 
 
 @app.route("/screening/settings/azure-test", methods=["POST"])
