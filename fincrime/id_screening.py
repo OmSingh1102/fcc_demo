@@ -7,7 +7,10 @@ rule is written in code.
      World-Check One by its API once a key and secret are entered on the
      Settings page (adapters/world_check); until then to the stand-in
      watchlist, the World-Check records of the reconciliation log's 1,000
-     cases (fincrime/watchlist). Either way the search only finds candidates.
+     cases (fincrime/watchlist); or, as Settings chooses, to Didit's AML
+     screening, or to our own sanctions lists (OFAC, UN, UK, EU, downloaded
+     from their publishers: fincrime/sanctions). Either way the search only
+     finds candidates.
   3. Decide. For each hit a model gets the SOP (the current version of the
      SOP page: the files' v1 to v3, then any version saved in the console),
      the client's variance reference, and the resolved cases of the log most
@@ -28,7 +31,7 @@ settings (kind "settings", id "screening"), not code.
 import hashlib
 import time
 
-from fincrime import benchmark, decision_model, watchlist
+from fincrime import benchmark, decision_model, sanctions, watchlist
 from fincrime.adapters import azure_docintel, didit, world_check
 from fincrime.data import vocab
 from fincrime.documents import id_scan
@@ -41,13 +44,23 @@ RESOLUTIONS = ("True match", "Possible match", "False positive")
 SUGGESTION = {"clear": "False positive", "true_match": "True match", "request_documents": "Possible match",
               "escalate": "Possible match"}          # the defaults: Settings holds the rule (ai_suggestion)
 IDV_FIELDS = (("Name", "full_name"), ("Date of birth", "date_of_birth"), ("Document number", "document_number"))
-SOURCES = {"stand-in": "Stand-in World-Check", "world_check": "World-Check One", "didit_aml": "Didit AML screening"}
+SOURCES = {"stand-in": "Stand-in World-Check", "world_check": "World-Check One", "didit_aml": "Didit AML screening",
+           "own_lists": "Our sanctions lists (OFAC, UN, UK, EU)"}
 
 
 def list_name(sc):
     """The watchlist a case was screened on, as its pages name it."""
     src = (sc or {}).get("source")
+    if src == sanctions.SOURCE:
+        return "Sanctions list"
     return src if src in ("World-Check One", "Didit AML") else "World-Check"
+
+
+def record_label(hit):
+    """The record a hit is, as the model is told it."""
+    if hit.get("source") == sanctions.SOURCE:
+        return f"Sanctions list record ({', '.join(hit.get('lists') or [])})"
+    return "Didit AML record" if hit.get("source") == "Didit AML" else "World-Check record"
 DECISION_MODELS = ("claude-opus-4-8", "claude-sonnet-5-5", "gpt-5", "gemini-2.5-pro", "gemini-2.5-flash", "claude-haiku-4-5",
                    "gpt-5-mini")
 
@@ -72,6 +85,10 @@ def default_settings():
             "auto_needs_idv": True, "idv_must_agree": [w for w, _ in IDV_FIELDS],
             # the services connected by API (adapters/): reading the ID, verifying it; the client's system sending IDs
             "azure": dict(azure_docintel.DEFAULTS), "didit": dict(didit.DEFAULTS), "intake_keys": [],
+            # our own sanctions lists (fincrime/sanctions); what our API charges a call, and where it tells the
+            # client's system of a closed case or a list change (a signed webhook)
+            "sanctions": dict(sanctions.DEFAULTS), "api_price_case": 0.0, "api_price_aml": 0.0, "api_price_watch": 0.0,
+            "webhook_url": "", "webhook_secret": "",
             # the models the gateway serves, which read and which decide, their prices; the reader's instructions
             # (empty: id_scan.SYSTEM); tries after a busy answer and the first wait; the threads deciding hits
             "models": default_models(), "reader_instructions": "", "llm_retries": 3, "llm_retry_wait": 10,
@@ -93,8 +110,8 @@ def settings_from(stored):
     """The defaults with the stored record laid on top."""
     s = default_settings()
     stored = stored or {}
-    s.update({k: v for k, v in stored.items() if k not in ("world_check", "azure", "didit")})
-    for service in ("world_check", "azure", "didit"):
+    s.update({k: v for k, v in stored.items() if k not in ("world_check", "azure", "didit", "sanctions")})
+    for service in ("world_check", "azure", "didit", "sanctions"):
         s[service].update(stored.get(service) or {})
     for rules in ("check_rules", "ai_suggestion"):  # a rule added since keeps its default
         s[rules] = dict(default_settings()[rules], **(stored.get(rules) or {}))
@@ -121,7 +138,8 @@ def source(settings):
     entered; the stand-in otherwise."""
     wc_ready = world_check.configured(settings.get("world_check"))
     chosen = settings.get("screening_source") or ("world_check" if wc_ready else "stand-in")
-    ready = {"stand-in": True, "world_check": wc_ready, "didit_aml": didit.configured(settings.get("didit"))}
+    ready = {"stand-in": True, "world_check": wc_ready, "didit_aml": didit.configured(settings.get("didit")),
+             "own_lists": sanctions.ready(settings.get("sanctions"))}
     return chosen if ready.get(chosen) else "stand-in"
 
 
@@ -131,6 +149,11 @@ def live(settings):
 
 def source_label(settings):
     src = source(settings)
+    if src == "own_lists":
+        cfg = settings.get("sanctions") or {}
+        at = [d["fetched_at"] for d in sanctions.versions(cfg).values()]
+        return (f"Our sanctions lists: {', '.join(sanctions.LISTS[k]['short'] for k in sanctions.versions(cfg))}, downloaded "
+                f"from the publishers (the oldest on {min(at)})")
     if src == "didit_aml":
         return ("Didit AML screening (live, by its API: sanctions, PEP, warnings"
                 + (", adverse media" if (settings.get("didit") or {}).get("aml_adverse_media") else "") + ")")
@@ -138,7 +161,8 @@ def source_label(settings):
         return "World-Check One (live, by its API)"
     wanted = settings.get("screening_source")
     return ("Stand-in World-Check: the World-Check records of the reconciliation log's 1,000 cases"
-            + (f" ({SOURCES[wanted]} is chosen, but its key is not on Settings)" if wanted in ("world_check", "didit_aml") else ""))
+            + (f" ({SOURCES[wanted]} is chosen, but its key is not on Settings)" if wanted in ("world_check", "didit_aml") else "")
+            + (" (our sanctions lists are chosen, but they are not downloaded yet)" if wanted == "own_lists" else ""))
 
 
 # ── the person on the ID ─────────────────────────────────────────────────────
@@ -158,6 +182,9 @@ def person(read):
 def search(who, settings, reference=""):
     """(hits, source, error, case_system_id, Didit's screening or None): the
     candidates for the person, from where Settings says to screen."""
+    if source(settings) == "own_lists":
+        return (sanctions.search(who, settings["sanctions"], int(settings["name_threshold"]), int(settings["max_hits"]),
+                                 settings.get("strength_bands")), sanctions.SOURCE, "", "", None)
     if source(settings) == "didit_aml":
         try:
             hits, aml = didit.aml_screen(settings["didit"], who, int(settings["max_hits"]), reference)
@@ -223,13 +250,16 @@ def facts(who, hit):
         f"  MRZ line 1: {who['mrz1'] or 'none'}",
         "Secondary ID: not provided",
         "Proof of address: not provided",
-        f"{'Didit AML' if hit.get('source') == 'Didit AML' else 'World-Check'} record {hit['uid']}: {hit['name']}"
+        f"{record_label(hit)} {hit['uid']}: {hit['name']}"
         + (f" (AKA: {', '.join(hit['aka'])})" if hit.get("aka") else ""),
         f"  listed date of birth: {hit['dob_text']}",
         f"  listed places: {hit['places']}",
         f"  category: {hit['category']}; name match {hit['strength']} ({hit['score']}%)",
         f"  trigger: {hit['narrative']}",
     ]
+    if hit.get("source") == sanctions.SOURCE:
+        lines.append(f"  on the official sanctions lists: {', '.join(hit.get('lists') or [])}; programme {hit.get('programme') or 'not given'}"
+                     + (f"; listed {hit['listed_on']}" if hit.get("listed_on") else ""))
     if hit.get("source") == "Didit AML":
         lines.append(f"  Didit's own scoring: match {hit['score']} of 100, risk {hit.get('risk_score')} of 100; Didit marked it "
                      f"{hit.get('didit_review') or 'Unreviewed'}" + ("; the same document number is on the record" if hit.get("document_match") == "MATCH" else ""))
@@ -591,7 +621,7 @@ def wc_view(case):
             "primary_name": who.get("name", ""), "gender": {"M": "Male", "F": "Female"}.get((who.get("sex") or "").upper()[:1], ""),
             "dob": dob, "group": "ID screening", "assignee": "Case Unassigned", "rating": "Not Rated", "ongoing_screening": "Off",
             "last_updated": max([at] + [h["resolution"]["at"] for h in hits if h.get("resolution")]),
-            "case_details": {"Source": sc.get("source") if sc.get("source") in ("World-Check One", "Didit AML") else "Stand-in (reconciliation log)",
+            "case_details": {"Source": sc.get("source") if sc.get("source") in ("World-Check One", "Didit AML", sanctions.SOURCE) else "Stand-in (reconciliation log)",
                              "DocumentType": who.get("document_type", ""), "DocumentNo": who.get("document_number", ""),
                              "Nationality": who.get("nationality", ""), "IssuingCountry": who.get("issuing_country", ""),
                              "UploadedBy": case.get("by", ""), "CaseStatus": "Closed" if case.get("status") == "closed" else "Open"},

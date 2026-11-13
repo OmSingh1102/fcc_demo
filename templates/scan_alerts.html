@@ -29,14 +29,14 @@
             <div><span class="l">Uploaded by</span><span class="v">{{ s.by|who }}</span></div>
             <div><span class="l">Created Date</span><span class="v">{{ s.at }}</span></div>
             <div><span class="l">Status</span><span class="v">{{ outcome_badge('Closed' if closed else 'Open') }}</span></div>
-            <div><span class="l">Screened on</span><span class="v">{{ sc.source if sc.source in ('World-Check One', 'Didit AML') else 'Stand-in World-Check' }}</span></div>
+            <div><span class="l">Screened on</span><span class="v">{{ sc.source if sc.source in ('World-Check One', 'Didit AML', 'Sanctions lists') else 'Stand-in World-Check' }}</span></div>
             {% if wc_group %}<div><span class="l">WC Group Name</span><span class="v">{{ wc_group }}</span></div>{% endif %}
             <div><span class="l">Latest Updated Date</span><span class="v">{{ wc.last_updated }}</span></div>
             <div><span class="l">Last Screen Time</span><span class="v">{{ sc.at or '-' }}</span></div>
             <div><span class="l">Screening SOP</span><span class="v"><a href="{{ url_for('screening_sop') }}">{{ sop.version }}</a></span></div>
             <div><span class="l">Case</span><span class="v"><a href="{{ url_for('scan_result', scan_id=s.id) }}" class="mono">{{ s.id }}</a></span></div>
             <div><span class="l">Document</span><span class="v">{{ who.document_type or '-' }}{% if who.document_number %} · <span class="mono">{{ who.document_number }}</span>{% endif %}</span></div>
-            <div><span class="l">Watchlist case</span><span class="v">{% if s.screening and not sc.error %}<a href="{{ url_for('wc_case', wc_case_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab" id="open-wc">{{ 'Open in the screening console' if wl == 'Didit AML' else 'Open in World-Check console' }}<span class="ext-ic">{{ icon('external-link') }}</span></a>{% else %}-{% endif %}</span></div>
+            <div><span class="l">Watchlist case</span><span class="v">{% if s.screening and not sc.error %}<a href="{{ url_for('wc_case', wc_case_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab" id="open-wc">{{ 'Open in the screening console' if wl in ('Didit AML', 'Sanctions list') else 'Open in World-Check console' }}<span class="ext-ic">{{ icon('external-link') }}</span></a>{% else %}-{% endif %}</span></div>
         </div>
         <div class="row mt-12">
             <span class="small" id="case-outcome">Case outcome: {% if closed %}<b>{{ s.closed.outcome }}</b> <span class="muted">by {{ s.closed.by|who }} at {{ s.closed.at }}</span>{% else %}<span class="muted">none yet — the case closes when every alert has an outcome</span>{% endif %}</span>
@@ -83,7 +83,7 @@
                 <thead><tr>
                     <th style="width:28px"><span class="sr-hide">Open</span></th><th style="width:40px"><input type="checkbox" id="pick-all" title="Tick every alert shown" aria-label="Tick every alert shown" onchange="afPickAll(this)"></th>
                     <th>Vendor</th><th>Watch List ID</th><th>Alert Outcome</th><th>AI assessment</th><th>Name</th><th>Matched Alias</th><th>Score</th><th>Type</th><th>Date of Birth</th><th>Places</th>
-                    <th>Last Resolved By</th><th>Last Resolved Time</th><th>Reason</th><th>Risk</th><th class="sticky-right">{{ 'Record' if wl == 'Didit AML' else 'World-Check' }}</th>
+                    <th>Last Resolved By</th><th>Last Resolved Time</th><th>Reason</th><th>Risk</th><th class="sticky-right">{{ 'Record' if wl in ('Didit AML', 'Sanctions list') else 'World-Check' }}</th>
                 </tr></thead>
                 <tbody>
                 {% for h in hits %}{% set ai = h.ai or {} %}{% set res = h.resolution %}{% set label = outcomes[res.status] if res else 'Pending' %}
@@ -107,7 +107,7 @@
                     <td class="nowrap">{{ res.at if res else '-' }}</td>
                     <td>{{ (res.reason if res else '') or '-' }}</td>
                     <td>{% if res and res.risk %}{{ outcome_badge(res.risk) }}{% else %}-{% endif %}</td>
-                    <td class="sticky-right"><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=s.id, match_id=h.uid) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ 'Open' if wl == 'Didit AML' else 'Open in WC' }}<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
+                    <td class="sticky-right"><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=s.id, match_id=h.uid) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ 'Open' if wl in ('Didit AML', 'Sanctions list') else 'Open in WC' }}<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
                 </tr>
                 {% set d = details[h.uid] %}{% set m = d.m %}{% set kd = m.key_data %}{% set fi = m.further_info %}
                 <tr class="alert-detail hidden" data-for="{{ h.uid }}">
@@ -170,7 +170,7 @@
                             <div class="ad-kv"><div><span class="l">{{ wl }} ID</span><span class="v mono">{{ m.wc_id }}</span></div>
                                 <div><span class="l">Types</span><span class="v">{{ m.types|join(', ') or '-' }}</span></div>
                                 <div><span class="l">Match strength</span><span class="v">{{ h.score }}% · {{ h.strength }}</span></div></div>
-                            <a class="btn btn-outline btn-xs" href="{{ url_for('wc_match', wc_case_id=s.id, match_id=h.uid) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ 'Open the full record in the console' if wl == 'Didit AML' else 'Open the full record in World-Check' }}<span class="ext-ic">{{ icon('external-link') }}</span></a>
+                            <a class="btn btn-outline btn-xs" href="{{ url_for('wc_match', wc_case_id=s.id, match_id=h.uid) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ 'Open the full record in the console' if wl in ('Didit AML', 'Sanctions list') else 'Open the full record in World-Check' }}<span class="ext-ic">{{ icon('external-link') }}</span></a>
                         </div>
                     </div>
                 </div></td>

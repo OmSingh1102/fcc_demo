@@ -64,8 +64,9 @@
             <div><span class="l">Uploaded</span><span class="v">{{ s.at }}</span></div>
             <div><span class="l">File</span><span class="v">{{ s.file }}</span></div>
             {% if s.model %}<div><span class="l">Read by</span><span class="v">{{ s.model.label }}</span></div>{% endif %}
-            {% if s.screening %}<div><span class="l">Screened on</span><span class="v">{{ sc.source if sc.source in ('World-Check One', 'Didit AML') else 'Stand-in World-Check' }}</span></div>{% endif %}
+            {% if s.screening %}<div><span class="l">Screened on</span><span class="v">{{ sc.source if sc.source in ('World-Check One', 'Didit AML', 'Sanctions lists') else 'Stand-in World-Check' }}</span></div>{% endif %}
             {% if sc and sc.aml %}<div id="didit-aml"><span class="l">Didit AML</span><span class="v">{{ sc.aml.status }}{% if sc.aml.score %} · risk {{ sc.aml.score|round|int }}{% endif %}{% if sc.aml.sandbox %} · sandbox, free{% elif sc.aml.cost %} · ${{ '%.2f'|format(sc.aml.cost) }}{% endif %}{% if sc.aml.monitoring and not (sc.aml.monitoring_stopped or {}).done %} · watched{% endif %}</span></div>{% endif %}
+            {% if sc and sc.lists %}<div id="lists-line"><span class="l">Lists</span><span class="v">{{ sc.lists.versions|map('upper')|join(', ') }}{% if sc.lists.monitoring and not (sc.lists.monitoring_stopped or {}).done %} · watched{% endif %}{% if (sc.lists.history or {}).changes %} · <b>a change</b>{% endif %}</span></div>{% endif %}
             {% if hits %}<div><span class="l">Hits</span><span class="v">{{ hits|length }} · {{ ns.open }} left for review</span></div>{% endif %}
             {% if closed %}<div><span class="l">Closed by</span><span class="v">{{ s.closed.by|who }}</span></div>
             <div><span class="l">Closed</span><span class="v">{{ s.closed.at }}</span></div>{% endif %}
@@ -254,7 +255,7 @@
             <div class="card-head"><div class="card-title">Screening result</div>
                 <div class="row" style="gap:8px">
                     {% if s.screening and not sc.error %}
-                    <a class="btn btn-outline btn-sm" id="open-wc" href="{{ url_for('wc_case', wc_case_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ icon('globe') }} {{ 'Open in console' if wl == 'Didit AML' else 'Open in World-Check' }}<span class="ext-ic">{{ icon('external-link') }}</span></a>
+                    <a class="btn btn-outline btn-sm" id="open-wc" href="{{ url_for('wc_case', wc_case_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ icon('globe') }} {{ 'Open in console' if wl in ('Didit AML', 'Sanctions list') else 'Open in World-Check' }}<span class="ext-ic">{{ icon('external-link') }}</span></a>
                     {% endif %}
                     {% if s.screening and not closed %}
                     <form method="post" action="{{ url_for('scan_screen', scan_id=s.id) }}" style="margin:0"><button class="btn btn-outline btn-sm" type="submit">{{ icon('refresh-cw') }} Search again</button></form>
@@ -273,7 +274,7 @@
                     <thead><tr><th>Platform Name</th><th>User Name</th><th>Screen time</th><th>Name screening list</th><th>Screening result</th><th>Alert ID</th></tr></thead>
                     <tbody>
                     <tr>
-                        <td>{{ sc.source if sc.source in ('World-Check One', 'Didit AML') else 'World-Check' }}{% if sc.source == 'stand-in' %} <span class="tag" title="{{ sc.source_label }}">stand-in</span>{% endif %}</td>
+                        <td>{{ sc.source if sc.source in ('World-Check One', 'Didit AML', 'Sanctions lists') else 'World-Check' }}{% if sc.source == 'stand-in' %} <span class="tag" title="{{ sc.source_label }}">stand-in</span>{% endif %}</td>
                         <td>{{ sc.searched.name }}</td><td class="nowrap">{{ sc.at }}</td>
                         <td>{{ hits|map(attribute='category')|unique|join(' / ') if hits else wl }}</td>
                         <td>{{ hit_mark('Hit' if hits else 'No Match') }}</td>
@@ -286,7 +287,7 @@
                 {% if not hits %}
                 <div class="screen-none mt-12" id="screen-none">
                     <div><b>No {{ wl }} record matches the name.</b>
-                        <div class="small muted">{% if wl == 'Didit AML' %}Didit answered {{ (sc.aml or {}).status or 'with no hit' }}: nothing on its sanctions, PEP or warning lists{{ ', or in the news,' if (sc.aml or {}).adverse_media }} matched the name.{% else %}No record of {{ 'the stand-in watchlist' if sc.source == 'stand-in' else sc.source }} scored the name at or above the search's floor ({{ 'Settings' if sc.source == 'stand-in' else 'set by ' + sc.source }}).{% endif %}{% if sc.aml and sc.aml.sandbox %} <b>Didit's sandbox answered with a fixed result: nobody was screened.</b>{% endif %}</div></div>
+                        <div class="small muted">{% if wl == 'Sanctions list' %}Nothing on {{ (sc.lists or {}).versions|map('upper')|join(', ') or 'our sanctions lists' }}, as downloaded, scored the name at or above the search's floor (Settings).{% elif wl == 'Didit AML' %}Didit answered {{ (sc.aml or {}).status or 'with no hit' }}: nothing on its sanctions, PEP or warning lists{{ ', or in the news,' if (sc.aml or {}).adverse_media }} matched the name.{% else %}No record of {{ 'the stand-in watchlist' if sc.source == 'stand-in' else sc.source }} scored the name at or above the search's floor ({{ 'Settings' if sc.source == 'stand-in' else 'set by ' + sc.source }}).{% endif %}{% if sc.aml and sc.aml.sandbox %} <b>Didit's sandbox answered with a fixed result: nobody was screened.</b>{% endif %}</div></div>
                     {% if not closed %}
                     <form method="post" action="{{ url_for('scan_close', scan_id=s.id) }}" class="row">
                         <input class="input input-sm" name="note" placeholder="Note (optional)" style="min-width:240px">
@@ -308,6 +309,22 @@
                 <div class="row mt-8" style="gap:8px">
                     <form method="post" action="{{ url_for('scan_aml_history', scan_id=s.id) }}" style="margin:0"><button class="btn btn-outline btn-xs" type="submit" title="Reads Didit's re-screens of this person; not billed">Check for changes</button></form>
                     <form method="post" action="{{ url_for('scan_aml_unwatch', scan_id=s.id) }}" style="margin:0" onsubmit="return confirm('Stop Didit watching this person?');"><button class="btn btn-outline btn-xs" type="submit">Stop watching</button></form>
+                </div>{% endif %}
+            </div>
+            {% endif %}
+            {% set ls = sc.lists or {} %}{% set lh = ls.history or {} %}{% set lstop = ls.monitoring_stopped or {} %}
+            {% if ls.monitoring or lstop %}
+            <div class="note {{ 'warn' if lh.changes else 'info' }} small mt-12" id="lists-monitoring">
+                {% if lstop.done %}No longer watched on our sanctions lists since {{ lstop.at }} ({{ lstop.by|who }}).
+                {% else %}<b>Watched on our sanctions lists:</b> screened again, free, whenever a list changes (they are downloaded every {{ lists_hours }} hours).{% endif %}
+                {% if lh %} Screened again {{ lh.runs }} time{{ 's' if lh.runs != 1 }}, the last on {{ lh.checked_at }}{% if lh.changes %}{% set c = lh.changes[0] %}; <b>{{ lh.changes|length }} with a change</b>, the latest on {{ c.at }}:
+                    {% for a in c.added %}new record {{ a.uid }} {{ a.name }} ({{ a.lists|join(', ') }}, name score {{ a.score }}){% if not loop.last %}; {% endif %}{% endfor %}{% if c.added and c.delisted %}; {% endif %}{% if c.delisted %}taken off the lists: {{ c.delisted|join(', ') }}{% endif %}.
+                    {% if c.added %}{% if not closed %}Press <b>Search again</b> to screen and review the new record.{% else %}The case is closed: upload the ID again to review the new record.{% endif %}{% endif %}{% else %}; nothing changed.{% endif %}
+                {% elif not lstop.done %} Not screened again yet.{% endif %}
+                {% if not lstop.done %}
+                <div class="row mt-8" style="gap:8px">
+                    <form method="post" action="{{ url_for('scan_lists_rescreen', scan_id=s.id) }}" style="margin:0"><button class="btn btn-outline btn-xs" type="submit" title="Screens the person on the lists as downloaded now; free">Screen on today's lists</button></form>
+                    <form method="post" action="{{ url_for('scan_lists_unwatch', scan_id=s.id) }}" style="margin:0" onsubmit="return confirm('Stop screening this person again when the lists change?');"><button class="btn btn-outline btn-xs" type="submit">Stop watching</button></form>
                 </div>{% endif %}
             </div>
             {% endif %}

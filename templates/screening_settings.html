@@ -14,12 +14,12 @@
 <div class="card mt-12" id="settings-wc">
     <div class="card-head"><div><div class="card-title">Watchlist screening: where the console screens</div>
         <div class="card-sub">Screening now: <b>{{ source }}</b></div></div>
-        <span class="badge {{ 'amber' if screen_source == 'stand-in' else 'emerald' }}">{{ {'stand-in': 'Stand-in', 'world_check': 'Live World-Check One', 'didit_aml': 'Live Didit AML'}[screen_source] }}</span></div>
+        <span class="badge {{ 'amber' if screen_source == 'stand-in' else 'emerald' }}">{{ {'stand-in': 'Stand-in', 'world_check': 'Live World-Check One', 'didit_aml': 'Live Didit AML', 'own_lists': 'Our sanctions lists'}[screen_source] }}</span></div>
     <div class="card-body">
         <div class="settings-grid mb-12">
             <label>Screen on
-                <select class="input" name="screening_source" id="screening-source"{% if not can_edit %} disabled{% endif %}>{% for k, label in sources.items() %}<option value="{{ k }}"{% if k == (s.screening_source or screen_source) %} selected{% endif %}>{{ label }}{% if not source_ready[k] %} (no key yet){% endif %}</option>{% endfor %}</select>
-                <span class="tiny muted">World-Check One with the key below; Didit AML with the Didit key (the ID verification card). Without its key, the stand-in screens</span></label>
+                <select class="input" name="screening_source" id="screening-source"{% if not can_edit %} disabled{% endif %}>{% for k, label in sources.items() %}<option value="{{ k }}"{% if k == (s.screening_source or screen_source) %} selected{% endif %}>{{ label }}{% if not source_ready[k] %}{{ ' (not downloaded yet)' if k == 'own_lists' else ' (no key yet)' }}{% endif %}</option>{% endfor %}</select>
+                <span class="tiny muted">World-Check One with the key below; Didit AML with the Didit key (the ID verification card); our sanctions lists once downloaded (the card further down). Until then, the stand-in screens</span></label>
         </div>
         <p class="small muted" style="margin-top:0">With no key, the console searches the stand-in watchlist: the {{ watchlist_size }} World-Check records of the reconciliation log's cases. Enter the World-Check One API key and secret from the licence, and the group to screen in, and it screens on World-Check One itself. The calls are written from LSEG's public description of the API and have not run against the service yet: check the host and paths against the documentation that comes with the licence, then press <b>Test connection</b>.</p>
         <div class="settings-grid">
@@ -253,6 +253,54 @@
     </div>
 </div>
 
+<div class="card mt-12" id="settings-lists">
+    <input type="hidden" name="lists_form" value="1">
+    <div class="card-head"><div><div class="card-title">Our sanctions lists</div>
+        <div class="card-sub">the official lists, downloaded free from their publishers and searched here (<a href="{{ url_for('screening_lists') }}">Lists and API</a>); choose "Our sanctions lists" under "Screen on" above to screen uploaded IDs on them</div></div>
+        <span class="badge {{ 'emerald' if source_ready.own_lists else 'amber' }}">{{ 'Downloaded' if source_ready.own_lists else 'Not downloaded yet' }}</span></div>
+    <div class="card-body">
+        <p class="small muted" style="margin-top:0">Sanctions only: no PEP lists, no news, no national registers; those stay with Didit or World-Check. A sanctions hit always goes to an analyst while "Sanctions" is in auto-verify's "always to an analyst" lists below.</p>
+        <div class="settings-grid">
+            {% for l in lists %}
+            <label><span><input type="checkbox" name="sl_use_{{ l.key }}" value="1"{% if l.used %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> {{ l.label }}</span>
+                <span class="tiny muted">{{ l.publisher }}{% if l.downloaded %} · {{ '{:,}'.format(l.people) }} people, downloaded {{ l.fetched_at }}{% else %} · not downloaded yet{% endif %}</span></label>
+            {% endfor %}
+            <label><span><input type="checkbox" name="sl_auto_update" value="1"{% if sl.auto_update %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> Download them again by themselves</span>
+                <span class="tiny muted">once they were downloaded the first time, on the Lists and API page</span></label>
+            <label>Every (hours)<input class="input" type="number" name="sl_update_hours" min="1" max="720" value="{{ sl.update_hours }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label><span><input type="checkbox" name="sl_monitoring" value="1"{% if sl.monitoring %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> Watch each person screened on them</span>
+                <span class="tiny muted">screened again, free, whenever a list changes; a new record or one taken off a list is kept with the case and sent by the webhook</span></label>
+        </div>
+        <div class="small strong mt-12">Where each list is downloaded from</div>
+        <div class="settings-grid">
+            <label>OFAC SDN (CSV)<input class="input" name="sl_ofac_url" value="{{ sl.ofac_url }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>OFAC other names (CSV)<input class="input" name="sl_ofac_alt_url" value="{{ sl.ofac_alt_url }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>UN consolidated (XML)<input class="input" name="sl_un_url" value="{{ sl.un_url }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>UK Sanctions List (XML)<input class="input" name="sl_uk_url" value="{{ sl.uk_url }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>EU consolidated (XML)<input class="input" name="sl_eu_url" value="{{ sl.eu_url }}"{% if not can_edit %} disabled{% endif %}></label>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-12" id="settings-api">
+    <input type="hidden" name="api_form" value="1">
+    <div class="card-head"><div><div class="card-title">Our API: prices and the webhook</div>
+        <div class="card-sub">what a call costs the client (the usage on Lists and API), and where the client's system is told of a closed case or a list change</div></div>
+        <span class="badge {{ 'emerald' if s.webhook_url else 'slate' }}">{{ 'Webhook set' if s.webhook_url else 'No webhook' }}</span></div>
+    {% if new_webhook_secret %}<div class="card-body" style="padding-top:0"><div class="note ok small" id="webhook-new-secret"><b>Signing secret:</b> <code>{{ new_webhook_secret }}</code><br>Copy it now and give it to the client's system, to check each call's signature: it is not shown again.</div></div>{% endif %}
+    <div class="card-body">
+        <div class="settings-grid">
+            <label>Price an ID sent (USD)<input class="input" type="number" step="0.01" min="0" name="api_price_case" value="{{ s.api_price_case }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>Price a name screened (USD)<input class="input" type="number" step="0.01" min="0" name="api_price_aml" value="{{ s.api_price_aml }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>Price a watched name a year (USD)<input class="input" type="number" step="0.01" min="0" name="api_price_watch" value="{{ s.api_price_watch }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>Webhook address<input class="input" name="webhook_url" value="{{ s.webhook_url }}" placeholder="https://client.example/hooks/screening"{% if not can_edit %} disabled{% endif %}>
+                <span class="tiny muted">case.closed and aml.list_change are POSTed here, signed with the secret</span></label>
+            <label>Signing secret<span class="mono small">{{ webhook_secret_shown or 'none yet: made when an address is saved' }}</span>
+                {% if can_edit %}<span class="row" style="gap:6px"><button class="btn btn-outline btn-xs" type="submit" form="settings-webhook-secret"{% if not s.webhook_url %} disabled title="Save an address first"{% endif %}>New secret</button><button class="btn btn-outline btn-xs" type="submit" form="settings-webhook-test"{% if not s.webhook_url %} disabled title="Save an address first"{% endif %}>Send a test event</button></span>{% endif %}</label>
+        </div>
+    </div>
+</div>
+
 {% if can_edit %}
 <div class="row mt-12">
     <button class="btn btn-primary" type="submit">{{ icon('check') }} Save settings</button>
@@ -267,22 +315,25 @@
 <form method="post" action="{{ url_for('screening_settings_test') }}" id="settings-test"></form>
 <form method="post" action="{{ url_for('screening_azure_test') }}" id="settings-azure-test"></form>
 <form method="post" action="{{ url_for('screening_didit_aml_test') }}" id="settings-didit-aml-test"></form>
+<form method="post" action="{{ url_for('webhook_secret_new') }}" id="settings-webhook-secret" onsubmit="return confirm('Make a new signing secret? The client\'s system must be given it: calls signed with the old one stop checking out.');"></form>
+<form method="post" action="{{ url_for('webhook_test') }}" id="settings-webhook-test"></form>
 
 <div class="card mt-12 pad-0" id="settings-intake">
-    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Intake API: the client's system sends IDs</div>
-        <div class="card-sub">every ID sent becomes a case, read, screened and decided as an upload is; the client's system reads the result back</div></div>
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">API keys: the client's system sends IDs and names</div>
+        <div class="card-sub">every ID sent becomes a case, read, screened and decided as an upload is; a name sent is screened on our sanctions lists (<a href="{{ url_for('screening_lists') }}#api-docs">every call</a>)</div></div>
         <span class="badge {{ 'emerald' if intake_keys else 'slate' }}">{{ intake_keys|length }} key{{ 's' if intake_keys|length != 1 }}</span></div>
     {% if new_key %}
     <div class="card-body" style="padding-top:0"><div class="note ok small" id="intake-new-key"><b>Key for {{ new_key.name }}:</b> <code>{{ new_key.key }}</code><br>Copy it now and give it to the client's system: it is kept only as a fingerprint and not shown again.</div></div>
     {% endif %}
     <table class="tbl">
-        <thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Last case sent</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Key</th><th>Created</th><th>{{ month }}</th><th>Last call</th><th></th></tr></thead>
         <tbody>
         {% for k in intake_keys %}
-        <tr><td class="strong">{{ k.name }}</td><td class="mono">{{ k.prefix }}…</td><td class="small">{{ k.created_at }} · {{ k.created_by|who }}</td><td class="small">{{ k.last_used or '—' }}</td>
+        <tr><td class="strong">{{ k.name }}</td><td class="mono">{{ k.prefix }}…</td><td class="small">{{ k.created_at }} · {{ k.created_by|who }}</td>
+            <td class="small">{% set u = usage[k.id] %}{{ u.calls.cases or 0 }} IDs · {{ u.calls.aml or 0 }} names · ${{ '%.2f'|format(u.amount) }}</td><td class="small">{{ k.last_used or '—' }}</td>
             <td>{% if can_edit %}<form method="post" action="{{ url_for('intake_key_revoke', key_id=k.id) }}" style="margin:0" onsubmit="return confirm('Revoke this key? Calls with it are refused from now.');"><button class="btn btn-outline btn-xs" type="submit">Revoke</button></form>{% endif %}</td></tr>
         {% else %}
-        <tr><td colspan="5" class="small muted">No key yet{% if can_edit %}: create one below{% endif %}.</td></tr>
+        <tr><td colspan="6" class="small muted">No key yet{% if can_edit %}: create one below{% endif %}.</td></tr>
         {% endfor %}
         </tbody>
     </table>
@@ -299,6 +350,9 @@
         <pre class="sop-text">curl {{ api_base }}/cases/&lt;scan_id&gt; -H "X-API-Key: &lt;key&gt;"
 curl "{{ api_base }}/cases?reference=CUST-1042" -H "X-API-Key: &lt;key&gt;"</pre>
         <div class="tiny muted">The case carries the read, the World-Check hits with the AI's suggestion and each outcome, <code>auto_verified</code>, the ID verification, and <code>outcome</code> once closed. A wrong or revoked key is refused (401).</div>
+        <div class="small mt-12"><b>Screen a name</b> on our sanctions lists, and keep it watched:</div>
+        <pre class="sop-text">curl -X POST {{ api_base }}/aml -H "X-API-Key: &lt;key&gt;" -H "Content-Type: application/json" \
+  -d '{"full_name": "ASHISH UPADHYAY", "date_of_birth": "1962-06-29", "reference": "CUST-1042", "monitoring": true}'</pre>
     </div>
 </div>
 {% endblock %}

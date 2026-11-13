@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Lists and API{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div><h2>Lists and API</h2>
+        <p>Our own sanctions screening: the official lists, downloaded free from the governments that publish them and searched here, so a name is screened without a vendor and without leaving this machine. The client's system calls it by our API, as it would call Didit's. PEP lists, the news and government registers (Aadhaar) are not on these lists: they stay with Didit or World-Check.</p></div>
+</div>
+
+<div class="card mt-12 pad-0" id="lists-card">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Our sanctions lists</div>
+        <div class="card-sub">{% if ready %}{% if cfg.auto_update %}downloaded again every {{ cfg.update_hours }} hours{% else %}downloaded by hand only (Settings){% endif %}{% if age is not none %} · the oldest check {{ '%.0f'|format(age) }} h ago{% endif %} · {% if screening_on %}<b>the console screens uploaded IDs on them</b>{% else %}to screen uploaded IDs on them, choose them under "Screen on" on <a href="{{ url_for('screening_settings') }}#settings-wc">Settings</a>{% endif %}{% else %}not downloaded yet: press <b>Download the lists</b>, then every day after that by itself{% endif %}</div></div>
+        <form method="post" action="{{ url_for('screening_lists_update') }}" style="margin:0">
+            <button class="btn btn-primary btn-sm" type="submit" id="lists-update"{% if job.running %} disabled{% endif %} title="About 80 MB from the four publishers; free">{{ icon('download') }} {% if job.running %}Downloading…{% elif ready %}Download again now{% else %}Download the lists{% endif %}</button></form></div>
+    {% if job.running %}<div class="card-body" style="padding-top:0"><div class="note info small" id="lists-running">Downloading since {{ job.started_at }} ({{ job.by|who }}). Reload the page in a minute.</div></div>
+    {% elif job.last %}<div class="card-body" style="padding-top:0"><div class="note {{ 'warn' if job.last.error else 'ok' }} small" id="lists-last">Last download {{ job.last.at }} ({{ job.last.by|who }}):
+        {% for k, r in (job.last.result or {}).items() %}<b>{{ k|upper }}</b> {% if r.error %}not downloaded ({{ r.error }}){% elif r.changed %}{% if r.first %}{{ r.people }} people{% else %}changed: {{ r.added }} added, {{ r.removed }} taken off{% endif %}{% else %}unchanged{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}{% if job.last.error and not job.last.result %}{{ job.last.error }}{% endif %}.
+        {% if job.last.rescreened %} {{ job.last.rescreened }} watched {{ 'person' if job.last.rescreened == 1 else 'people' }} screened again{% if job.last.changes %}: <b>a change for {{ job.last.changes|join(', ') }}</b>{% else %}, nothing changed for them{% endif %}.{% endif %}</div></div>{% endif %}
+    <div class="tbl-scroll">
+    <table class="tbl" id="lists-table">
+        <thead><tr><th>List</th><th>Publisher</th><th>People</th><th>Entities</th><th>List date</th><th>Downloaded</th><th>Last change</th><th>Used</th></tr></thead>
+        <tbody>
+        {% for l in lists %}
+        <tr><td class="strong">{{ l.label }} <span class="tag">{{ l.short }}</span></td><td class="small">{{ l.publisher }}</td>
+            <td>{{ '{:,}'.format(l.people) if l.downloaded else '—' }}</td><td>{{ '{:,}'.format(l.entities) if l.downloaded else '—' }}</td>
+            <td class="small nowrap">{{ l.published or '—' }}</td>
+            <td class="small nowrap">{{ l.fetched_at or 'not yet' }}{% if l.checked_at and l.checked_at != l.fetched_at %}<div class="tiny muted">checked {{ l.checked_at }}</div>{% endif %}
+                {% if l.error %}<div class="tiny" style="color:var(--rose-700, #b91c1c)">{{ l.error }}</div>{% endif %}</td>
+            <td class="small">{% if l.changed_at and l.changed_at != l.fetched_at or l.added or l.removed %}{{ l.added }} added, {{ l.removed }} taken off{% else %}—{% endif %}</td>
+            <td>{% if l.used %}<span class="badge emerald">Yes</span>{% else %}<span class="badge slate">No</span>{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="card-body small muted">Watched: {{ watched_cases }} {{ 'case' if watched_cases == 1 else 'cases' }} and {{ watched_api }} API {{ 'screening' if watched_api == 1 else 'screenings' }}. Each is screened again, free, whenever a list changes; a new record, or one taken off a list, is kept with it and sent to the client's system by the webhook. India enforces the UN list; its own MHA lists are web pages, not files, and are not here.</div>
+</div>
+
+<div class="card mt-12" id="lists-search">
+    <div class="card-head"><div><div class="card-title">Search the lists</div>
+        <div class="card-sub">a name on the four lists, as the screening searches it: free, nothing sent anywhere, nothing kept</div></div></div>
+    <div class="card-body">
+        <form method="get" action="{{ url_for('screening_lists') }}#lists-search" class="row" style="gap:8px;flex-wrap:wrap">
+            <input class="input input-sm" name="name" value="{{ q.name }}" placeholder="Full name" style="min-width:240px"{% if not ready %} disabled{% endif %}>
+            <input class="input input-sm" name="dob" value="{{ q.dob }}" placeholder="Date of birth (YYYY-MM-DD)" style="width:200px"{% if not ready %} disabled{% endif %}>
+            <input class="input input-sm" name="nationality" value="{{ q.nationality }}" placeholder="Nationality" style="width:150px"{% if not ready %} disabled{% endif %}>
+            <select class="input input-sm" name="kind"{% if not ready %} disabled{% endif %}><option value="person">a person</option><option value="entity"{% if kind == 'entity' %} selected{% endif %}>a company</option></select>
+            <button class="btn btn-outline btn-sm" type="submit"{% if not ready %} disabled title="Download the lists first"{% endif %}>{{ icon('search') }} Search</button>
+        </form>
+        {% if found is not none %}
+        {% if found %}
+        <div class="tbl-scroll mt-12">
+        <table class="tbl dense" id="lists-found">
+            <thead><tr><th>Record</th><th>Listed name</th><th>On</th><th>Score</th><th>Date of birth</th><th>Country</th><th>Programme</th></tr></thead>
+            <tbody>{% for h in found %}
+            <tr><td class="mono small">{{ h.uid }}</td>
+                <td class="strong">{{ h.name }}{% if h.aka %}<div class="tiny muted">also {{ h.aka[:3]|join('; ') }}</div>{% endif %}</td>
+                <td class="nowrap">{% for l in h.lists %}<span class="tag">{{ l }}</span> {% endfor %}</td>
+                <td class="nowrap">{{ h.score }} <span class="tiny muted">{{ h.strength }}</span></td>
+                <td class="small">{{ h.dob_text }}<div class="tiny muted">{{ h.dob_result }}</div></td>
+                <td class="small">{{ h.places|truncate(60) }}<div class="tiny muted">{{ h.country_result }}</div></td>
+                <td class="small">{{ h.programme|truncate(70) }}</td></tr>
+            {% endfor %}</tbody>
+        </table>
+        </div>
+        {% else %}<div class="screen-none mt-12" id="lists-none"><div><b>No listed {{ 'company' if kind == 'entity' else 'person' }} matches "{{ q.name }}".</b><div class="small muted">Nothing on the used lists scored the name at or above the search's floor (Settings, "name score").</div></div></div>{% endif %}
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mt-12" id="api-docs">
+    <div class="card-head"><div><div class="card-title">Our API</div>
+        <div class="card-sub">what the client's system calls, as it would call Didit: an ID becomes a screened case, a name becomes a screening, a watched name is screened again on every list change</div></div>
+        <a class="btn btn-outline btn-sm" href="{{ url_for('screening_settings') }}#settings-intake">{{ icon('sliders') }} Keys, prices and the webhook</a></div>
+    <div class="card-body">
+        <div class="small">Every call carries a key from Settings: <code>X-API-Key: &lt;key&gt;</code> (or <code>Authorization: Bearer &lt;key&gt;</code>). A wrong or revoked key is refused (401). Base address: <code>{{ api_base }}</code></div>
+        <table class="tbl dense mt-8" id="api-endpoints">
+            <thead><tr><th>Call</th><th>What it does</th><th>Charged</th></tr></thead>
+            <tbody>
+            <tr><td class="mono nowrap">POST /aml</td><td>Screen a name on our sanctions lists. JSON: <code>full_name</code> (required), <code>date_of_birth</code>, <code>nationality</code>, <code>entity_type</code> (person, company), <code>reference</code>, <code>match_threshold</code>, <code>max_hits</code>, <code>monitoring</code>. 201: <code>status</code> Approved (no hit) or In Review, the hits with their lists and scores.</td><td class="nowrap">${{ '%.2f'|format(prices.aml) }} a call{% if prices.watch %}<div class="tiny muted">+ ${{ '%.2f'|format(prices.watch) }} a watched name a year</div>{% endif %}</td></tr>
+            <tr><td class="mono nowrap">GET /aml/&lt;request_id&gt;</td><td>The screening, with every re-screen's change since.</td><td>free</td></tr>
+            <tr><td class="mono nowrap">GET /aml/&lt;request_id&gt;/history</td><td>The re-screens of a watched name: each change (new records, records taken off), newest first.</td><td>free</td></tr>
+            <tr><td class="mono nowrap">DELETE /aml/&lt;request_id&gt;/monitoring</td><td>Stop screening the name again.</td><td>free</td></tr>
+            <tr><td class="mono nowrap">POST /cases</td><td>Send an ID image (multipart <code>image</code>, or JSON <code>image_base64</code>): read by the AI, checked, screened, decided as an upload is. 201: the case.</td><td class="nowrap">${{ '%.2f'|format(prices.case) }} a call</td></tr>
+            <tr><td class="mono nowrap">GET /cases/&lt;scan_id&gt;</td><td>The case: the read, the hits with the AI's suggestion and each outcome, <code>outcome</code> once closed.</td><td>free</td></tr>
+            <tr><td class="mono nowrap">GET /lists</td><td>The lists screened on: when each was downloaded, its records, its last change.</td><td>free</td></tr>
+            <tr><td class="mono nowrap">GET /usage</td><td>The key's calls this month (<code>?month=YYYY-MM</code>) and what they come to.</td><td>free</td></tr>
+            </tbody>
+        </table>
+        <div class="small mt-12"><b>Screen a name:</b></div>
+        <pre class="sop-text">curl -X POST {{ api_base }}/aml -H "X-API-Key: &lt;key&gt;" -H "Content-Type: application/json" \
+  -d '{"full_name": "Ayman al Zawahiri", "date_of_birth": "1951-06-19", "nationality": "Egypt", "reference": "CUST-1042", "monitoring": true}'</pre>
+        <div class="small"><b>The webhook</b>{% if webhook_url %} (now <code>{{ webhook_url }}</code>){% else %} (no address yet: Settings){% endif %}: a <code>POST</code> of <code>{"event", "created_at", "data"}</code> for <code>case.closed</code> and <code>aml.list_change</code>. The header <code>X-Webhook-Signature</code> is <code>sha256=</code> and the HMAC-SHA256, with the signing secret, of <code>X-Webhook-Timestamp + "." + body</code>: check it before trusting the call.</div>
+        <pre class="sop-text">import hashlib, hmac
+expected = "sha256=" + hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+trusted = hmac.compare_digest(expected, signature_header)</pre>
+    </div>
+</div>
+
+<div class="card mt-12 pad-0" id="api-usage">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Usage, {{ month }}</div>
+        <div class="card-sub">the calls each key made this month, at the prices on Settings</div></div></div>
+    <table class="tbl">
+        <thead><tr><th>Key</th><th>IDs sent</th><th>Names screened</th><th>Watched now</th><th>This month</th><th>Last call</th></tr></thead>
+        <tbody>{% for k in usage %}
+        <tr><td class="strong">{{ k.name }} <span class="mono tiny muted">{{ k.prefix }}…</span></td><td>{{ k.month.calls.cases or 0 }}</td><td>{{ k.month.calls.aml or 0 }}</td>
+            <td>{{ k.month.watched }}{% if k.month.watching_a_year %} <span class="tiny muted">${{ '%.2f'|format(k.month.watching_a_year) }} a year</span>{% endif %}</td>
+            <td>${{ '%.2f'|format(k.month.amount) }}</td><td class="small">{{ k.last_used or '—' }}</td></tr>
+        {% else %}<tr><td colspan="6" class="small muted">No key yet: create one on <a href="{{ url_for('screening_settings') }}#settings-intake">Settings</a>.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card mt-12 pad-0" id="api-calls">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Names screened by the API</div>
+        <div class="card-sub">{{ api_total }} in all; the latest 10</div></div></div>
+    <table class="tbl dense">
+        <thead><tr><th>Request</th><th>When</th><th>Key</th><th>Name</th><th>Answer</th><th>Watched</th><th>Changes</th></tr></thead>
+        <tbody>{% for r in api_calls %}
+        <tr><td class="mono small">{{ r.id }}</td><td class="small nowrap">{{ r.created_at }}</td><td class="small">{{ r.key_name }}</td>
+            <td class="strong">{{ r.query.full_name }}{% if r.reference %}<div class="tiny muted">{{ r.reference }}</div>{% endif %}</td>
+            <td>{% if r.total_hits %}<span class="badge amber">In Review · {{ r.total_hits }}</span>{% else %}<span class="badge emerald">Approved</span>{% endif %}</td>
+            <td class="small">{{ 'Yes' if r.monitoring and not (r.monitoring_stopped or {}).done else 'No' }}</td>
+            <td class="small">{% set ch = (r.history or {}).changes or [] %}{% if ch %}<span class="badge rose">{{ ch|length }}</span> latest {{ ch[0].at }}{% else %}—{% endif %}</td></tr>
+        {% else %}<tr><td colspan="7" class="small muted">No name screened by the API yet.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card mt-12 pad-0" id="api-events">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Webhook deliveries</div>
+        <div class="card-sub">the latest 12</div></div></div>
+    <table class="tbl dense">
+        <thead><tr><th>When</th><th>Event</th><th>About</th><th>Answer</th></tr></thead>
+        <tbody>{% for e in events %}
+        <tr><td class="small nowrap">{{ e.at }}</td><td class="mono small">{{ e.event }}</td><td class="mono small">{{ e.subject or '—' }}</td>
+            <td>{% if e.ok %}<span class="badge emerald">{{ e.status }}</span>{% else %}<span class="badge rose">Not delivered</span> <span class="tiny muted">{{ e.error }}</span>{% endif %}</td></tr>
+        {% else %}<tr><td colspan="4" class="small muted">Nothing sent yet{% if not webhook_url %}: no webhook address on Settings{% endif %}.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

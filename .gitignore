@@ -34,3 +34,6 @@ server.log
 .idea/
 Thumbs.db
 .DS_Store
+
+# Sanctions lists downloaded from their publishers (fincrime/sanctions.py): rebuilt by a download.
+sanctions_lists/
