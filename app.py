@@ -22,8 +22,6 @@ import re
 import secrets
 import threading
 import time
-import urllib.error
-import urllib.request
 from functools import wraps
 from urllib.parse import urlsplit
 
@@ -48,7 +46,7 @@ from fincrime.analytics.queues import QueueConsole
 from fincrime.analytics.routing_console import RoutingConsole
 from fincrime.analytics.trackers import TrackerConsole, to_csv
 from fincrime.analytics.work import WorkConsole
-from fincrime import benchmark, decision_model, id_screening, sanctions, upload_eval, watchlist
+from fincrime import benchmark, decision_model, id_screening, upload_eval, watchlist
 from fincrime.data import vocab
 from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
@@ -124,8 +122,7 @@ CONSOLE_KINDS = ("kyc", "alert", "wc", "analyst", "settings", "upload")
 _SHOW_DEMO_HINT = "STRAIVE_DEMO_PASSWORD" not in os.environ
 
 ROLE_LABEL = {"L1": "L1 Analyst", "L2": "L2 Analyst", "EDD": "EDD Analyst", "QC": "QC Lead"}
-PUBLIC_ENDPOINTS = {"portal", "login", "logout", "static", "api_cases", "api_case", "api_aml", "api_aml_one",
-                    "api_aml_history", "api_aml_unwatch", "api_lists", "api_usage"}     # the API checks its own key
+PUBLIC_ENDPOINTS = {"portal", "login", "logout", "static", "api_cases", "api_case"}     # the API checks its own key
 
 ANALYSTS = []            # filled by _load_seed
 ANALYST_BY_KEY = {}
@@ -238,7 +235,7 @@ _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
               ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"), ("model_evaluation", "model_evaluation"), ("scan", "scan_id"),
-              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"), ("screening_lists", "screening_lists"))
+              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"))
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -264,8 +261,6 @@ def _side_nav():
          "endpoint": "screening_sop", "active": owner == "screening_sop"},
         {"label": "Settings", "title": "World-Check connection, models, search", "icon": "sliders",
          "endpoint": "screening_settings", "active": owner == "screening_settings"},
-        {"label": "Lists and API", "title": "Our sanctions lists, and the API the client's system calls", "icon": "globe",
-         "endpoint": "screening_lists", "active": owner == "screening_lists"},
     ]
     insights = [
         {"label": "Architecture", "icon": "layers", "endpoint": "architecture", "active": owner == "architecture"},
@@ -1722,7 +1717,6 @@ def _agent_autostart():
         return
     AI_AGENT["autostarted"] = True
     _screen_resume()
-    threading.Thread(target=_lists_daily, name="sanctions-daily", daemon=True).start()
     if ai_review.configured() and CASE_BOOK != "screening":
         _agent_start("System")
 
@@ -1955,18 +1949,14 @@ def _sop_stored():
 
 
 def _screen_update(scan_id, change):
-    """Apply `change` to the stored record and save it; the record, or None.
-    A case it closes is sent to the client's system (the webhook)."""
+    """Apply `change` to the stored record and save it; the record, or None."""
     with _SCREEN_LOCK:
         rec = _scan_or_none(scan_id)
         if rec is None:
             return None
-        was = rec.get("status", "open")
         change(rec)
         _save("scan", rec)
-    if was != "closed" and rec.get("status") == "closed":
-        _webhook("case.closed", _webhook_case(rec))
-    return rec
+        return rec
 
 
 def _hit(rec, uid):
@@ -2042,7 +2032,6 @@ def _screen_search(rec):
     before keep their confirmation)."""
     who = id_screening.person(rec.get("read"))
     hits, source, error, csid, aml = id_screening.search(who, SCREEN_SETTINGS, rec.get("id", ""))
-    watch = (rec.get("screening") or {}).get("lists") or {}
     before = {h["uid"]: h for h in (rec.get("screening") or {}).get("hits") or []}
     for h in hits:
         if before.get(h["uid"], {}).get("resolution"):
@@ -2050,12 +2039,6 @@ def _screen_search(rec):
     rec["screening"] = {"person": who, "source": source, "source_label": id_screening.source_label(SCREEN_SETTINGS),
                         "at": dates.now_str(), "hits": hits, "error": error, "case_system_id": csid, "aml": aml,
                         "searched": {k: who[k] for k in ("name", "dob", "sex", "nationality")}}
-    if source == sanctions.SOURCE:                  # the lists' downloads it was made on, and the person watched
-        cfg = SCREEN_SETTINGS["sanctions"]
-        stopped = watch.get("monitoring_stopped")
-        rec["screening"]["lists"] = {"versions": sanctions.versions(cfg), "history": watch.get("history"), "monitoring_stopped": stopped,
-                                     "monitoring": bool(cfg.get("monitoring") or watch.get("monitoring")) and not (stopped or {}).get("done"),
-                                     "known": sorted({u for h in hits for u in h.get("list_ids") or []} | set(watch.get("known") or []))}
 
 
 @app.route("/scan", methods=["GET", "POST"])
@@ -2074,7 +2057,6 @@ def scan_id():
                                model_ready=id_scan.model_ready(), scans=shown, status=status,
                                counts={k: sum(1 for s in scans if kind(s) == k) for k in ("open", "auto", "closed")} | {"all": len(scans)},
                                auto_on=SCREEN_SETTINGS.get("auto_verify"), watched=sum(1 for s in scans if _watched(s)),
-                               lists_watched=sum(1 for s in scans if _lists_watched(s)),
                                source=id_screening.source_label(SCREEN_SETTINGS), outcome=id_screening.outcome)
     f = request.files.get("image")
     if not f or not f.filename:
@@ -2157,8 +2139,6 @@ def _new_scan(data, filename, reader, actor, reference=""):
             record["idv"] = {"provider": "Didit", "status": "pending", "at": at}
         id_screening.auto_verify(record, SCREEN_SETTINGS)          # a case with no hit (hits wait for the AI)
     _save("scan", record)
-    if record.get("status") == "closed":
-        _webhook("case.closed", _webhook_case(record))
     _screen_queue(sid, why="upload")
     if (record.get("idv") or {}).get("status") == "pending":
         _idv_start(sid)
@@ -2318,264 +2298,6 @@ def scan_aadhaar(scan_id):
     return back
 
 
-# ─── Our own sanctions lists (fincrime/sanctions): downloaded, and watched ──────
-# The lists are downloaded on the Lists and API page, then again every day
-# (Settings). A person screened on them, from an uploaded ID or by the API, is
-# watched: when a list changes they are screened again here, free, and a new
-# record or one taken off the lists is kept with the case (and sent to the
-# client's system by the webhook).
-LISTS_JOB = {"running": False, "started_at": "", "by": "", "last": None}
-
-
-def _lists_watched(rec):
-    ls = (rec.get("screening") or {}).get("lists") or {}
-    return bool(ls.get("monitoring") and not (ls.get("monitoring_stopped") or {}).get("done"))
-
-
-def _api_watched(rec):
-    return bool(rec.get("monitoring") and not (rec.get("monitoring_stopped") or {}).get("done"))
-
-
-def _hit_brief(h):
-    return {k: h.get(k) for k in ("uid", "name", "lists", "list_ids", "score", "strength", "dob_text", "dob_result",
-                                  "country_result", "programme")}
-
-
-def _lists_history(watch, new, gone, at):
-    """One re-screen kept on a watched screening (a case's, or an API
-    request's): the records it knows grow by the new ones and lose those
-    taken off the lists. The change, or None."""
-    h = dict(watch.get("history") or {"runs": 0, "changes": []})
-    h.update(runs=h.get("runs", 0) + 1, checked_at=at, versions=sanctions.versions(SCREEN_SETTINGS["sanctions"]))
-    change = None
-    if new or gone:
-        change = {"at": at, "added": [_hit_brief(x) for x in new], "delisted": gone}
-        h["changes"] = ([change] + (h.get("changes") or []))[:10]
-        watch["known"] = sorted((set(watch.get("known") or []) | {u for x in new for u in x["list_ids"]}) - set(gone))
-    watch["history"] = h
-    return change
-
-
-def _change_words(change):
-    if not change:
-        return "nothing changed."
-    parts = []
-    if change["added"]:
-        parts.append(f"{len(change['added'])} new record(s): " + "; ".join(f"{a['name']} ({', '.join(a['lists'])})" for a in change["added"][:3]))
-    if change["delisted"]:
-        parts.append(f"{len(change['delisted'])} taken off the lists: {', '.join(change['delisted'][:4])}")
-    return ". ".join(parts) + "."
-
-
-def _lists_rescreen_case(scan_id):
-    """A watched case's person screened again on today's lists; the change, or None."""
-    rec = _scan_or_none(scan_id)
-    if not rec or not _lists_watched(rec):
-        return None
-    s = SCREEN_SETTINGS
-    _, new, gone = sanctions.rescreen(rec["screening"]["person"], rec["screening"]["lists"].get("known"), s["sanctions"],
-                                      int(s["name_threshold"]), int(s["max_hits"]), s.get("strength_bands"))
-    at, out = dates.now_str(), {}
-
-    def land(r):
-        out["change"] = _lists_history(r["screening"]["lists"], new, gone, at)
-    _screen_update(scan_id, land)
-    if out.get("change"):
-        _webhook("aml.list_change", {"scan_id": scan_id, "reference": rec.get("reference", ""),
-                                     "name": rec["screening"]["person"].get("name", ""), "change": out["change"]})
-    return out.get("change")
-
-
-def _api_aml(request_id):
-    return next((r for r in StateStore.records("api_aml") if r.get("id") == request_id), None)
-
-
-def _api_aml_rescreen(request_id):
-    """A watched API request screened again on today's lists; the change, or None."""
-    with _SCREEN_LOCK:
-        rec = _api_aml(request_id)
-        if not rec or not _api_watched(rec):
-            return None
-        q = rec["query"]
-        _, new, gone = sanctions.rescreen({"name": q["full_name"], "dob": q.get("date_of_birth", ""), "nationality": q.get("nationality", "")},
-                                          rec.get("known"), SCREEN_SETTINGS["sanctions"], int(q["match_threshold"]), int(q["max_hits"]),
-                                          SCREEN_SETTINGS.get("strength_bands"), "entity" if q.get("entity_type") == "company" else "person")
-        change = _lists_history(rec, new, gone, dates.now_str())
-        _save("api_aml", rec)
-    if change:
-        _webhook("aml.list_change", {"request_id": request_id, "reference": rec.get("reference", ""), "name": q["full_name"],
-                                     "change": change})
-    return change
-
-
-def _lists_update(by):
-    """Download the lists again; when one changed, screen every watched person
-    again (free: it is all here)."""
-    try:
-        result = sanctions.update(SCREEN_SETTINGS["sanctions"])
-    except sanctions.ListError as exc:
-        LISTS_JOB.update(running=False, last={"at": dates.now_str(), "by": by, "error": str(exc)})
-        return
-    rescreened, changes = 0, []
-    if any(r["changed"] for r in result.values()):
-        for rec in _scans():
-            if _lists_watched(rec):
-                rescreened += 1
-                if _lists_rescreen_case(rec["id"]):
-                    changes.append(rec["id"])
-        for rec in StateStore.records("api_aml"):
-            if _api_watched(rec):
-                rescreened += 1
-                if _api_aml_rescreen(rec["id"]):
-                    changes.append(rec["id"])
-    errors = "; ".join(f"{sanctions.LISTS[k]['short']}: {r['error']}" for k, r in result.items() if r.get("error"))
-    LISTS_JOB.update(running=False, last={"at": dates.now_str(), "by": by, "result": result, "rescreened": rescreened,
-                                          "changes": changes, "error": errors})
-
-
-def _lists_update_safe(by):
-    try:
-        _lists_update(by)
-    except Exception as exc:                # a failed download never leaves the page saying "downloading"
-        app.logger.exception("Sanctions list update failed")
-        LISTS_JOB.update(running=False, last={"at": dates.now_str(), "by": by, "error": f"{type(exc).__name__}: {exc}"[:300]})
-
-
-def _lists_start(by):
-    """Start a download (in the background; at once under the test client). False when one runs."""
-    if LISTS_JOB["running"]:
-        return False
-    LISTS_JOB.update(running=True, started_at=dates.now_str(), by=by)
-    if app.testing:
-        _lists_update_safe(by)
-    else:
-        threading.Thread(target=_lists_update_safe, args=(by,), name="sanctions-lists", daemon=True).start()
-    return True
-
-
-def _lists_daily():
-    """Download the lists again once the oldest check is older than Settings
-    says (only once they were downloaded the first time, by hand)."""
-    while True:
-        cfg = SCREEN_SETTINGS.get("sanctions") or {}
-        age = sanctions.age_hours(cfg)
-        if cfg.get("auto_update") and age is not None and age >= float(cfg.get("update_hours") or 24):
-            _lists_start("Daily update")
-        time.sleep(900)
-
-
-@app.route("/screening/lists")
-def screening_lists():
-    """Our sanctions lists, a name searched on them, and the API that serves them."""
-    s = SCREEN_SETTINGS
-    cfg = s["sanctions"]
-    q = {k: request.args.get(k, "").strip()[:200] for k in ("name", "dob", "nationality")}
-    kind = "entity" if request.args.get("kind") == "entity" else "person"
-    found = (sanctions.search(q, cfg, int(s["name_threshold"]), 10, s.get("strength_bands"), kind)
-             if q["name"] and sanctions.ready(cfg) else None)
-    month = dates.now_str()[:7]
-    usage = [dict(k, month=_usage(k, month)) for k in s.get("intake_keys") or []]
-    events = sorted(StateStore.records("api_event"), key=lambda e: e.get("at", ""), reverse=True)[:12]
-    api_calls = sorted(StateStore.records("api_aml"), key=lambda e: e.get("created_at", ""), reverse=True)
-    return render_template("screening_lists.html", lists=sanctions.lists(cfg), cfg=cfg, job=LISTS_JOB, q=q, kind=kind, found=found,
-                           usage=usage, month=month, events=events, api_calls=api_calls[:10], api_total=len(api_calls),
-                           watched_cases=sum(1 for r in _scans() if _lists_watched(r)), watched_api=sum(1 for r in api_calls if _api_watched(r)),
-                           ready=sanctions.ready(cfg), screening_on=id_screening.source(s) == "own_lists", age=sanctions.age_hours(cfg),
-                           api_base=request.url_root.rstrip("/") + "/api/v1", webhook_url=s.get("webhook_url", ""),
-                           prices={"case": s.get("api_price_case", 0), "aml": s.get("api_price_aml", 0), "watch": s.get("api_price_watch", 0)})
-
-
-@app.route("/screening/lists/update", methods=["POST"])
-def screening_lists_update():
-    """Download the lists from their publishers now."""
-    if not sanctions.enabled(SCREEN_SETTINGS["sanctions"]):
-        flash("No list is ticked on Settings.", "error")
-    elif _lists_start(_actor()):
-        last = LISTS_JOB.get("last") or {}
-        if app.testing and last.get("error"):
-            flash("Not every list was downloaded: " + last["error"], "error")
-        else:
-            flash("Downloading the lists from their publishers: about a minute. Every watched person is screened again if a list "
-                  "changed.", "success")
-    else:
-        flash("The lists are being downloaded already.", "error")
-    return redirect(url_for("screening_lists"))
-
-
-@app.route("/scan/<scan_id>/lists-rescreen", methods=["POST"])
-def scan_lists_rescreen(scan_id):
-    """Screen the watched person on today's lists now (free)."""
-    rec = _scan(scan_id)
-    back = redirect(url_for("scan_result", scan_id=scan_id) + "#screening")
-    if not _lists_watched(rec):
-        flash("This person is not watched on our sanctions lists.", "error")
-        return back
-    change = _lists_rescreen_case(scan_id)
-    flash("Screened again on today's lists: " + _change_words(change), "error" if change else "success")
-    return back
-
-
-@app.route("/scan/<scan_id>/lists-unwatch", methods=["POST"])
-def scan_lists_unwatch(scan_id):
-    rec = _scan(scan_id)
-    if _lists_watched(rec):
-        _screen_update(scan_id, lambda r: r["screening"]["lists"].update(
-            monitoring_stopped={"done": True, "at": dates.now_str(), "by": _actor()}))
-        flash("This person is no longer screened again when the lists change.", "success")
-    return redirect(url_for("scan_result", scan_id=scan_id) + "#screening")
-
-
-# ─── Webhooks: the client's system is told of a closed case or a list change ──
-def _webhook_case(rec):
-    closed = rec.get("closed") or {}
-    return {"scan_id": rec["id"], "reference": rec.get("reference", ""), "status": rec.get("status", "open"),
-            "outcome": id_screening.outcome(rec) if rec.get("status") == "closed" else None,
-            "auto_verified": bool(closed.get("auto")), "closed_at": closed.get("at", "")}
-
-
-def _webhook_post(url, body, headers):
-    """One delivery (the suite replaces it). The HTTP status."""
-    req = urllib.request.Request(url, data=body, method="POST", headers=headers)
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return r.status
-
-
-def _webhook(event, data, wait=False):
-    """POST the event to the webhook address on Settings, signed: the header
-    X-Webhook-Signature is sha256=HMAC-SHA256(secret, timestamp + "." + body).
-    In the background unless `wait`; each delivery is kept (kind api_event).
-    Returns the delivery when it waited, else None."""
-    url, secret = SCREEN_SETTINGS.get("webhook_url") or "", SCREEN_SETTINGS.get("webhook_secret") or ""
-    if not url:
-        return None
-    at = dates.now_str()
-    body = json.dumps({"event": event, "created_at": at, "data": data}, ensure_ascii=False).encode("utf-8")
-    stamp = str(int(time.time()))
-    headers = {"Content-Type": "application/json", "User-Agent": "screening-console-webhook/1.0", "X-Webhook-Event": event,
-               "X-Webhook-Timestamp": stamp,
-               "X-Webhook-Signature": "sha256=" + hmac.new(secret.encode(), stamp.encode() + b"." + body, hashlib.sha256).hexdigest()}
-
-    def deliver():
-        try:
-            code = _webhook_post(url, body, headers)
-            ok, err = 200 <= code < 300, "" if 200 <= code < 300 else f"answered {code}"
-        except urllib.error.HTTPError as exc:
-            code, ok, err = exc.code, False, f"answered {exc.code}"
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            code, ok, err = 0, False, f"{type(exc).__name__}: {str(exc)[:160]}"
-        ev = {"id": "EVT-" + "".join(ch for ch in at if ch.isdigit()) + "-" + secrets.token_hex(3).upper(), "at": at, "event": event,
-              "url": url, "status": code, "ok": ok, "error": err, "subject": data.get("scan_id") or data.get("request_id") or ""}
-        _save("api_event", ev)
-        kept = sorted(StateStore.records("api_event"), key=lambda e: e.get("at", ""))
-        if len(kept) > 200:
-            StateStore.delete("api_event", [e["id"] for e in kept[:-200]])
-        return ev
-    if wait or app.testing:
-        return deliver()
-    threading.Thread(target=deliver, name="webhook", daemon=True).start()
-    return None
-
-
 # ─── The intake API: the client's onboarding system sends IDs ─────────────────
 def _intake_key():
     """The intake key the request carries (X-API-Key, or Authorization:
@@ -2625,7 +2347,8 @@ def api_cases():
         rec = _new_scan(data, name, reader or None, f"Intake API ({key['name']})", reference)
     except WorkflowError as exc:
         return _api_error(400, str(exc))
-    _meter(key, "cases")
+    key["last_used"] = dates.now_str()
+    _save("settings", SCREEN_SETTINGS)
     return jsonify(_scan_export(_scan(rec["id"]))), 201, {"Location": url_for("api_case", scan_id=rec["id"])}
 
 
@@ -2639,156 +2362,6 @@ def api_case(scan_id):
     return jsonify(_scan_export(rec)) if rec else _api_error(404, f"No case {scan_id}.")
 
 
-# ─── Our API, Didit's way: a name screened on our sanctions lists ─────────────
-_API_401 = "A valid API key is required: the X-API-Key header, or Authorization: Bearer."
-
-
-def _usage(key, month):
-    """The key's calls of a month, and what they come to at Settings' prices."""
-    calls = dict((key.get("usage") or {}).get(month) or {})
-    s = SCREEN_SETTINGS
-    watched = sum(1 for r in StateStore.records("api_aml") if r.get("key_id") == key["id"] and _api_watched(r))
-    amount = calls.get("cases", 0) * float(s.get("api_price_case") or 0) + calls.get("aml", 0) * float(s.get("api_price_aml") or 0)
-    return {"month": month, "calls": calls, "amount": round(amount, 2), "watched": watched,
-            "watching_a_year": round(watched * float(s.get("api_price_watch") or 0), 2)}
-
-
-def _meter(key, what):
-    """Count one billable call of the key's, by month, and save it."""
-    month = dates.now_str()[:7]
-    use = key.setdefault("usage", {}).setdefault(month, {})
-    use[what] = use.get(what, 0) + 1
-    key["last_used"] = dates.now_str()
-    _save("settings", SCREEN_SETTINGS)
-
-
-def _api_hit(h):
-    return {k: h.get(k) for k in ("uid", "name", "aka", "lists", "list_ids", "programme", "listed_on", "dob_text", "places",
-                                  "score", "strength", "dob_result", "country_result", "narrative")}
-
-
-def _api_aml_view(r):
-    h = r.get("history") or {}
-    return {"request_id": r["id"], "created_at": r["created_at"], "reference": r.get("reference", ""), "query": r["query"],
-            "status": r["status"], "total_hits": r["total_hits"], "score": r["score"], "hits": r["hits"], "lists": r["lists"],
-            "monitoring": _api_watched(r), "monitoring_stopped_at": (r.get("monitoring_stopped") or {}).get("at", ""),
-            "rescreens": h.get("runs", 0), "last_rescreen_at": h.get("checked_at", ""), "changes": h.get("changes") or []}
-
-
-@app.route("/api/v1/aml", methods=["POST"])
-def api_aml():
-    """Screen a name on our sanctions lists. JSON: full_name (required),
-    date_of_birth (YYYY-MM-DD), nationality, entity_type (person, company),
-    reference, match_threshold (50-100), max_hits (1-50), monitoring (true:
-    screened again whenever a list changes). 201: the screening."""
-    key = _intake_key()
-    if not key:
-        return _api_error(401, _API_401)
-    cfg, s = SCREEN_SETTINGS["sanctions"], SCREEN_SETTINGS
-    if not sanctions.ready(cfg):
-        return _api_error(503, "The sanctions lists are not downloaded yet: download them on the Lists and API page.")
-    body = request.get_json(silent=True)
-    if not isinstance(body, dict):
-        return _api_error(400, "Send a JSON body: {\"full_name\": \"...\"}.")
-    name = str(body.get("full_name") or "").strip()[:200]
-    kind = str(body.get("entity_type") or "person").lower()
-    dob = str(body.get("date_of_birth") or "").strip()[:10]
-    if not name:
-        return _api_error(400, "full_name is required.")
-    if kind not in ("person", "company"):
-        return _api_error(400, "entity_type is person or company.")
-    if dob and not re.match(r"\d{4}(-\d{2}-\d{2})?$", dob):
-        return _api_error(400, "date_of_birth is YYYY-MM-DD (or YYYY).")
-    try:
-        threshold = int(body.get("match_threshold") or s["name_threshold"])
-        limit = int(body.get("max_hits") or 10)
-    except (TypeError, ValueError):
-        return _api_error(400, "match_threshold and max_hits are whole numbers.")
-    if not (50 <= threshold <= 100 and 1 <= limit <= 50):
-        return _api_error(400, "match_threshold is 50-100; max_hits 1-50.")
-    who = {"name": name, "dob": dob, "nationality": str(body.get("nationality") or "").strip()[:60], "issuing_country": ""}
-    hits = sanctions.search(who, cfg, threshold, limit, s.get("strength_bands"), "entity" if kind == "company" else "person")
-    at = dates.now_str()
-    rid = "AML-" + "".join(ch for ch in at if ch.isdigit()) + "-" + secrets.token_hex(3).upper()
-    monitor = body.get("monitoring")
-    rec = {"id": rid, "created_at": at, "key_id": key["id"], "key_name": key["name"], "reference": str(body.get("reference") or "")[:120],
-           "query": {"full_name": name, "date_of_birth": dob, "nationality": who["nationality"], "entity_type": kind,
-                     "match_threshold": threshold, "max_hits": limit},
-           "status": "In Review" if hits else "Approved", "total_hits": len(hits), "score": max((h["score"] for h in hits), default=0),
-           "hits": [_api_hit(h) for h in hits], "lists": sanctions.versions(cfg),
-           "monitoring": bool(cfg.get("monitoring")) if monitor is None else bool(monitor),
-           "known": sorted({u for h in hits for u in h["list_ids"]})}
-    _save("api_aml", rec)
-    _meter(key, "aml")
-    return jsonify(_api_aml_view(rec)), 201, {"Location": url_for("api_aml_one", request_id=rid)}
-
-
-def _api_own(request_id):
-    """(the key's request, None) or (None, an error answer)."""
-    key = _intake_key()
-    if not key:
-        return None, _api_error(401, _API_401)
-    rec = _api_aml(request_id)
-    if not rec or rec.get("key_id") != key["id"]:
-        return None, _api_error(404, f"No screening {request_id} for this key.")
-    return rec, None
-
-
-@app.route("/api/v1/aml/<request_id>")
-def api_aml_one(request_id):
-    rec, err = _api_own(request_id)
-    return err or jsonify(_api_aml_view(rec))
-
-
-@app.route("/api/v1/aml/<request_id>/history")
-def api_aml_history(request_id):
-    """The re-screens of a watched name: each change, newest first."""
-    rec, err = _api_own(request_id)
-    if err:
-        return err
-    h = rec.get("history") or {}
-    return jsonify({"request_id": rec["id"], "monitoring": _api_watched(rec), "count": h.get("runs", 0),
-                    "checked_at": h.get("checked_at", ""), "results": h.get("changes") or []})
-
-
-@app.route("/api/v1/aml/<request_id>/monitoring", methods=["DELETE"])
-def api_aml_unwatch(request_id):
-    """Stop screening the name again when the lists change."""
-    rec, err = _api_own(request_id)
-    if err:
-        return err
-    with _SCREEN_LOCK:
-        rec = _api_aml(request_id)
-        rec["monitoring_stopped"] = {"done": True, "at": dates.now_str(), "by": f"API ({rec['key_name']})"}
-        _save("api_aml", rec)
-    return jsonify({"request_id": request_id, "monitoring": False})
-
-
-@app.route("/api/v1/lists")
-def api_lists():
-    """The sanctions lists the API screens on: when each was downloaded, its records, its last change."""
-    if not _intake_key():
-        return _api_error(401, _API_401)
-    cfg = SCREEN_SETTINGS["sanctions"]
-    return jsonify({"lists": [{k: l[k] for k in ("key", "label", "publisher", "used", "downloaded", "published", "fetched_at", "people",
-                                                 "entities", "changed_at", "added", "removed")} for l in sanctions.lists(cfg)],
-                    "update_every_hours": cfg.get("update_hours"), "monitoring_default": bool(cfg.get("monitoring"))})
-
-
-@app.route("/api/v1/usage")
-def api_usage():
-    """The calling key's calls this month (or ?month=YYYY-MM) and what they come to."""
-    key = _intake_key()
-    if not key:
-        return _api_error(401, _API_401)
-    month = request.args.get("month") or dates.now_str()[:7]
-    if not re.match(r"\d{4}-\d{2}$", month):
-        return _api_error(400, "month is YYYY-MM.")
-    return jsonify(dict(_usage(key, month), key=key["name"], prices={"case": SCREEN_SETTINGS.get("api_price_case", 0),
-                                                                     "aml": SCREEN_SETTINGS.get("api_price_aml", 0),
-                                                                     "watch_a_year": SCREEN_SETTINGS.get("api_price_watch", 0)}))
-
-
 @app.route("/scan/<scan_id>")
 def scan_result(scan_id):
     rec = _scan(scan_id)
@@ -2798,8 +2371,7 @@ def scan_result(scan_id):
                            idv_counts=SCREEN_SETTINGS.get("auto_needs_idv", True),
                            outcomes=id_screening.ALERT_OUTCOME, sop=id_screening.sop_current(_sop_stored()),
                            aadhaar_pre=_aadhaar_prefill(rec), aadhaar_price=SCREEN_SETTINGS["didit"].get("aadhaar_price", 0),
-                           aml_monitor_price=SCREEN_SETTINGS["didit"].get("aml_monitoring_price", 0),
-                           lists_hours=SCREEN_SETTINGS["sanctions"].get("update_hours", 24))
+                           aml_monitor_price=SCREEN_SETTINGS["didit"].get("aml_monitoring_price", 0))
 
 
 def _aadhaar_prefill(rec):
@@ -2941,11 +2513,9 @@ def _scan_export(rec):
             "fields": read.get("fields", {}), "uncertain": read.get("uncertain", []), "mrz": read.get("mrz", []),
             "checks": rec.get("checks", []), "model": rec.get("model"),
             "screening": sc and {"source": sc.get("source"), "searched": sc.get("searched"), "at": sc.get("at"), "error": sc.get("error"),
-                                 "didit_aml": sc.get("aml"), "sanctions_lists": sc.get("lists"),
+                                 "didit_aml": sc.get("aml"),
                                  "hits": [{k: h.get(k) for k in ("uid", "name", "aka", "dob_text", "places", "category", "score",
-                                                                  "strength", "dob_result", "country_result", "lists", "list_ids",
-                                                                  "programme", "ai", "resolution")
-                                           if k in h or k not in ("lists", "list_ids", "programme")}
+                                                                  "strength", "dob_result", "country_result", "ai", "resolution")}
                                           for h in sc.get("hits") or []]},
             "closed": rec.get("closed"), "reference": rec.get("reference", ""), "uploaded_by": rec.get("by", ""),
             "auto_verified": bool((rec.get("closed") or {}).get("auto")), "qc_sample": bool(rec.get("qc_sample")),
@@ -3033,10 +2603,9 @@ def screening_settings():
         if not (0 <= examples <= 12 and 50 <= threshold <= 100 and 1 <= max_hits <= 20):
             flash("Examples 0-12, name score 50-100, hits 1-20.", "error")
             return redirect(url_for("screening_settings"))
-        if f.get("checks_form") or f.get("team_form") or f.get("rules_form") or f.get("lists_form") or f.get("api_form"):
+        if f.get("checks_form") or f.get("team_form") or f.get("rules_form"):  # the checks and lists, team, rules cards
             err = ((f.get("checks_form") and _checks_update(s, f)) or (f.get("team_form") and _team_update(s, f))
-                   or (f.get("rules_form") and _rules_update(s, f)) or (f.get("lists_form") and _lists_settings_update(s, f))
-                   or (f.get("api_form") and _api_update(s, f)))
+                   or (f.get("rules_form") and _rules_update(s, f)))
             if err:
                 flash(err, "error")
                 return redirect(url_for("screening_settings"))
@@ -3091,10 +2660,7 @@ def screening_settings():
                            readers=_readers(), deciders=id_screening.decision_models(s), live=world_check.configured(s["world_check"]),
                            sources=id_screening.SOURCES, screen_source=id_screening.source(s), aml_scenarios=didit.AML_SCENARIOS,
                            source_ready={"stand-in": True, "world_check": world_check.configured(s["world_check"]),
-                                         "didit_aml": didit.configured(s["didit"]), "own_lists": sanctions.ready(s["sanctions"])},
-                           sl=s["sanctions"], lists=sanctions.lists(s["sanctions"]), list_labels=sanctions.LISTS,
-                           new_webhook_secret=session.pop("new_webhook_secret", None), webhook_secret_shown=_masked(s.get("webhook_secret")),
-                           month=dates.now_str()[:7], usage={k["id"]: _usage(k, dates.now_str()[:7]) for k in s.get("intake_keys") or []},
+                                         "didit_aml": didit.configured(s["didit"])},
                            providers=MODEL_PROVIDERS, reader_instructions=s.get("reader_instructions") or id_scan.SYSTEM,
                            team=s.get("team") or [{"name": a["name"], "email": a["email"], "roles": a["roles"]} for a in ANALYSTS],
                            team_roles=TEAM_ROLES,
@@ -3312,74 +2878,6 @@ def intake_key_revoke(key_id):
     flash(f"Revoked the key for {gone[0]['name']}: calls with it are refused from now." if gone else "No such key.",
           "success" if gone else "error")
     return redirect(url_for("screening_settings") + "#settings-intake")
-
-
-@app.route("/screening/settings/webhook-secret", methods=["POST"])
-def webhook_secret_new():
-    """A new signing secret for the webhook, shown once (the QC lead)."""
-    if "QC" not in _levels():
-        flash("Only the QC lead changes the webhook.", "error")
-        return redirect(url_for("screening_settings") + "#settings-api")
-    SCREEN_SETTINGS["webhook_secret"] = "whsec_" + secrets.token_urlsafe(24)
-    _save("settings", SCREEN_SETTINGS)
-    session["new_webhook_secret"] = SCREEN_SETTINGS["webhook_secret"]
-    return redirect(url_for("screening_settings") + "#settings-api")
-
-
-@app.route("/screening/settings/webhook-test", methods=["POST"])
-def webhook_test():
-    """Send the webhook a test event and say what its address answered."""
-    if "QC" not in _levels():
-        flash("Only the QC lead tests the webhook.", "error")
-        return redirect(url_for("screening_settings") + "#settings-api")
-    if not SCREEN_SETTINGS.get("webhook_url"):
-        flash("Enter and save the webhook address first.", "error")
-        return redirect(url_for("screening_settings") + "#settings-api")
-    ev = _webhook("ping", {"message": "A test event from the screening console."}, wait=True)
-    flash(f"The webhook address answered {ev['status']}." if ev["ok"] else f"The webhook was not delivered: {ev['error']}.",
-          "success" if ev["ok"] else "error")
-    return redirect(url_for("screening_settings") + "#settings-api")
-
-
-def _lists_settings_update(s, f):
-    """Our sanctions lists' settings from the form ("" when saved, else what is wrong)."""
-    cfg = s["sanctions"]
-    try:
-        hours = int(f.get("sl_update_hours", cfg["update_hours"]))
-    except ValueError:
-        return "The hours between downloads are a whole number."
-    if not 1 <= hours <= 720:
-        return "Download the lists every 1 to 720 hours."
-    use = {k: bool(f.get("sl_use_" + k)) for k in sanctions.LISTS}
-    if not any(use.values()):
-        return "Tick at least one sanctions list."
-    urls = {}
-    for k in ("ofac_url", "ofac_alt_url", "un_url", "uk_url", "eu_url"):
-        v = f.get("sl_" + k, "").strip()
-        if v and not v.startswith("https://"):
-            return "The lists' addresses start with https://."
-        urls[k] = v or sanctions.DEFAULTS[k]
-    cfg.update({"use_" + k: v for k, v in use.items()}, **urls)
-    cfg.update(update_hours=hours, auto_update=bool(f.get("sl_auto_update")), monitoring=bool(f.get("sl_monitoring")))
-    return ""
-
-
-def _api_update(s, f):
-    """Our API's prices and webhook from the form ("" when saved, else what is wrong)."""
-    try:
-        prices = {n: float(f.get(n, s.get(n, 0)) or 0) for n in ("api_price_case", "api_price_aml", "api_price_watch")}
-    except ValueError:
-        return "The API prices are numbers."
-    if min(prices.values()) < 0:
-        return "The API prices are 0 or more."
-    url = f.get("webhook_url", "").strip()
-    if url and not re.match(r"https?://[^\s/]+", url):
-        return "The webhook address starts with https:// (http:// on a test machine)."
-    s.update(prices, webhook_url=url)
-    if url and not s.get("webhook_secret"):         # a first address gets its signing secret, shown once
-        s["webhook_secret"] = "whsec_" + secrets.token_urlsafe(24)
-        session["new_webhook_secret"] = s["webhook_secret"]
-    return ""
 
 
 @app.route("/screening/settings/test", methods=["POST"])

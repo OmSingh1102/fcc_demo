@@ -58,8 +58,8 @@
                 {% elif sc.error %}<span class="badge rose">Search failed</span>
                 {% elif hits %}<b>{{ hits|length }} hit{{ 's' if hits|length > 1 }}</b><div class="tiny muted">{{ hits[0].name }} · {{ hits[0].strength }}</div>
                 {% else %}<span class="badge emerald">No hit</span>{% endif %}
-                {% if s.screening and not sc.error %}<div class="tiny muted">{{ sc|list_name }}{% if (sc.aml or {}).monitoring and not ((sc.aml or {}).monitoring_stopped or {}).done %} · watched{% endif %}{% if (sc.lists or {}).monitoring and not ((sc.lists or {}).monitoring_stopped or {}).done %} · watched{% endif %}</div>{% endif %}
-                {% if ((sc.aml or {}).history or {}).changes or ((sc.lists or {}).history or {}).changes %}<span class="badge rose" title="A re-screen found a change">List change</span>{% endif %}</td>
+                {% if s.screening and not sc.error %}<div class="tiny muted">{{ sc|list_name }}{% if (sc.aml or {}).monitoring and not ((sc.aml or {}).monitoring_stopped or {}).done %} · watched{% endif %}</div>{% endif %}
+                {% if ((sc.aml or {}).history or {}).changes %}<span class="badge rose" title="Didit's re-screen found a change">List change</span>{% endif %}</td>
             <td class="small">{% set ns = namespace(wait=0, done=[]) %}{% for h in hits %}{% if (h.ai or {}).status == 'pending' %}{% set ns.wait = ns.wait + 1 %}{% elif (h.ai or {}).status == 'done' %}{% set ns.done = ns.done + [h.ai.suggested] %}{% endif %}{% endfor %}
                 {% if ns.wait %}<span class="badge blue">Reviewing {{ ns.wait }}</span>{% endif %}
                 {% for d in ns.done|unique %}<span class="badge {{ {'True match': 'rose', 'Possible match': 'amber', 'False positive': 'emerald'}[d] }}">{{ d }}</span> {% endfor %}

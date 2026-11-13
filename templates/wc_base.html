@@ -15,7 +15,7 @@
 <body class="wc-theme">
 <header class="wc-topbar">
     <div class="row1">
-        <span class="product">{{ 'Screening console' if wl in ('Didit AML', 'Sanctions list') else 'World-Check console' }} <span class="sim">simulated</span>{% if wl in ('Didit AML', 'Sanctions list') %} <span class="sim">{{ 'Didit AML' if wl == 'Didit AML' else 'sanctions-list' }} hits</span>{% endif %}</span>
+        <span class="product">{{ 'Screening console' if wl == 'Didit AML' else 'World-Check console' }} <span class="sim">simulated</span>{% if wl == 'Didit AML' %} <span class="sim">Didit AML hits</span>{% endif %}</span>
         <a class="wc-back" href="{{ back_url }}" title="Back to the screening case">{{ icon('home') }}</a>
         <form class="wc-search" method="get" action="{{ url_for('ns_search') }}"><input class="input" name="q" placeholder="Search for record id"></form>
         <span class="user"><span class="av">{{ user_initials }}</span>{{ session.name }}</span>
