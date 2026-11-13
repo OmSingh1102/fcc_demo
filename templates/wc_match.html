@@ -28,7 +28,7 @@
 
 <div class="wc-tabs">
     <a class="wc-tab" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='summary') }}">{{ icon('list') }} Summary</a>
-    <a class="wc-tab active" href="{{ url_for('wc_case', wc_case_id=wc.id) }}">{{ icon('globe') }} World-Check {% if unresolved %}<span class="n">{{ unresolved }}</span>{% endif %}</a>
+    <a class="wc-tab active" href="{{ url_for('wc_case', wc_case_id=wc.id) }}">{{ icon('globe') }} {{ wl or 'World-Check' }} {% if unresolved %}<span class="n">{{ unresolved }}</span>{% endif %}</a>
     <a class="wc-tab" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='audit') }}">{{ icon('clipboard') }} Audit</a>
 </div>
 
@@ -47,7 +47,7 @@
         <div class="row between mb-8">
             <div class="row">
                 <a class="wc-back" href="{{ url_for('wc_case', wc_case_id=wc.id, status=status, type=mtype) }}">{{ icon('chevron-left') }} Back to Matches</a>
-                <span class="small">Matching World-Check Record</span>
+                <span class="small">Matching {{ wl or 'World-Check' }} Record</span>
                 <span class="pager">
                     <a href="{{ url_for('wc_match', wc_case_id=wc.id, match_id=nav.prev, status=status, type=mtype) if nav.prev else '#' }}" class="{% if not nav.prev %}dis{% endif %}">&lsaquo;</a>
                     <span class="on">{{ nav.index }}</span>
@@ -133,7 +133,7 @@
         </div>
 
         <div class="wc-pane show" data-pane="key">
-            <div class="row between mb-8"><span class="small strong">KEY DATA {{ type_badges(m.types) }}</span><span class="small muted">World-Check ID: {{ m.wc_id }}</span></div>
+            <div class="row between mb-8"><span class="small strong">KEY DATA {{ type_badges(m.types) }}</span><span class="small muted">{{ wl or 'World-Check' }} ID: {{ m.wc_id }}</span></div>
             <table class="wc-compare"><tbody>
                 <tr><td class="k">Name</td><td>{{ m.name }}</td></tr>
                 <tr><td class="k">Record Update</td><td>Update Categorization <span class="badge blue">C6</span><br>Entered Date &nbsp; {{ (m.entered ~ ' 00:00:00')|wc_date }}<br>Updated Date &nbsp; {{ (m.updated ~ ' 00:00:00')|wc_date }}</td></tr>
@@ -161,7 +161,7 @@
         <div class="wc-pane" data-pane="pep"><h4>PEP role details</h4>{% if kd.pep_status %}<table class="wc-compare"><tbody><tr><td class="k">Position</td><td>{{ kd.position }}</td></tr><tr><td class="k">Status</td><td>{{ kd.pep_status }}</td></tr><tr><td class="k">Sub-Category</td><td>{{ kd.sub_category }}</td></tr></tbody></table>{% else %}<div class="no-data">Not a PEP record.</div>{% endif %}</div>
         <div class="wc-pane" data-pane="connections"><div class="no-data">No connections or relationships recorded.</div></div>
         <div class="wc-pane" data-pane="sources">
-            <div class="row between mb-8"><span class="small strong">SOURCES</span><span class="small muted">World-Check ID: {{ m.wc_id }}</span></div>
+            <div class="row between mb-8"><span class="small strong">SOURCES</span><span class="small muted">{{ wl or 'World-Check' }} ID: {{ m.wc_id }}</span></div>
             <table class="wc-compare"><thead><tr><th>Date Added</th><th>Source</th></tr></thead>
                 <tbody>{% for d, u in m.sources %}<tr><td class="k">{{ d }}</td><td title="Fictional source — the demo's records do not resolve">{{ u }}</td></tr>
                 {% else %}<tr><td colspan="2"><div class="no-data">No sources recorded.</div></td></tr>{% endfor %}</tbody></table>

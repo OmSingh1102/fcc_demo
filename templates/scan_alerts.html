@@ -8,7 +8,7 @@
    shows one: one alert row per World-Check hit, the AI's assessment of it,
    the analyst's outcome. Values come from the upload, the model's read, the
    hits and the analysts; a field nothing filled is left out. #}
-{% set sc = s.screening or {} %}{% set hits = sc.hits or [] %}{% set closed = s.status == 'closed' %}
+{% set sc = s.screening or {} %}{% set hits = sc.hits or [] %}{% set closed = s.status == 'closed' %}{% set wl = sc|list_name %}
 {% set ai_tone = {'True match': 'rose', 'Possible match': 'amber', 'False positive': 'emerald'} %}
 <div class="row between mb-12">
     <div class="row">
@@ -36,7 +36,7 @@
             <div><span class="l">Screening SOP</span><span class="v"><a href="{{ url_for('screening_sop') }}">{{ sop.version }}</a></span></div>
             <div><span class="l">Case</span><span class="v"><a href="{{ url_for('scan_result', scan_id=s.id) }}" class="mono">{{ s.id }}</a></span></div>
             <div><span class="l">Document</span><span class="v">{{ who.document_type or '-' }}{% if who.document_number %} · <span class="mono">{{ who.document_number }}</span>{% endif %}</span></div>
-            <div><span class="l">Watchlist case</span><span class="v">{% if s.screening and not sc.error %}<a href="{{ url_for('wc_case', wc_case_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab" id="open-wc">Open in World-Check console<span class="ext-ic">{{ icon('external-link') }}</span></a>{% else %}-{% endif %}</span></div>
+            <div><span class="l">Watchlist case</span><span class="v">{% if s.screening and not sc.error %}<a href="{{ url_for('wc_case', wc_case_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab" id="open-wc">{{ 'Open in the screening console' if wl == 'Didit AML' else 'Open in World-Check console' }}<span class="ext-ic">{{ icon('external-link') }}</span></a>{% else %}-{% endif %}</span></div>
         </div>
         <div class="row mt-12">
             <span class="small" id="case-outcome">Case outcome: {% if closed %}<b>{{ s.closed.outcome }}</b> <span class="muted">by {{ s.closed.by|who }} at {{ s.closed.at }}</span>{% else %}<span class="muted">none yet — the case closes when every alert has an outcome</span>{% endif %}</span>
@@ -83,12 +83,12 @@
                 <thead><tr>
                     <th style="width:28px"><span class="sr-hide">Open</span></th><th style="width:40px"><input type="checkbox" id="pick-all" title="Tick every alert shown" aria-label="Tick every alert shown" onchange="afPickAll(this)"></th>
                     <th>Vendor</th><th>Watch List ID</th><th>Alert Outcome</th><th>AI assessment</th><th>Name</th><th>Matched Alias</th><th>Score</th><th>Type</th><th>Date of Birth</th><th>Places</th>
-                    <th>Last Resolved By</th><th>Last Resolved Time</th><th>Reason</th><th>Risk</th><th class="sticky-right">World-Check</th>
+                    <th>Last Resolved By</th><th>Last Resolved Time</th><th>Reason</th><th>Risk</th><th class="sticky-right">{{ 'Record' if wl == 'Didit AML' else 'World-Check' }}</th>
                 </tr></thead>
                 <tbody>
                 {% for h in hits %}{% set ai = h.ai or {} %}{% set res = h.resolution %}{% set label = outcomes[res.status] if res else 'Pending' %}
                 <tr data-outcome="{{ label }}"{% if loop.first %} class="open"{% endif %}>
-                    <td><button type="button" class="row-toggle" aria-expanded="false" aria-label="Show the AI's assessment and the World-Check record behind {{ h.name }}" title="Show or hide the AI's assessment and the record" onclick="adToggle(this)">+</button></td>
+                    <td><button type="button" class="row-toggle" aria-expanded="false" aria-label="Show the AI's assessment and the {{ wl }} record behind {{ h.name }}" title="Show or hide the AI's assessment and the record" onclick="adToggle(this)">+</button></td>
                     <td><input type="checkbox" name="pick" value="{{ h.uid }}" aria-label="Tick {{ h.name }}" data-name="{{ h.name }}" {% if res %}disabled title="Has an outcome"{% endif %}
                                data-ai="{% if ai.status == 'done' %}{{ outcomes[ai.suggested] }} ({{ ai.label }}), {{ ai.confidence }}% — {{ ai.reasons|join('; ') }}{% endif %}" data-ai-outcome="{{ outcomes[ai.suggested] if ai.status == 'done' else '' }}" onchange="afPick()"></td>
                     <td><span class="badge emerald">WC</span></td>
@@ -107,7 +107,7 @@
                     <td class="nowrap">{{ res.at if res else '-' }}</td>
                     <td>{{ (res.reason if res else '') or '-' }}</td>
                     <td>{% if res and res.risk %}{{ outcome_badge(res.risk) }}{% else %}-{% endif %}</td>
-                    <td class="sticky-right"><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=s.id, match_id=h.uid) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open in WC<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
+                    <td class="sticky-right"><a class="btn btn-outline btn-xs nowrap" href="{{ url_for('wc_match', wc_case_id=s.id, match_id=h.uid) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ 'Open' if wl == 'Didit AML' else 'Open in WC' }}<span class="ext-ic">{{ icon('external-link') }}</span></a></td>
                 </tr>
                 {% set d = details[h.uid] %}{% set m = d.m %}{% set kd = m.key_data %}{% set fi = m.further_info %}
                 <tr class="alert-detail hidden" data-for="{{ h.uid }}">
@@ -166,17 +166,17 @@
                                 {% for dt, u in m.sources %}<tr><td class="nowrap">{{ dt }}</td><td>{{ u }}</td></tr>{% endfor %}</tbody></table>
                             {% else %}<div class="no-data">{{ icon('list') }}No data</div>{% endif %}
                         </div>
-                        <div class="ad-card"><h5>World-Check record</h5>
-                            <div class="ad-kv"><div><span class="l">World-Check ID</span><span class="v mono">{{ m.wc_id }}</span></div>
+                        <div class="ad-card"><h5>{{ wl }} record</h5>
+                            <div class="ad-kv"><div><span class="l">{{ wl }} ID</span><span class="v mono">{{ m.wc_id }}</span></div>
                                 <div><span class="l">Types</span><span class="v">{{ m.types|join(', ') or '-' }}</span></div>
                                 <div><span class="l">Match strength</span><span class="v">{{ h.score }}% · {{ h.strength }}</span></div></div>
-                            <a class="btn btn-outline btn-xs" href="{{ url_for('wc_match', wc_case_id=s.id, match_id=h.uid) }}" target="_blank" rel="noopener" title="Opens in a new tab">Open the full record in World-Check<span class="ext-ic">{{ icon('external-link') }}</span></a>
+                            <a class="btn btn-outline btn-xs" href="{{ url_for('wc_match', wc_case_id=s.id, match_id=h.uid) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ 'Open the full record in the console' if wl == 'Didit AML' else 'Open the full record in World-Check' }}<span class="ext-ic">{{ icon('external-link') }}</span></a>
                         </div>
                     </div>
                 </div></td>
                 </tr>
                 {% else %}
-                <tr><td colspan="17"><div class="no-data">{{ icon('search') }}No World-Check record matches the name{% if not closed and s.screening and not sc.error %} — confirm no match on the <a href="{{ url_for('scan_result', scan_id=s.id) }}#screening">case's Screening tab</a>{% endif %}</div></td></tr>
+                <tr><td colspan="17"><div class="no-data">{{ icon('search') }}No {{ wl }} record matches the name{% if not closed and s.screening and not sc.error %} — confirm no match on the <a href="{{ url_for('scan_result', scan_id=s.id) }}#screening">case's Screening tab</a>{% endif %}</div></td></tr>
                 {% endfor %}
                 </tbody>
             </table>

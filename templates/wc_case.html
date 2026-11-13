@@ -25,7 +25,7 @@
 
 <div class="wc-tabs">
     <a class="wc-tab {% if tab == 'summary' %}active{% endif %}" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='summary') }}">{{ icon('list') }} Summary</a>
-    <a class="wc-tab {% if tab == 'worldcheck' %}active{% endif %}" href="{{ url_for('wc_case', wc_case_id=wc.id) }}">{{ icon('globe') }} World-Check {% if facets.status.Unresolved %}<span class="n">{{ facets.status.Unresolved }}</span>{% endif %}</a>
+    <a class="wc-tab {% if tab == 'worldcheck' %}active{% endif %}" href="{{ url_for('wc_case', wc_case_id=wc.id) }}">{{ icon('globe') }} {{ wl or 'World-Check' }} {% if facets.status.Unresolved %}<span class="n">{{ facets.status.Unresolved }}</span>{% endif %}</a>
     <a class="wc-tab {% if tab == 'audit' %}active{% endif %}" href="{{ url_for('wc_case', wc_case_id=wc.id, tab='audit') }}">{{ icon('clipboard') }} Audit</a>
 </div>
 
@@ -65,7 +65,7 @@
             <table class="tbl dense">
                 <thead><tr>
                     <th>Name</th>{% if ai_col %}<th>AI suggestion</th>{% endif %}<th>Matched Alias</th><th>Match Strength</th><th>Type</th><th>Gender</th><th>Date(s) of Birth</th><th>Place of Birth</th><th>Citizenship</th><th>Country Location</th>
-                    <th>World-Check ID</th><th>Entered Date</th><th>Updated Date</th><th>Matched Date</th><th>Last Alert Date</th><th>Last Resolved/ Reviewed On</th><th>Last Resolved/ Reviewed By</th><th>Risk Level</th><th></th>
+                    <th>{{ wl or 'World-Check' }} ID</th><th>Entered Date</th><th>Updated Date</th><th>Matched Date</th><th>Last Alert Date</th><th>Last Resolved/ Reviewed On</th><th>Last Resolved/ Reviewed By</th><th>Risk Level</th><th></th>
                 </tr></thead>
                 <tbody>
                 {% for m in page['items'] %}

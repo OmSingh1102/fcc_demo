@@ -13,7 +13,7 @@
 {% set r = s.read or {} %}{% set f = r.fields or {} %}{% set sc = s.screening or {} %}{% set hits = sc.hits or [] %}
 {% set ns = namespace(open=0, ai_wait=0, ai_done=0, auto=0) %}
 {% for h in hits %}{% if not h.resolution %}{% set ns.open = ns.open + 1 %}{% elif h.resolution.auto %}{% set ns.auto = ns.auto + 1 %}{% endif %}{% if (h.ai or {}).status == 'pending' %}{% set ns.ai_wait = ns.ai_wait + 1 %}{% elif (h.ai or {}).status == 'done' %}{% set ns.ai_done = ns.ai_done + 1 %}{% endif %}{% endfor %}
-{% set closed = s.status == 'closed' %}
+{% set closed = s.status == 'closed' %}{% set wl = sc|list_name %}
 {% set name = f.full_name or ((f.given_names ~ ' ' ~ f.surname)|trim) %}
 <div class="case-layout">
 <aside class="case-rail" id="case-rail">
@@ -33,7 +33,7 @@
 
     <div class="rail-section rail-actions">
         {% if not closed and ns.open %}
-        <a class="btn btn-primary btn-sm btn-block" id="review-btn" href="{{ url_for('scan_alerts', scan_id=s.id) }}" title="The World-Check hits: the AI's assessment, and the alert outcome">Review</a>
+        <a class="btn btn-primary btn-sm btn-block" id="review-btn" href="{{ url_for('scan_alerts', scan_id=s.id) }}" title="The {{ wl }} hits: the AI's assessment, and the alert outcome">Review</a>
         {% else %}
         {% if closed %}{% set why = 'Case is closed' %}{% elif not s.screening %}{% set why = 'Nobody was searched: the ID was not read' %}{% elif sc.error %}{% set why = 'The search failed: use Search again on the Screening tab' %}{% else %}{% set why = 'No hit: confirm no match on the Screening tab' %}{% endif %}
         <button type="button" class="btn btn-primary btn-sm btn-block" disabled title="{{ why }}">Review</button>
@@ -77,7 +77,7 @@
     <div class="tabs case-tabs" role="tablist" aria-label="Case sections">
         <button type="button" class="tab active" role="tab" data-tab="overview" aria-selected="true">{{ icon('user') }} Overview</button>
         <button type="button" class="tab" role="tab" data-tab="documents" aria-selected="false">{{ icon('image') }} Documents <span class="n">1</span></button>
-        <button type="button" class="tab" role="tab" data-tab="screening" aria-selected="false">{{ icon('shield') }} Screening{% if ns.open %} <span class="tab-dot rose" title="World-Check hits left for review"></span>{% endif %}</button>
+        <button type="button" class="tab" role="tab" data-tab="screening" aria-selected="false">{{ icon('shield') }} Screening{% if ns.open %} <span class="tab-dot rose" title="{{ wl }} hits left for review"></span>{% endif %}</button>
         <button type="button" class="tab" role="tab" data-tab="decisions" aria-selected="false">{{ icon('clipboard') }} Decisions</button>
     </div>
 
@@ -220,7 +220,7 @@
             <div class="card-head"><div class="card-title">Screening result</div>
                 <div class="row" style="gap:8px">
                     {% if s.screening and not sc.error %}
-                    <a class="btn btn-outline btn-sm" id="open-wc" href="{{ url_for('wc_case', wc_case_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ icon('globe') }} Open in World-Check<span class="ext-ic">{{ icon('external-link') }}</span></a>
+                    <a class="btn btn-outline btn-sm" id="open-wc" href="{{ url_for('wc_case', wc_case_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ icon('globe') }} {{ 'Open in console' if wl == 'Didit AML' else 'Open in World-Check' }}<span class="ext-ic">{{ icon('external-link') }}</span></a>
                     {% endif %}
                     {% if s.screening and not closed %}
                     <form method="post" action="{{ url_for('scan_screen', scan_id=s.id) }}" style="margin:0"><button class="btn btn-outline btn-sm" type="submit">{{ icon('refresh-cw') }} Search again</button></form>
@@ -241,7 +241,7 @@
                     <tr>
                         <td>{{ sc.source if sc.source in ('World-Check One', 'Didit AML') else 'World-Check' }}{% if sc.source == 'stand-in' %} <span class="tag" title="{{ sc.source_label }}">stand-in</span>{% endif %}</td>
                         <td>{{ sc.searched.name }}</td><td class="nowrap">{{ sc.at }}</td>
-                        <td>{{ hits|map(attribute='category')|unique|join(' / ') if hits else 'World-Check' }}</td>
+                        <td>{{ hits|map(attribute='category')|unique|join(' / ') if hits else wl }}</td>
                         <td>{{ hit_mark('Hit' if hits else 'No Match') }}</td>
                         <td>{% if hits %}<span class="cell-hex" title="{{ s.id }}">{{ s.id }}</span>
                             <a class="btn btn-outline btn-xs" id="alerts-details" href="{{ url_for('scan_alerts', scan_id=s.id) }}" target="_blank" rel="noopener" title="Opens in a new tab">Details<span class="ext-ic">{{ icon('external-link') }}</span></a>
@@ -251,8 +251,8 @@
                 </table>
                 {% if not hits %}
                 <div class="screen-none mt-12" id="screen-none">
-                    <div><b>No World-Check record matches the name.</b>
-                        <div class="small muted">No record of {{ 'the stand-in watchlist' if sc.source == 'stand-in' else sc.source }} scored the name at or above the search's floor ({{ 'Settings' if sc.source == 'stand-in' else 'set by ' + sc.source }}).{% if sc.aml and sc.aml.sandbox %} <b>Didit's sandbox answered with a fixed result: nobody was screened.</b>{% endif %}</div></div>
+                    <div><b>No {{ wl }} record matches the name.</b>
+                        <div class="small muted">{% if wl == 'Didit AML' %}Didit answered {{ (sc.aml or {}).status or 'with no hit' }}: nothing on its sanctions, PEP or warning lists{{ ', or in the news,' if (sc.aml or {}).adverse_media }} matched the name.{% else %}No record of {{ 'the stand-in watchlist' if sc.source == 'stand-in' else sc.source }} scored the name at or above the search's floor ({{ 'Settings' if sc.source == 'stand-in' else 'set by ' + sc.source }}).{% endif %}{% if sc.aml and sc.aml.sandbox %} <b>Didit's sandbox answered with a fixed result: nobody was screened.</b>{% endif %}</div></div>
                     {% if not closed %}
                     <form method="post" action="{{ url_for('scan_close', scan_id=s.id) }}" class="row">
                         <input class="input input-sm" name="note" placeholder="Note (optional)" style="min-width:240px">

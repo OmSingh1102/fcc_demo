@@ -849,6 +849,14 @@ class ScreeningBookPageTests(unittest.TestCase):
         with mock.patch.object(didit, "_send", lambda req: (200, _json.dumps(an_aml_answer(scenario_hits=[])).encode())):
             sid = self.upload(self.client(), a_read())
         self.assertEqual(fcc._scan(sid)["status"], "closed")                                 # a live answer with no hit does
+        # the case's pages name the list it was screened on, not World-Check
+        self.assertEqual(fcc._scan(sid)["closed"]["note"], "No Didit AML record matched the name, and every ID check passed.")
+        page = self.client().get(f"/scan/{sid}").data.decode("utf-8")
+        panel = page.split('id="scan-screening"')[1].split('id="scan-decisions"')[0]
+        self.assertIn("No Didit AML record matches the name.", panel)
+        self.assertNotIn("World-Check", panel)
+        self.assertIn("No Didit AML record matches the name", self.client().get(f"/scan/{sid}/screening").data.decode("utf-8"))
+        self.assertIn("Didit AML hits", self.client().get(f"/wc/{sid}").data.decode("utf-8"))
 
     def test_the_team_and_the_password_are_settings(self):
         before = list(fcc.ANALYSTS)

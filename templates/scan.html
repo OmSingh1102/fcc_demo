@@ -47,7 +47,7 @@
     {% if scans %}
     <div class="tbl-scroll">
     <table class="tbl">
-        <thead><tr><th>Case ID</th><th>Uploaded</th><th>Name on the ID</th><th>Document</th><th>World-Check</th><th>AI</th><th>Status</th><th>Details</th></tr></thead>
+        <thead><tr><th>Case ID</th><th>Uploaded</th><th>Name on the ID</th><th>Document</th><th>Watchlist</th><th>AI</th><th>Status</th><th>Details</th></tr></thead>
         <tbody>{% for s in scans %}{% set r = s.read or {} %}{% set f = r.fields or {} %}{% set sc = s.screening or {} %}{% set hits = sc.hits or [] %}
         <tr><td class="nowrap"><a class="mono" href="{{ url_for('scan_result', scan_id=s.id) }}">{{ s.id }}</a></td>
             <td class="nowrap small">{{ s.at }}<div class="tiny muted">{{ s.by|who }}</div></td>
@@ -56,7 +56,8 @@
             <td class="small">{% if not s.screening %}<span class="muted">Not searched</span>
                 {% elif sc.error %}<span class="badge rose">Search failed</span>
                 {% elif hits %}<b>{{ hits|length }} hit{{ 's' if hits|length > 1 }}</b><div class="tiny muted">{{ hits[0].name }} · {{ hits[0].strength }}</div>
-                {% else %}<span class="badge emerald">No hit</span>{% endif %}</td>
+                {% else %}<span class="badge emerald">No hit</span>{% endif %}
+                {% if s.screening and not sc.error %}<div class="tiny muted">{{ sc|list_name }}</div>{% endif %}</td>
             <td class="small">{% set ns = namespace(wait=0, done=[]) %}{% for h in hits %}{% if (h.ai or {}).status == 'pending' %}{% set ns.wait = ns.wait + 1 %}{% elif (h.ai or {}).status == 'done' %}{% set ns.done = ns.done + [h.ai.suggested] %}{% endif %}{% endfor %}
                 {% if ns.wait %}<span class="badge blue">Reviewing {{ ns.wait }}</span>{% endif %}
                 {% for d in ns.done|unique %}<span class="badge {{ {'True match': 'rose', 'Possible match': 'amber', 'False positive': 'emerald'}[d] }}">{{ d }}</span> {% endfor %}
@@ -89,7 +90,7 @@
         if (sent) { ev.preventDefault(); return; }
         sent = true;
         var b = ev.submitter || document.getElementById('scan-submit');
-        b.textContent = (b.value === 'ocr' ? 'OCR is reading' : 'The AI is reading') + ' the document and searching World-Check…';
+        b.textContent = (b.value === 'ocr' ? 'OCR is reading' : 'The AI is reading') + ' the document and screening the name…';
     });
 })();
 </script>

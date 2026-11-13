@@ -87,6 +87,7 @@ app.jinja_env.globals.update(status_tone=vocab.STATUS_TONE, vocab=vocab,
                              icon=app.jinja_env.get_template("_icon.html").module.icon,
                              ai_summary=ai_screening.summary, shown_workflow=ai_screening.shown_workflow, sop=sop)
 app.jinja_env.filters.update(wc_date=dates.wc_date, wc_dt=dates.wc_datetime, who=_who, translit=translit)
+app.jinja_env.filters["list_name"] = lambda sc: id_screening.list_name(sc)
 
 # ─── Sign-in, analysts and roles ───────────────────────────────────────────────
 # Demo gate only: one shared password, a profile picker, the session cookie
@@ -1260,7 +1261,7 @@ def _wc_page(wc_case_id):
     rec = _scan(wc_case_id)
     wc = id_screening.wc_view(rec)
     is_open = rec.get("status") != "closed"
-    return wc, {"wc": wc, "alert": None, "back_url": url_for("scan_alerts", scan_id=rec["id"]),
+    return wc, {"wc": wc, "alert": None, "back_url": url_for("scan_alerts", scan_id=rec["id"]), "wl": id_screening.list_name(rec.get("screening")),
                 "can_resolve": is_open and bool(_levels() & {"L1", "L2"}), "case_open": is_open, "wc_statuses": list(id_screening.FROM_WC_STATUS),
                 "resolve_hint": "The case is closed" if not is_open else "An L1 or L2 analyst resolves matches"}, rec
 

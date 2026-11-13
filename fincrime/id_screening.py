@@ -42,6 +42,12 @@ SUGGESTION = {"clear": "False positive", "true_match": "True match", "request_do
               "escalate": "Possible match"}          # the defaults: Settings holds the rule (ai_suggestion)
 IDV_FIELDS = (("Name", "full_name"), ("Date of birth", "date_of_birth"), ("Document number", "document_number"))
 SOURCES = {"stand-in": "Stand-in World-Check", "world_check": "World-Check One", "didit_aml": "Didit AML screening"}
+
+
+def list_name(sc):
+    """The watchlist a case was screened on, as its pages name it."""
+    src = (sc or {}).get("source")
+    return src if src in ("World-Check One", "Didit AML") else "World-Check"
 DECISION_MODELS = ("claude-opus-4-8", "claude-sonnet-5-5", "gpt-5", "gemini-2.5-pro", "gemini-2.5-flash", "claude-haiku-4-5",
                    "gpt-5-mini")
 
@@ -514,7 +520,7 @@ def auto_verify(case, settings):
                            "ai_suggested": "False positive", "agreed": True, "auto": True}
     if open_hits(case):
         return "cleared"
-    close(case, AUTO_ACTOR, "No World-Check record matched the name, and every ID check passed." if not hits
+    close(case, AUTO_ACTOR, f"No {list_name(sc)} record matched the name, and every ID check passed." if not hits
           else f"Every hit cleared by the AI screening rule ({len(safe)}).")
     case["closed"]["auto"] = True
     return "closed"
