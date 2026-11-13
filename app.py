@@ -2056,7 +2056,7 @@ def scan_id():
                                default_model=SCREEN_SETTINGS["reader_model"], ocr_ready=ocr.available(),
                                model_ready=id_scan.model_ready(), scans=shown, status=status,
                                counts={k: sum(1 for s in scans if kind(s) == k) for k in ("open", "auto", "closed")} | {"all": len(scans)},
-                               auto_on=SCREEN_SETTINGS.get("auto_verify"),
+                               auto_on=SCREEN_SETTINGS.get("auto_verify"), watched=sum(1 for s in scans if _watched(s)),
                                source=id_screening.source_label(SCREEN_SETTINGS), outcome=id_screening.outcome)
     f = request.files.get("image")
     if not f or not f.filename:
@@ -2189,6 +2189,115 @@ def scan_idv(scan_id):
     return redirect(url_for("scan_result", scan_id=scan_id))
 
 
+# ─── Didit: ongoing AML monitoring, and the Aadhaar check with UIDAI ──────────
+def _watched(rec):
+    """Is Didit watching the person on this case (and still asked to)?"""
+    aml = (rec.get("screening") or {}).get("aml") or {}
+    return bool(aml.get("monitoring") and aml.get("request_id") and not (aml.get("monitoring_stopped") or {}).get("done"))
+
+
+def _aml_history_land(scan_id, runs):
+    """Keep Didit's re-screens with the case; the ones that changed something."""
+    changes = [r for r in runs if r["outcome"] == "CHANGED"]
+
+    def land(rec):
+        rec["screening"]["aml"]["history"] = {"checked_at": dates.now_str(), "runs": len(runs), "changes": changes[:10],
+                                              "latest": runs[0] if runs else None}
+    _screen_update(scan_id, land)
+    return changes
+
+
+@app.route("/scan/<scan_id>/aml-history", methods=["POST"])
+def scan_aml_history(scan_id):
+    """What Didit's re-screens of this watched person found (a read, not billed)."""
+    rec = _scan(scan_id)
+    back = redirect(url_for("scan_result", scan_id=scan_id) + "#screening")
+    if not (didit.configured(SCREEN_SETTINGS["didit"]) and _watched(rec)):
+        flash("Didit is not watching the person on this case.", "error")
+        return back
+    try:
+        runs = didit.aml_history(SCREEN_SETTINGS["didit"], rec["screening"]["aml"]["request_id"])
+    except didit.DiditError as exc:
+        flash(f"Didit's re-screens could not be read: {exc}", "error")
+        return back
+    changes = _aml_history_land(scan_id, runs)
+    flash(f"Didit has screened this person again {len(runs)} time(s): "
+          + (f"{len(changes)} with a change." if changes else "nothing changed."), "error" if changes else "success")
+    return back
+
+
+@app.route("/scans/watched/check", methods=["POST"])
+def scan_watched_check():
+    """Every watched person's re-screens, from Didit (reads, not billed)."""
+    if not didit.configured(SCREEN_SETTINGS["didit"]):
+        flash("Enter the Didit API key on Settings first.", "error")
+        return redirect(url_for("scan_id"))
+    done, changed, failed = 0, [], []
+    for rec in _scans():
+        if not _watched(rec):
+            continue
+        try:
+            runs = didit.aml_history(SCREEN_SETTINGS["didit"], rec["screening"]["aml"]["request_id"])
+        except didit.DiditError as exc:
+            failed.append(f"{rec['id']}: {exc}")
+            continue
+        done += 1
+        if _aml_history_land(rec["id"], runs):
+            changed.append(rec["id"])
+    flash(f"Checked {done} watched {'person' if done == 1 else 'people'} on Didit: "
+          + (f"a list change for {', '.join(changed)}." if changed else "no list change.")
+          + (f" Not read: {'; '.join(failed)[:300]}" if failed else ""), "error" if changed or failed else "success")
+    return redirect(url_for("scan_id"))
+
+
+@app.route("/scan/<scan_id>/aml-unwatch", methods=["POST"])
+def scan_aml_unwatch(scan_id):
+    """Ask Didit to stop watching the person on this case."""
+    rec = _scan(scan_id)
+    back = redirect(url_for("scan_result", scan_id=scan_id) + "#screening")
+    if not (didit.configured(SCREEN_SETTINGS["didit"]) and _watched(rec)):
+        flash("Didit is not watching the person on this case.", "error")
+        return back
+    try:
+        done, word = didit.aml_monitoring_off(SCREEN_SETTINGS["didit"], scan_id)
+    except didit.DiditError as exc:
+        flash(f"Didit could not be asked: {exc}", "error")
+        return back
+    _screen_update(scan_id, lambda r: r["screening"]["aml"].update(
+        monitoring_stopped={"done": done, "answer": word, "at": dates.now_str(), "by": _actor()}))
+    flash("Didit stopped watching this person." if done else
+          f"Didit answered \"{word}\": if it still watches the person, stop it in Didit's Business Console.", "success" if done else "error")
+    return back
+
+
+@app.route("/scan/<scan_id>/aadhaar", methods=["POST"])
+def scan_aadhaar(scan_id):
+    """An Aadhaar card's details checked with UIDAI through Didit, with the customer's consent."""
+    rec = _scan(scan_id)
+    back = redirect(url_for("scan_result", scan_id=scan_id) + "#aadhaar-check")
+    f = request.form
+    if not didit.configured(SCREEN_SETTINGS["didit"]):
+        flash("Enter the Didit API key on Settings first.", "error")
+    elif rec.get("status") == "closed":
+        flash("The case is closed.", "error")
+    elif not f.get("consent"):
+        flash("The Aadhaar check needs the customer's consent: tick the box. Nothing was sent.", "error")
+    else:
+        try:
+            res = didit.aadhaar_check(SCREEN_SETTINGS["didit"], f.get("full_name", ""), f.get("date_of_birth", ""),
+                                      f.get("aadhaar", ""), f.get("pan", ""), scan_id)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return back
+        except didit.DiditError as exc:
+            res = {"provider": "Didit", "status": "error", "error": str(exc)[:400]}
+        res.update(at=dates.now_str(), by=_actor(), consent=True)
+        _screen_update(scan_id, lambda r: r.update(aadhaar=res))
+        flash(f"Not checked: {res['error']}" if res["status"] == "error" else f"UIDAI's answer through Didit: {res['status']}.",
+              "success" if res["status"] == "Approved" else "error")
+    return back
+
+
 # ─── The intake API: the client's onboarding system sends IDs ─────────────────
 def _intake_key():
     """The intake key the request carries (X-API-Key, or Authorization:
@@ -2260,7 +2369,17 @@ def scan_result(scan_id):
                            didit_ready=didit.configured(SCREEN_SETTINGS["didit"]), idv_sandbox=didit.is_sandbox(rec.get("idv") or {}),
                            idv_diffs=id_screening.idv_differences(rec, SCREEN_SETTINGS),
                            idv_counts=SCREEN_SETTINGS.get("auto_needs_idv", True),
-                           outcomes=id_screening.ALERT_OUTCOME, sop=id_screening.sop_current(_sop_stored()))
+                           outcomes=id_screening.ALERT_OUTCOME, sop=id_screening.sop_current(_sop_stored()),
+                           aadhaar_pre=_aadhaar_prefill(rec), aadhaar_price=SCREEN_SETTINGS["didit"].get("aadhaar_price", 0),
+                           aml_monitor_price=SCREEN_SETTINGS["didit"].get("aml_monitoring_price", 0))
+
+
+def _aadhaar_prefill(rec):
+    """The Aadhaar form's date of birth and number, from the read, when it gives them whole."""
+    f = (rec.get("read") or {}).get("fields") or {}
+    digits = re.sub(r"\D", "", f.get("document_number") or "")
+    dob = (f.get("date_of_birth") or "").strip()
+    return {"dob": dob if re.fullmatch(r"\d{4}-\d{2}-\d{2}", dob) else "", "number": digits if len(digits) == 12 else ""}
 
 
 @app.route("/scan/<scan_id>/screening")
@@ -2404,13 +2523,19 @@ def _scan_export(rec):
                                                        approved=id_screening.idv_approved(rec, SCREEN_SETTINGS)[0],
                                                        differs=[{"field": w, "verification": a, "id": b}
                                                                 for w, a, b in id_screening.idv_differences(rec, SCREEN_SETTINGS)]),
-            "reader_fallback": rec.get("fallback", "")}
+            "reader_fallback": rec.get("fallback", ""), "aadhaar_check": rec.get("aadhaar")}
     return body
 
 
 @app.route("/scan/<scan_id>/delete", methods=["POST"])
 def scan_delete(scan_id):
     rec = _scan(scan_id)
+    unwatched = ""
+    if _watched(rec) and didit.configured(SCREEN_SETTINGS["didit"]):      # a deleted case is not paid for a year
+        try:
+            unwatched = " Didit was asked to stop watching the person: " + didit.aml_monitoring_off(SCREEN_SETTINGS["didit"], scan_id)[1] + "."
+        except didit.DiditError as exc:
+            unwatched = f" Didit could not be asked to stop watching the person ({exc}): stop it in Didit's Business Console."
     try:
         os.remove(os.path.join(uploads.base(), rec["image"]))
     except (OSError, KeyError):
@@ -2418,7 +2543,7 @@ def scan_delete(scan_id):
     with _SCREEN_LOCK:
         StateStore.delete("scan", [scan_id])
     _bump_state()
-    flash(f"Case {scan_id} and its image deleted.", "success")
+    flash(f"Case {scan_id} and its image deleted.{unwatched}", "success")
     return redirect(url_for("scan_id"))
 
 
@@ -2666,15 +2791,19 @@ def _services_update(s, f):
                                          float(f.get("az_price_per_page", az["price_per_page"]) or 0),
                                          float(f.get("dd_price_per_call", dd["price_per_call"]) or 0))
         aml_price = float(f.get("dd_aml_price", dd["aml_price"]) or 0)
+        watch_price = float(f.get("dd_aml_monitoring_price", dd["aml_monitoring_price"]) or 0)
+        aadhaar_price = float(f.get("dd_aadhaar_price", dd["aadhaar_price"]) or 0)
     except ValueError:
         return "The confidence floor and the prices are numbers."
-    if not (0 <= floor <= 1 and page_price >= 0 and call_price >= 0 and aml_price >= 0):
+    if not (0 <= floor <= 1 and page_price >= 0 and call_price >= 0 and aml_price >= 0 and watch_price >= 0 and aadhaar_price >= 0):
         return "The confidence floor is 0-1; prices are 0 or more."
     scenario = f.get("dd_aml_sandbox_scenario", dd["aml_sandbox_scenario"])
     if scenario not in didit.AML_SCENARIOS:
         return "Choose one of Didit's sandbox scenarios, or none for a live key."
     dd.update(aml_path=f.get("dd_aml_path", "").strip() or didit.DEFAULTS["aml_path"], aml_price=aml_price,
-              aml_adverse_media=bool(f.get("dd_aml_adverse_media")), aml_sandbox_scenario=scenario)
+              aml_adverse_media=bool(f.get("dd_aml_adverse_media")), aml_sandbox_scenario=scenario,
+              aml_monitoring=bool(f.get("dd_aml_monitoring")), aml_monitoring_price=watch_price,
+              dbv_path=f.get("dd_dbv_path", "").strip() or didit.DEFAULTS["dbv_path"], aadhaar_price=aadhaar_price)
     az.update(endpoint=f.get("az_endpoint", "").strip(), api_version=f.get("az_api_version", "").strip() or azure_docintel.DEFAULTS["api_version"],
               model_id=f.get("az_model_id", "").strip() or azure_docintel.DEFAULTS["model_id"], min_confidence=floor, price_per_page=page_price)
     dd.update(base_url=f.get("dd_base_url", "").strip() or didit.DEFAULTS["base_url"], path=f.get("dd_path", "").strip() or didit.DEFAULTS["path"],

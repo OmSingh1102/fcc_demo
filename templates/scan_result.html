@@ -65,7 +65,7 @@
             <div><span class="l">File</span><span class="v">{{ s.file }}</span></div>
             {% if s.model %}<div><span class="l">Read by</span><span class="v">{{ s.model.label }}</span></div>{% endif %}
             {% if s.screening %}<div><span class="l">Screened on</span><span class="v">{{ sc.source if sc.source in ('World-Check One', 'Didit AML') else 'Stand-in World-Check' }}</span></div>{% endif %}
-            {% if sc and sc.aml %}<div id="didit-aml"><span class="l">Didit AML</span><span class="v">{{ sc.aml.status }}{% if sc.aml.score %} · risk {{ sc.aml.score|round|int }}{% endif %}{% if sc.aml.sandbox %} · sandbox, free{% elif sc.aml.cost %} · ${{ '%.2f'|format(sc.aml.cost) }}{% endif %}</span></div>{% endif %}
+            {% if sc and sc.aml %}<div id="didit-aml"><span class="l">Didit AML</span><span class="v">{{ sc.aml.status }}{% if sc.aml.score %} · risk {{ sc.aml.score|round|int }}{% endif %}{% if sc.aml.sandbox %} · sandbox, free{% elif sc.aml.cost %} · ${{ '%.2f'|format(sc.aml.cost) }}{% endif %}{% if sc.aml.monitoring and not (sc.aml.monitoring_stopped or {}).done %} · watched{% endif %}</span></div>{% endif %}
             {% if hits %}<div><span class="l">Hits</span><span class="v">{{ hits|length }} · {{ ns.open }} left for review</span></div>{% endif %}
             {% if closed %}<div><span class="l">Closed by</span><span class="v">{{ s.closed.by|who }}</span></div>
             <div><span class="l">Closed</span><span class="v">{{ s.closed.at }}</span></div>{% endif %}
@@ -147,6 +147,40 @@
                     {% else %}<div><span class="l">Status</span><span class="v">Not checked yet.</span></div>{% endif %}
                     {% if didit_ready and not closed and (not v or v.status != 'pending') %}
                     <div class="fact-actions"><form method="post" action="{{ url_for('scan_idv', scan_id=s.id) }}" style="margin:0"><button class="btn btn-outline btn-xs" type="submit">{{ 'Verify again' if v else 'Verify with Didit' }}</button></form></div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            {# The Aadhaar check: UIDAI's records against the card, through Didit, with the customer's consent #}
+            {% set a = s.aadhaar %}
+            {% if a or (didit_ready and r.document_type == 'Aadhaar card') %}
+            <div class="card" id="aadhaar-check">
+                <div class="card-head"><div class="card-title">Aadhaar check with UIDAI</div>
+                    {% if a %}<span class="badge {{ {'Approved': 'emerald', 'Declined': 'rose'}.get(a.status, 'amber') }}">{{ 'Not checked' if a.status == 'error' else a.status }}</span>{% endif %}</div>
+                <div class="card-body">
+                    <div class="fact-list">
+                    <div><span class="l">Vendor</span><span class="v">Didit · India Aadhaar (UIDAI)</span></div>
+                    {% if a and a.status == 'error' %}<div><span class="l">Reason</span><span class="v">{{ a.error }}</span></div>
+                    {% elif a %}
+                    {% for label, word in a.fields %}<div><span class="l">{{ label }}</span><span class="v"><span class="badge {{ {'Matched': 'emerald', 'Partly matched': 'amber', 'Not matched': 'rose'}.get(word, 'slate') }}">{{ word }}</span></span></div>{% endfor %}
+                    {% if a.outcome or a.detail %}<div><span class="l">UIDAI's answer</span><span class="v">{{ a.outcome }}{% if a.detail %} · {{ a.detail }}{% endif %}</span></div>{% endif %}
+                    <div><span class="l">Sent</span><span class="v">Aadhaar <span class="mono">{{ a.number }}</span> · PAN <span class="mono">{{ a.pan }}</span></span></div>
+                    {% endif %}
+                    {% if a %}<div><span class="l">Checked</span><span class="v">{{ a.at }} by {{ a.by|who }}, with the customer's consent{% if a.cost %} · ${{ '%.2f'|format(a.cost) }}{% endif %}</span></div>
+                    {% else %}<div><span class="l">Status</span><span class="v">Not checked yet.</span></div>{% endif %}
+                    </div>
+                    {% if didit_ready and not closed %}
+                    <form method="post" action="{{ url_for('scan_aadhaar', scan_id=s.id) }}" id="aadhaar-form" class="mt-12">
+                        <div class="tiny muted mb-8">UIDAI matches the name, the date of birth and the full 12-digit number, and needs the PAN too. ${{ '%.2f'|format(aadhaar_price) }} a check; the case keeps the numbers masked.</div>
+                        <div class="settings-grid">
+                            <label>Name<input class="input input-sm" name="full_name" value="{{ f.full_name or ((f.given_names ~ ' ' ~ f.surname)|trim) }}" required></label>
+                            <label>Date of birth<input class="input input-sm" name="date_of_birth" value="{{ aadhaar_pre.dob }}" placeholder="YYYY-MM-DD" required></label>
+                            <label>Aadhaar number<input class="input input-sm mono" name="aadhaar" value="{{ aadhaar_pre.number }}" placeholder="12 digits" inputmode="numeric" autocomplete="off" required></label>
+                            <label>PAN<input class="input input-sm mono" name="pan" placeholder="ABCDE1234F" autocomplete="off" required></label>
+                        </div>
+                        <label class="small mt-8" style="display:block"><input type="checkbox" name="consent" value="1" required> The customer consented to this Aadhaar check</label>
+                        <div class="fact-actions"><button class="btn btn-outline btn-xs" type="submit">{{ 'Check again' if a else 'Check with UIDAI' }}</button></div>
+                    </form>
                     {% endif %}
                 </div>
             </div>
@@ -261,6 +295,21 @@
                     {% endif %}
                 </div>
                 {% endif %}
+            {% endif %}
+            {% set am = sc.aml or {} %}{% set hi = am.history or {} %}{% set stopped = am.monitoring_stopped or {} %}
+            {% if am.monitoring %}
+            <div class="note {{ 'warn' if hi.changes else 'info' }} small mt-12" id="aml-monitoring">
+                {% if stopped.done %}Didit stopped watching this person on {{ stopped.at }} ({{ stopped.by|who }}).
+                {% else %}<b>Didit keeps watching this person:</b> it screens them again whenever its lists change (${{ '%.2f'|format(aml_monitor_price) }} a year).{% endif %}
+                {% if hi %}Checked {{ hi.checked_at }}: screened again {{ hi.runs }} time{{ 's' if hi.runs != 1 }}{% if hi.changes %}, <b>{{ hi.changes|length }} with a change</b>; the latest on {{ hi.changes[0].at }}: {{ hi.changes[0].status }}{% if hi.changes[0].total_hits is not none %}, {{ hi.changes[0].total_hits }} hit{{ 's' if hi.changes[0].total_hits != 1 }}{% endif %}. {% if not closed %}Press <b>Search again</b> to screen and review the new hits.{% else %}The case is closed: upload the ID again to review the new hits.{% endif %}{% else %}; nothing changed.{% endif %}
+                {% elif not stopped.done %}No change checked for yet.{% endif %}
+                {% if stopped and not stopped.done %} Didit's answer to "stop watching" ({{ stopped.at }}): {{ stopped.answer }}.{% endif %}
+                {% if didit_ready and not stopped.done %}
+                <div class="row mt-8" style="gap:8px">
+                    <form method="post" action="{{ url_for('scan_aml_history', scan_id=s.id) }}" style="margin:0"><button class="btn btn-outline btn-xs" type="submit" title="Reads Didit's re-screens of this person; not billed">Check for changes</button></form>
+                    <form method="post" action="{{ url_for('scan_aml_unwatch', scan_id=s.id) }}" style="margin:0" onsubmit="return confirm('Stop Didit watching this person?');"><button class="btn btn-outline btn-xs" type="submit">Stop watching</button></form>
+                </div>{% endif %}
+            </div>
             {% endif %}
             {% if closed %}<div class="small mt-12" id="scan-closed">Closed as <b>{{ s.closed.outcome }}</b> by {{ s.closed.by|who }} on {{ s.closed.at }}.{% if s.closed.note %} {{ s.closed.note }}{% endif %}</div>{% endif %}
             </div>

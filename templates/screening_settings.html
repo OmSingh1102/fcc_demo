@@ -118,7 +118,7 @@
         <div class="card-sub">is the ID genuine and valid: screen captures, printed copies, a replaced portrait, covered fields, the MRZ, expiry. A document Didit does not approve never closes by itself</div></div>
         <span class="badge {{ 'emerald' if dd_live else 'amber' }}">{{ 'Key entered' if dd_live else 'Ready for a key' }}</span></div>
     <div class="card-body">
-        <p class="small muted" style="margin-top:0">Sign up at business.didit.me and copy an API key (Developers, API keys); a sandbox key answers every check with a fixed "Approved" sample, to try it without cost. Written from Didit's public API reference and not yet run against the service. Face match and liveness need a selfie, which an uploaded ID does not bring: they are not called.</p>
+        <p class="small muted" style="margin-top:0">Sign up at business.didit.me and copy an API key (Developers, API keys); a sandbox key answers every check with a fixed "Approved" sample, to try it without cost. Written from Didit's public API reference; the ID check and AML screening have run on a live account. Face match and liveness need a selfie, which an uploaded ID does not bring: they are not called.</p>
         <div class="settings-grid">
             <label>API key<input class="input" name="dd_api_key" type="password" value="" placeholder="{{ dd_key_shown or 'not entered' }}" autocomplete="new-password"{% if not can_edit %} disabled{% endif %}>
                 <span class="tiny muted">{% if dd.api_key %}Stored. Leave blank to keep it. <label class="tiny"><input type="checkbox" name="dd_forget" value="1"> forget it</label>{% else %}Never shown again once saved.{% endif %}</span></label>
@@ -139,6 +139,15 @@
             <label>Sandbox scenario
                 <select class="input" name="dd_aml_sandbox_scenario"{% if not can_edit %} disabled{% endif %}>{% for v in aml_scenarios %}<option value="{{ v }}"{% if v == dd.aml_sandbox_scenario %} selected{% endif %}>{{ v or 'none: a live key' }}</option>{% endfor %}</select>
                 <span class="tiny muted">a sandbox key only: Didit's fixed answer, free. A sandbox answer never closes a case</span></label>
+            <label><span><input type="checkbox" name="dd_aml_monitoring" value="1"{% if dd.aml_monitoring %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> Keep watching each screened person (ongoing monitoring)</span>
+                <span class="tiny muted">Didit screens them again whenever its lists change. "Check for changes" on the case, or on the Scan ID list, reads what changed. Only people screened after this is ticked</span></label>
+            <label>Monitoring price a person a year (USD)<input class="input" type="number" step="0.01" min="0" name="dd_aml_monitoring_price" value="{{ dd.aml_monitoring_price }}"{% if not can_edit %} disabled{% endif %}></label>
+        </div>
+        <div class="small strong mt-12" id="settings-didit-aadhaar">Aadhaar check with UIDAI (Indian Aadhaar cards)</div>
+        <p class="small muted" style="margin-top:4px">On an Aadhaar card's case, an analyst can have UIDAI's records checked against the name, the date of birth, the full 12-digit number and the PAN, with the customer's consent (Didit's database validation, service <span class="mono">ind_aadhaar</span>). Didit switches database validation on after the account's first top-up; a sandbox key answers every check with a fixed full match. The case keeps the numbers masked.</p>
+        <div class="settings-grid">
+            <label>Database check path<input class="input" name="dd_dbv_path" value="{{ dd.dbv_path }}"{% if not can_edit %} disabled{% endif %}></label>
+            <label>Price an Aadhaar check (USD)<input class="input" type="number" step="0.01" min="0" name="dd_aadhaar_price" value="{{ dd.aadhaar_price }}"{% if not can_edit %} disabled{% endif %}></label>
         </div>
     </div>
 </div>

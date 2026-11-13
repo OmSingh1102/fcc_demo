@@ -278,7 +278,21 @@ Start from an ID document, with no CSV: every uploaded ID becomes a case.
    (a setting); *Test Didit AML* checks the key and the credits by sending
    an empty name, which Didit refuses unbilled. A sandbox scenario's fixed
    answer is free and never closes a case. Checked against the live
-   account with that free test on 2026-11-13; no paid screening run yet.
+   account with that free test on 2026-11-13, then with a first real
+   screening the same day. With *Keep watching each screened person*
+   ticked, Didit re-screens the person whenever its lists change
+   (ongoing monitoring, about $0.07 a person a year): *Check for changes*
+   on the case, or on the Scan ID list for every watched person, reads
+   Didit's re-screens back (`didit.aml_history`, not billed) and marks a
+   case whose re-screen changed something; *Stop watching* asks Didit to
+   stop, and deleting a case does too. Didit also pushes changes by
+   webhook, which needs an address it can reach, so the app asks instead.
+   On an Aadhaar card's case, *Check with UIDAI* sends the name, date of
+   birth, the full 12-digit number and the PAN, with the customer's
+   consent, to Didit's database validation (service `ind_aadhaar`,
+   about $0.42); the case keeps each field matched or not, and the
+   numbers masked. Didit keeps database validation off until the
+   account's first top-up, and says so (403, unbilled).
 3. *Decide.* For each hit, a model decides as the Model evaluation's decision
    model does: the **screening SOP** (the files' v1–v3, then any version
    saved on the Screening SOP page) as instructions, the client's variance

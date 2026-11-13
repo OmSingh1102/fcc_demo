@@ -36,8 +36,9 @@
 </div>
 
 <div class="card mt-12 pad-0" id="scan-cases">
-    <div class="card-head" style="padding-bottom:10px"><div class="card-title">Cases</div>
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Cases</div>
         <div class="card-sub">real ID images are kept until the case is deleted</div></div>
+        {% if watched %}<form method="post" action="{{ url_for('scan_watched_check') }}" style="margin:0"><button class="btn btn-outline btn-xs" type="submit" id="check-watched" title="Reads Didit's re-screens of each watched person; not billed">{{ icon('refresh-cw') }} Check {{ watched }} watched {{ 'person' if watched == 1 else 'people' }} for list changes</button></form>{% endif %}</div>
     <div class="tabs chips" style="padding:0 16px">
         <a class="tab chip {% if not status %}active{% endif %}" href="{{ url_for('scan_id') }}">All <span class="n">{{ counts.all }}</span></a>
         <a class="tab chip {% if status == 'open' %}active{% endif %}" href="{{ url_for('scan_id', status='open') }}">Needs an analyst <span class="n">{{ counts.open }}</span></a>
@@ -57,7 +58,8 @@
                 {% elif sc.error %}<span class="badge rose">Search failed</span>
                 {% elif hits %}<b>{{ hits|length }} hit{{ 's' if hits|length > 1 }}</b><div class="tiny muted">{{ hits[0].name }} · {{ hits[0].strength }}</div>
                 {% else %}<span class="badge emerald">No hit</span>{% endif %}
-                {% if s.screening and not sc.error %}<div class="tiny muted">{{ sc|list_name }}</div>{% endif %}</td>
+                {% if s.screening and not sc.error %}<div class="tiny muted">{{ sc|list_name }}{% if (sc.aml or {}).monitoring and not ((sc.aml or {}).monitoring_stopped or {}).done %} · watched{% endif %}</div>{% endif %}
+                {% if ((sc.aml or {}).history or {}).changes %}<span class="badge rose" title="Didit's re-screen found a change">List change</span>{% endif %}</td>
             <td class="small">{% set ns = namespace(wait=0, done=[]) %}{% for h in hits %}{% if (h.ai or {}).status == 'pending' %}{% set ns.wait = ns.wait + 1 %}{% elif (h.ai or {}).status == 'done' %}{% set ns.done = ns.done + [h.ai.suggested] %}{% endif %}{% endfor %}
                 {% if ns.wait %}<span class="badge blue">Reviewing {{ ns.wait }}</span>{% endif %}
                 {% for d in ns.done|unique %}<span class="badge {{ {'True match': 'rose', 'Possible match': 'amber', 'False positive': 'emerald'}[d] }}">{{ d }}</span> {% endfor %}

@@ -858,6 +858,89 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertIn("No Didit AML record matches the name", self.client().get(f"/scan/{sid}/screening").data.decode("utf-8"))
         self.assertIn("Didit AML hits", self.client().get(f"/wc/{sid}").data.decode("utf-8"))
 
+    def test_didit_watches_the_people_it_screened_and_checks_aadhaar_with_uidai(self):
+        s = fcc.SCREEN_SETTINGS
+        s["didit"].update(api_key="key", auto=False, aml_monitoring=True)
+        s["screening_source"] = "didit_aml"
+        who = id_screening.person(a_read())
+        self.assertTrue(didit.aml_query(who, "SCAN-1", s["didit"])["include_ongoing_monitoring"])
+        # a watched screening: the case says so, the list offers to check every watched person
+        sent = []
+        with mock.patch.object(didit, "_send", lambda req: sent.append(req) or (200, _json.dumps(an_aml_answer(scenario_hits=[])).encode())):
+            sid = self.upload(self.client(), a_read())
+        self.assertTrue(_json.loads(sent[0].data)["include_ongoing_monitoring"])
+        self.assertTrue(fcc._scan(sid)["screening"]["aml"]["monitoring"])
+        c = self.client()
+        self.assertIn('id="check-watched"', c.get("/scan").data.decode("utf-8"))
+        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        self.assertIn('id="aml-monitoring"', page)
+        self.assertIn("· watched", page)
+        # Didit's re-screens, read back: the newest change first
+        history = {"count": 2, "next": None, "results": [
+            {"outcome": "NO_CHANGE", "completed_at": "2026-11-20T10:00:00Z", "status": "Approved", "score": 0, "total_hits": 0},
+            {"outcome": "CHANGED", "completed_at": "2026-12-01T09:00:00Z", "status": "In Review", "score": 81, "total_hits": 1}]}
+        with mock.patch.object(didit, "_send", lambda req: sent.append(req) or (200, _json.dumps(history).encode())):
+            c.post(f"/scan/{sid}/aml-history")
+        self.assertEqual((sent[-1].full_url, sent[-1].get_method()),
+                         ("https://verification.didit.me/v1/session/a1b2c3d4/aml-screening-history/", "GET"))
+        hi = fcc._scan(sid)["screening"]["aml"]["history"]
+        self.assertEqual((hi["runs"], [r["at"] for r in hi["changes"]], hi["latest"]["outcome"]), (2, ["2026-12-01 09:00:00"], "CHANGED"))
+        self.assertIn("1 with a change", c.get(f"/scan/{sid}").data.decode("utf-8"))
+        self.assertIn("List change", c.get("/scan").data.decode("utf-8"))
+        with mock.patch.object(didit, "_send", lambda req: (200, _json.dumps(history).encode())):
+            self.assertIn("a list change for " + sid, c.post("/scans/watched/check", follow_redirects=True).data.decode("utf-8"))
+        # stop watching: Didit is asked for the case's vendor_data
+        with mock.patch.object(didit, "_send", lambda req: sent.append(req) or (200, b'{"results": [{"vendor_data": "x", "outcome": "disabled"}]}')):
+            c.post(f"/scan/{sid}/aml-unwatch")
+        self.assertEqual(_json.loads(sent[-1].data), {"is_enabled": False, "vendor_data_list": [sid]})
+        self.assertTrue(fcc._scan(sid)["screening"]["aml"]["monitoring_stopped"]["done"])
+        self.assertIn("Didit stopped watching this person", c.get(f"/scan/{sid}").data.decode("utf-8"))
+        self.assertNotIn('id="check-watched"', c.get("/scan").data.decode("utf-8"))
+
+        # the Aadhaar check: what UIDAI needs, or nothing is sent
+        with self.assertRaisesRegex(ValueError, "12-digit"):
+            didit.aadhaar_query("ASHISH UPADHYAY", "1962-06-29", "XXXX XXXX 1234", "ABCDE1234F")
+        with self.assertRaisesRegex(ValueError, "PAN"):
+            didit.aadhaar_query("ASHISH UPADHYAY", "1962-06-29", "1234 5678 9012", "")
+        self.assertEqual(didit.aadhaar_query("ASHISH UPADHYAY", "1962-06-29", "1234 5678 9012", "abcde1234f", "SCAN-1"),
+                         {"issuing_state": "IND", "services": ["ind_aadhaar"], "full_name": "ASHISH UPADHYAY", "date_of_birth": "1962-06-29",
+                          "personal_number": "123456789012", "pan": "ABCDE1234F", "consent": True, "vendor_data": "SCAN-1"})
+        card = dict(a_read(), document_type="Aadhaar card")
+        card["fields"] = dict(card["fields"], document_number="1234 5678 9012", date_of_expiry="")
+        s["screening_source"] = "stand-in"
+        sid = self.upload(c, card)
+        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        self.assertIn('id="aadhaar-form"', page)
+        self.assertIn('value="123456789012"', page)
+        form = {"full_name": "ASHISH UPADHYAY", "date_of_birth": "1962-06-29", "aadhaar": "123456789012", "pan": "ABCDE1234F"}
+        with mock.patch.object(didit, "_send", lambda req: self.fail("sent without consent")):
+            self.assertIn("consent", c.post(f"/scan/{sid}/aadhaar", data=form, follow_redirects=True).data.decode("utf-8"))
+        answer = {"request_id": "r1", "database_validation": {"status": "Declined", "match_type": "partial_match", "validations": [
+            {"service_id": "ind_aadhaar", "validation": {"full_name": "full_match", "date_of_birth": "no_match", "identification_number": "full_match"},
+             "outcome_code": "NO_MATCH", "outcome_detail": "The date of birth differs"}],
+            "warnings": [{"short_description": "Database validation: no match"}]}}
+        with mock.patch.object(didit, "_send", lambda req: sent.append(req) or (200, _json.dumps(answer).encode())):
+            c.post(f"/scan/{sid}/aadhaar", data=dict(form, consent="1"))
+        self.assertEqual(sent[-1].full_url, "https://verification.didit.me/v3/database-validation/")
+        a = fcc._scan(sid)["aadhaar"]
+        self.assertEqual((a["status"], a["fields"], a["outcome"], a["number"], a["pan"], a["cost"], a["by"]),
+                         ("Declined", [["Name", "Matched"], ["Date of birth", "Not matched"], ["Aadhaar number", "Matched"]],
+                          "NO_MATCH", "XXXX XXXX 9012", "XXXXX1234F", 0.42, "amara.iyer@straive.com"))
+        self.assertNotIn("123456789012", _json.dumps(a))                                       # kept masked
+        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        self.assertIn("Not matched", page)
+        self.assertIn("The date of birth differs", page)
+        # Didit's account switch: kept as the reason, not billed
+        with mock.patch.object(didit, "_send", lambda req: (403, b'{"detail":"database validation is disabled until your organization\'s first top-up."}')):
+            c.post(f"/scan/{sid}/aadhaar", data=dict(form, consent="1"))
+        self.assertIn("first top-up", fcc._scan(sid)["aadhaar"]["error"])
+        self.assertEqual(c.get(f"/scan/{sid}/data.json").get_json()["aadhaar_check"]["status"], "error")
+        # Settings: the switches and prices are the QC lead's
+        qc = self.client("leah.fernandez")
+        page = qc.get("/screening/settings").data.decode("utf-8")
+        for needle in ('name="dd_aml_monitoring"', 'name="dd_aml_monitoring_price"', 'name="dd_dbv_path"', 'name="dd_aadhaar_price"'):
+            self.assertIn(needle, page)
+
     def test_the_team_and_the_password_are_settings(self):
         before = list(fcc.ANALYSTS)
         self.addCleanup(lambda: (fcc.ANALYSTS.__setitem__(slice(None), before), fcc._rebuild_indexes()))

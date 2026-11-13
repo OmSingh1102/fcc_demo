@@ -19,7 +19,17 @@ number Didit read, and the photo-quality scores.
 
 AML screening (POST /v3/aml/, JSON, the same key): the person on the ID
 against Didit's watchlists, chosen on Settings as where the console screens
-(see aml_screen below).
+(see aml_screen below). With ongoing monitoring ticked, Didit keeps
+re-screening the person when its lists change ($0.07 a person a year); the
+app reads those re-screens back (aml_history) and can stop them
+(aml_monitoring_off). Didit pushes changes by webhook too, which needs an
+address Didit can reach: a laptop is not one, so the app asks.
+
+The Aadhaar check (POST /v3/database-validation/, service ind_aadhaar): an
+Indian Aadhaar card's name, date of birth and 12-digit number, with the
+PAN, matched against UIDAI's records, with the customer's consent. The
+field names are Didit's catalogue's (GET /v1/organization/database-
+validation-countries/, read 2026-11-13).
 """
 import json
 import re
@@ -33,7 +43,12 @@ from fincrime.data import countries
 DEFAULTS = {"api_key": "", "base_url": "https://verification.didit.me", "path": "/v3/id-verification/", "auto": True,
             "document_liveness": True, "price_per_call": 0.20,
             # AML screening: its path, its price, whether the news is searched too, a sandbox key's fixed answer
-            "aml_path": "/v3/aml/", "aml_price": 0.20, "aml_adverse_media": False, "aml_sandbox_scenario": ""}
+            "aml_path": "/v3/aml/", "aml_price": 0.20, "aml_adverse_media": False, "aml_sandbox_scenario": "",
+            # ongoing AML monitoring: on or off, its price a person a year; where the re-screens are read and stopped
+            "aml_monitoring": False, "aml_monitoring_price": 0.07,
+            "aml_history_path": "/v1/session/{id}/aml-screening-history/", "aml_monitoring_path": "/v3/users/aml-monitoring/",
+            # the Aadhaar check with UIDAI (database validation)
+            "dbv_path": "/v3/database-validation/", "aadhaar_price": 0.42}
 TIMEOUT = 120
 
 
@@ -76,6 +91,9 @@ _REFUSED = {401: ("Didit does not accept the API key (401): it is wrong, revoked
 
 def _refused(status, raw):
     """Say why, when Didit refused the call: no credits, the key, the rate limit."""
+    if status == 403 and b"top-up" in raw:
+        raise DiditError("Didit keeps this check switched off until the account's first top-up (403); nothing was billed. "
+                         "Top up in the Business Console (Settings > Organization > Billing), or try it free with a sandbox key.")
     if status == 403 and b"enough credits" in raw:
         raise DiditError("Didit accepted the key, but the account has no credits left (403): top up in the Business Console, "
                          "Settings > Organization > Billing and plan > Top up ($50 minimum; a check is about $0.20).")
@@ -168,6 +186,8 @@ def aml_query(person, reference="", cfg=None):
         body["include_adverse_media"] = True
     if cfg.get("aml_sandbox_scenario") in AML_SCENARIOS[1:]:
         body["sandbox_scenario"] = cfg["aml_sandbox_scenario"]
+    if cfg.get("aml_monitoring"):
+        body["include_ongoing_monitoring"] = True          # needs save_api_request, which is on
     return body
 
 
@@ -258,6 +278,7 @@ def aml_screen(cfg, person, limit=5, reference=""):
     return hits, {"provider": "Didit", "status": aml.get("status") or "Unknown", "score": aml.get("score"),
                   "total_hits": aml.get("total_hits", len(aml.get("hits") or [])), "request_id": answer.get("request_id", ""),
                   "adverse_media": bool(cfg.get("aml_adverse_media")), "sandbox": sandbox,
+                  "monitoring": bool(cfg.get("aml_monitoring")),
                   "warnings": [w.get("short_description") or w.get("risk", "") for w in aml.get("warnings") or []],
                   "cost": 0.0 if sandbox else round(float(cfg.get("aml_price") or 0), 4),
                   "seconds": round(time.monotonic() - started, 1)}
@@ -276,3 +297,126 @@ def aml_test(cfg):
     if status >= 400:
         raise DiditError(f"Didit answered {status}: {raw[:200].decode('utf-8', 'replace')}")
     return f"Didit answered {status} to the test: AML screening is reachable."
+
+
+# ── ongoing AML monitoring ─────────────────────────────────────────────────────
+def _get_json(cfg, url):
+    req = urllib.request.Request(url, method="GET", headers={"x-api-key": cfg["api_key"], "Accept": "application/json"})
+    try:
+        return _send(req)
+    except (urllib.error.URLError, OSError) as exc:
+        raise DiditError(f"Didit did not answer ({type(exc).__name__}): {str(exc)[:160]}") from exc
+
+
+def aml_history(cfg, request_id, pages=5):
+    """Didit's re-screens of one watched screening, newest first:
+    [{at, outcome (NO_CHANGE, CHANGED, FAILED), status, score, total_hits}].
+    A read: nothing is screened or billed."""
+    if not request_id:
+        raise DiditError("The screening has no Didit request id to follow.")
+    url = _url(cfg, "aml_history_path").replace("{id}", str(request_id))
+    runs = []
+    for _ in range(pages):
+        status, raw = _get_json(cfg, url)
+        _refused(status, raw)
+        if status == 404:
+            raise DiditError("Didit has no screening under this case's request id (404).")
+        if status >= 400:
+            raise DiditError(f"Didit answered {status}: {raw[:200].decode('utf-8', 'replace')}")
+        try:
+            page = json.loads(raw)
+        except ValueError as exc:
+            raise DiditError("Didit's answer was not JSON.") from exc
+        items = page if isinstance(page, list) else page.get("results") or []
+        runs += [{"at": str(e.get("completed_at") or "")[:19].replace("T", " "), "outcome": str(e.get("outcome") or ""),
+                  "status": e.get("status") or "", "score": e.get("score"), "total_hits": e.get("total_hits")} for e in items]
+        url = page.get("next") if isinstance(page, dict) else None
+        if not url:
+            break
+    return sorted(runs, key=lambda r: r["at"], reverse=True)
+
+
+def aml_monitoring_off(cfg, vendor_data):
+    """Ask Didit to stop watching the person screened under `vendor_data`
+    (the case id). (stopped or not, Didit's own word for it)."""
+    status, raw = _post_json(cfg, _url(cfg, "aml_monitoring_path"), {"is_enabled": False, "vendor_data_list": [vendor_data]})
+    _refused(status, raw)
+    if status >= 400:
+        raise DiditError(f"Didit answered {status}: {raw[:200].decode('utf-8', 'replace')}")
+    try:
+        answer = json.loads(raw)
+    except ValueError:
+        answer = {}
+    results = answer.get("results") if isinstance(answer, dict) else None
+    if isinstance(results, dict):
+        results = [dict(v, vendor_data=k) if isinstance(v, dict) else {"vendor_data": k, "outcome": v} for k, v in results.items()]
+    word = ""
+    for r in results or []:
+        if isinstance(r, dict):
+            word = str(r.get("outcome") or r.get("result") or r.get("status") or "")
+            if word:
+                break
+    word = word or (answer.get("status") if isinstance(answer, dict) else "") or f"answered {status}"
+    return "disabled" in word.lower(), word
+
+
+# ── the Aadhaar check with UIDAI (database validation) ─────────────────────────
+AADHAAR_SERVICE = "ind_aadhaar"
+MATCH_WORDS = {"full_match": "Matched", "partial_match": "Partly matched", "no_match": "Not matched"}
+AADHAAR_FIELDS = (("Name", "full_name"), ("Date of birth", "date_of_birth"), ("Aadhaar number", "identification_number"))
+
+
+def aadhaar_query(full_name, dob, number, pan, reference=""):
+    """What Didit is sent for an Aadhaar check. ValueError, and nothing is
+    sent, when a field UIDAI needs is missing or malformed."""
+    digits, pan = re.sub(r"\D", "", number or ""), re.sub(r"\s", "", pan or "").upper()
+    missing = []
+    if not (full_name or "").strip():
+        missing.append("the name")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", (dob or "").strip()):
+        missing.append("the date of birth as YYYY-MM-DD")
+    if len(digits) != 12:
+        missing.append("the full 12-digit Aadhaar number (a masked card shows only the last 4)")
+    if not re.fullmatch(r"[A-Z]{5}\d{4}[A-Z]", pan):
+        missing.append("the PAN (ten characters, like ABCDE1234F)")
+    if missing:
+        raise ValueError("Enter " + ", ".join(missing) + ". Nothing was sent.")
+    body = {"issuing_state": "IND", "services": [AADHAAR_SERVICE], "full_name": full_name.strip(), "date_of_birth": dob.strip(),
+            "personal_number": digits, "pan": pan, "consent": True}
+    if reference:
+        body["vendor_data"] = reference
+    return body
+
+
+def aadhaar_check(cfg, full_name, dob, number, pan, reference=""):
+    """UIDAI's answer through Didit, as kept with the case: the status, each
+    field matched or not, UIDAI's outcome, and the numbers masked."""
+    body = aadhaar_query(full_name, dob, number, pan, reference)
+    started = time.monotonic()
+    status, raw = _post_json(cfg, _url(cfg, "dbv_path"), body)
+    _refused(status, raw)
+    if status == 400:
+        raise DiditError(f"Didit refused the details before asking UIDAI (400, not billed): {raw[:300].decode('utf-8', 'replace')}")
+    if status == 502:
+        raise DiditError("UIDAI did not answer (502); nothing was billed: try again later.")
+    if status >= 400:
+        raise DiditError(f"Didit answered {status}: {raw[:200].decode('utf-8', 'replace')}")
+    try:
+        answer = json.loads(raw)
+    except ValueError as exc:
+        raise DiditError("Didit's answer was not JSON.") from exc
+    dv = answer.get("database_validation") or {}
+    found = dv.get("validations") or []
+    found = [found] if isinstance(found, dict) else found
+    v = next((x for x in found if x.get("service_id") == AADHAAR_SERVICE), found[0] if found else {})
+    marks = v.get("validation") or {}
+    outcome = str(v.get("outcome_code") or "")
+    billed = outcome not in ("REGISTRY_UNAVAILABLE", "REGISTRY_ERROR")
+    return {"provider": "Didit", "service": "India Aadhaar (UIDAI)", "status": dv.get("status") or "Unknown",
+            "match_type": dv.get("match_type") or "",
+            "fields": [[label, MATCH_WORDS.get(marks.get(key), "Not answered")] for label, key in AADHAAR_FIELDS],
+            "outcome": outcome, "detail": str(v.get("outcome_detail") or "")[:300],
+            "warnings": [w.get("short_description") or w.get("risk", "") if isinstance(w, dict) else str(w) for w in dv.get("warnings") or []],
+            "request_id": answer.get("request_id", ""), "number": "XXXX XXXX " + body["personal_number"][-4:],
+            "pan": "XXXXX" + body["pan"][-5:], "cost": round(float(cfg.get("aadhaar_price") or 0), 4) if billed else 0.0,
+            "seconds": round(time.monotonic() - started, 1)}
