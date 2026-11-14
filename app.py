@@ -2164,7 +2164,7 @@ def _sample_cost():
         didit_parts.append(("Didit's ID check", float(dd.get("price_per_call") or 0)))
     if id_screening.source(SCREEN_SETTINGS) == "didit_aml":
         didit_parts.append(("Didit's AML screening", float(dd.get("aml_price") or 0)))
-    return {"didit": didit_parts, "didit_total": round(sum(p for _, p in didit_parts), 2)}
+    return {"didit": didit_parts, "didit_total": round(sum(p for _, p in didit_parts), 2), "idv": _idv_wanted()}
 
 
 AZURE_READER = {"id": azure_docintel.MODEL["model"], "label": azure_docintel.MODEL["label"], "price": None}
@@ -2470,7 +2470,8 @@ def scan_result(scan_id):
                            idv_counts=SCREEN_SETTINGS.get("auto_needs_idv", True),
                            outcomes=id_screening.ALERT_OUTCOME, sop=id_screening.sop_current(_sop_stored()),
                            aadhaar_pre=_aadhaar_prefill(rec), aadhaar_price=SCREEN_SETTINGS["didit"].get("aadhaar_price", 0),
-                           aml_monitor_price=SCREEN_SETTINGS["didit"].get("aml_monitoring_price", 0))
+                           aml_monitor_price=SCREEN_SETTINGS["didit"].get("aml_monitoring_price", 0),
+                           summary=id_screening.case_summary(rec, SCREEN_SETTINGS))
 
 
 def _aadhaar_prefill(rec):

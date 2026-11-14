@@ -28,7 +28,14 @@
             {% if s.qc_sample %}<span class="badge amber" title="The AI screening rule would have closed it ({{ s.qc_sample.pct }}% of such cases go to an analyst)">QC sample</span>{% endif %}
             {% if ns.ai_wait %}<span class="badge blue"><span class="spin"></span> AI reviewing {{ ns.ai_wait }}</span>{% endif %}
             {% include "_scan_verdict.html" %}
+            {% if s.idv %}{% set iv = s.idv %}<span class="badge {{ {'Approved': 'emerald', 'Declined': 'rose', 'pending': 'blue'}.get(iv.status, 'amber') }}" id="idv-badge" title="Is the document genuine? Didit's check">{{ iv.provider or 'Didit' }}: {{ {'pending': 'checking…', 'error': 'not checked'}.get(iv.status, iv.status) }}</span>{% endif %}
         </div>
+        {% if summary %}
+        <div class="case-summary {{ summary.tone }}" id="case-summary">
+            <div class="strong small">{{ summary.label }}</div>
+            <ul>{% for r in summary.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+        </div>
+        {% endif %}
     </div>
 
     <div class="rail-section rail-actions">
@@ -107,7 +114,7 @@
                     {% if f[key] %}{% set more.n = more.n + 1 %}<div><span class="l">{{ label }}</span><span class="v">{{ f[key] }}</span></div>{% endif %}
                     {% endfor %}
                     {% if not more.n %}<div><span class="l">-</span><span class="v muted">None printed on this document.</span></div>{% endif %}
-                    <div><span class="l">Case source</span><span class="v">ID upload</span></div>
+                    <div><span class="l">Case source</span><span class="v">{{ 'Sample ID: ' ~ s.sample.title if s.sample else 'ID upload' }}</span></div>
                 </div>
             </div>
             <div class="card" id="id-check">

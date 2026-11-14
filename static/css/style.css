@@ -628,6 +628,12 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 .rail-facts .l { flex-shrink: 0; color: var(--muted-foreground); }
 .rail-facts .v { min-width: 0; text-align: right; font-weight: 500; color: var(--foreground); overflow-wrap: anywhere; }
 .rail-why { margin-top: 6px; font-size: 11.5px; line-height: 1.4; color: var(--muted-foreground); }
+/* Where an open screening case stands, with its reasons (id_screening.case_summary). */
+.case-summary { margin-top: 10px; border: 1px solid var(--border); border-left-width: 4px; border-radius: var(--radius-md); padding: 8px 10px; }
+.case-summary ul { margin: 4px 0 0; padding-left: 16px; font-size: 12px; line-height: 1.45; }
+.case-summary.rose  { border-color: #fecdd3; border-left-color: #e11d48; background: #fff1f2; color: #881337; }
+.case-summary.amber { border-color: #fde68a; border-left-color: #d97706; background: #fffbeb; color: #78350f; }
+.case-summary.blue  { border-color: #bfdbfe; border-left-color: #2563eb; background: #eff6ff; color: #1e3a8a; }
 .rail-actions .btn-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
 .rail-actions .btn-row.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .rail-actions .btn-row .btn, .rail-actions .btn-row form { width: 100%; }

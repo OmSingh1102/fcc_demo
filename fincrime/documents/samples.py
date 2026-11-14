@@ -9,7 +9,10 @@ the age limit, a printed date of birth that differs from the MRZ, a blurred
 photo, a US driving licence, and a document that is not an ID. A sample
 goes through the console exactly as an upload does (the AI reads it, the
 checks run, the name is screened, the AI decides each hit): only the image
-is the console's. Dates are drawn from today's date, so the clean ones stay
+is the console's. Didit's ID verification declines every one of them (no
+real photo, no real document template), so with Didit's check on a sample
+always goes to an analyst; with it off, each does what its card says. Dates
+are drawn from today's date, so the clean ones stay
 in date and the under-age holder stays under the limit. The made-up names
 match no record of the stand-in watchlist; the three listed names are
 records of it.
@@ -22,7 +25,7 @@ from fincrime.documents import raster, svg_cards
 SAMPLES = (
     {"id": "clean-passport", "title": "Clean passport", "group": "Passes",
      "shows": "Every check passes and the name matches no record.",
-     "expect": "Closes by itself when auto-verify is on (and Didit approves it, when Didit checks IDs).",
+     "expect": "With Didit's check off, it closes by itself (auto-verify). With it on, Didit declines it (a made-up document) and an analyst confirms.",
      "kind": "passport", "name": "Elena Marie Castellano", "nationality": "US", "gender": "F", "dob": "1989-04-17",
      "number": "X48213976", "address": "1842 Larkspur Lane, Sacramento, CA 95822"},
     {"id": "driving-licence", "title": "US driving licence", "group": "Passes",
@@ -32,7 +35,7 @@ SAMPLES = (
      "number": "D7315528", "address": "77 Harbor View Road, Portland, OR 97205"},
     {"id": "adverse-media-dob-differs", "title": "Name on the watchlist, another date of birth", "group": "Watchlist",
      "shows": "The name matches an adverse-media record exactly, but the record's date of birth is 25 years earlier.",
-     "expect": "The AI should call both hits false positives; with Didit's approval the rule can clear them.",
+     "expect": "The AI should call both hits false positives; with Didit's check off, the rule clears them and closes the case.",
      "kind": "passport", "name": "Sarah Louise Murphy", "nationality": "US", "gender": "F", "dob": "1991-03-14",
      "number": "X60442183", "address": "310 Maple Court, Columbus, OH 43215"},
     {"id": "pep-match", "title": "A politically exposed person", "group": "Watchlist",

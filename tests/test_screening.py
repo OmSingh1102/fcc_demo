@@ -344,10 +344,22 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertIn(">sample</span>", c.get("/scan").data.decode("utf-8"))
         self.assertEqual(c.get(f"/scan/{sid}/data.json").get_json()["sample"], "clean-passport")
         self.assertIn("pick a sample ID", c.post("/scan", data={"sample": "nope"}, follow_redirects=True).data.decode("utf-8"))
-        # Didit on: the page says what a sample costs on Didit's account
+        # the hits waiting for an analyst, each with its own reason
+        summary = id_screening.case_summary(rec, fcc.SCREEN_SETTINGS)
+        self.assertEqual(summary["label"], "Needs a person")
+        self.assertIn("No record matched: an analyst confirms no match (auto-verify of a case with no hit is off on Settings)",
+                      summary["reasons"])
+        hit = {"name": "SARAH MURPHY", "category": "Adverse Media", "dob_result": "Not matched",
+               "ai": {"status": "done", "suggested": "False positive", "confidence": 80}}
+        with_hit = dict(rec, screening=dict(rec["screening"], hits=[hit]))
+        self.assertIn("1 hit waits for an analyst's outcome (auto-verify is off on Settings): SARAH MURPHY: the AI was 80% sure, under "
+                      "the 90% bar", id_screening.case_summary(with_hit, fcc.SCREEN_SETTINGS)["reasons"])
+        # Didit on: the page says what a sample costs on Didit's account, and that Didit declines made-up documents
         fcc.SCREEN_SETTINGS["didit"].update(api_key="key", auto=True)
         fcc.SCREEN_SETTINGS["screening_source"] = "didit_aml"
-        self.assertIn("Didit&#39;s ID check and Didit&#39;s AML screening ($0.40 on Didit's account)", c.get("/scan").data.decode("utf-8"))
+        page = c.get("/scan").data.decode("utf-8")
+        self.assertIn("Didit&#39;s ID check and Didit&#39;s AML screening ($0.40 on Didit's account).", page)
+        self.assertIn("<b>Didit declines made-up documents</b>", page)
 
     def test_upload_to_closed_case(self):
         c = self.client()
@@ -569,11 +581,22 @@ class ScreeningBookPageTests(unittest.TestCase):
         page = c.get(f"/scan/{sid}").data.decode("utf-8")
         for needle in ('id="id-vendor"', "Screen capture detected", "Verify again"):
             self.assertIn(needle, page)
+        # the top of the page says the whole of it: the checks code made pass, Didit declined, a person decides
+        summary = id_screening.case_summary(rec, fcc.SCREEN_SETTINGS)
+        self.assertEqual((summary["label"], summary["tone"]), ("Needs a person", "rose"))
+        self.assertIn("Didit declined the document: Screen capture detected", summary["reasons"])
+        rail = page.split('id="case-rail"')[1].split('rail-actions')[0]
+        for needle in ("Document checks pass", 'id="idv-badge"', "Didit: Declined", 'id="case-summary"', "Needs a person",
+                       "Didit declined the document: Screen capture detected"):
+            self.assertIn(needle, rail)
+        self.assertIn(">Didit declined</span>", c.get("/scan").data.decode("utf-8"))
         answer["id_verification"].update(status="Approved", warnings=[])
         with mock.patch.object(didit, "_send", lambda req: (200, _json.dumps(answer).encode())):
             c.post(f"/scan/{sid}/idv")
         rec = fcc._scan(sid)
         self.assertEqual((rec["idv"]["status"], rec["status"], rec["closed"]["by"]), ("Approved", "closed", id_screening.AUTO_ACTOR))
+        self.assertIsNone(id_screening.case_summary(rec, fcc.SCREEN_SETTINGS))                # closed: its outcome says it
+        self.assertNotIn('id="case-summary"', c.get(f"/scan/{sid}").data.decode("utf-8"))
         with mock.patch.object(didit, "_send", lambda req: (403, b'{"error": "no credits"}')):
             sid = self.upload(c, a_read(name="ZEBEDIAH QUARTERMAINE", surname="QUARTERMAINE", given="ZEBEDIAH"), "ivory")
         rec = fcc._scan(sid)

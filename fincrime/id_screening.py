@@ -475,6 +475,97 @@ def hit_is_safe(case, hit, settings):
                   + "; every ID check passed")
 
 
+def _hit_reason(hit, settings):
+    """Why one hit waits for an analyst, from the hit alone (the case's own
+    reasons, the checks and the ID verification, are said once beside it)."""
+    ai = hit.get("ai") or {}
+    bar = int(settings.get("auto_min_confidence", 90))
+    listed = next((x for x in _person_lists(settings) if x.lower() in (hit.get("category") or "").lower()), None)
+    if ai.get("status") == "pending":
+        return "the AI is reviewing it"
+    if ai.get("status") != "done":
+        return "the AI could not answer: ask it again"
+    if listed:
+        return f"a {listed} record always goes to an analyst"
+    suggested = ai.get("suggested") or SUGGESTION.get(ai.get("outcome"), "")
+    if suggested != "False positive":
+        return f"the AI suggests {suggested.lower() or 'an analyst looks'}"
+    conf = ai.get("confidence")
+    if not isinstance(conf, (int, float)) or conf < bar:
+        return f"the AI was {conf}% sure, under the {bar}% bar"
+    if settings.get("auto_dob_differs") and hit.get("dob_result") != "Not matched":
+        return "the record's date of birth does not differ from the ID's"
+    return "the AI would clear it, but the case needs an analyst for the reasons above"
+
+
+def case_summary(case, settings):
+    """Where an open case stands, for the top of its page: a label (In
+    progress, Needs a person), a tone, and the reasons in plain words. It
+    puts together what the page shows apart: the checks code made on the read
+    (the "Document checks" badge is only those), the ID verification's answer,
+    the search, and each hit. None for a closed case: its outcome says it."""
+    if case.get("status") == "closed":
+        return None
+    settings = settings or {}
+    reasons, waiting, severe = [], [], False
+    read = case.get("read")
+    if not read:
+        reasons.append("The ID was not read: ask for a clearer photo, or upload it again")
+        severe = True
+    elif not is_id(read):
+        reasons.append("Not an identity document: nobody was screened")
+        severe = True
+    checks = case.get("checks") or []
+    failed = [c["label"] for c in checks if c.get("state") == "fail"]
+    looks = [c["label"] for c in checks if c.get("state") == "warn"]
+    if failed:
+        reasons.append("A document check failed: " + "; ".join(failed))
+        severe = True
+    elif looks:
+        reasons.append("A document check asks for a look: " + "; ".join(looks))
+    idv = case.get("idv") or {}
+    if idv:
+        status, who = idv.get("status"), idv.get("provider", "The ID verification")
+        if status == "pending":
+            waiting.append(f"{who} is checking the document")
+        elif status == "error":
+            reasons.append(f"{who} could not check the document: {idv.get('error', '')}".rstrip(": "))
+        elif didit.is_sandbox(idv):
+            reasons.append(f"{who}'s sandbox answered with its sample: the document was not really checked")
+        elif status != "Approved":
+            why = [w.get("text") for w in idv.get("warnings") or [] if isinstance(w, dict) and w.get("declines") and w.get("text")]
+            reasons.append(f"{who} {'declined' if status == 'Declined' else 'did not approve'} the document"
+                           + (f" ({status})" if status not in ("Declined", None) else "") + (": " + "; ".join(why[:3]) if why else ""))
+            severe = severe or status == "Declined"
+        else:
+            diff = idv_differences(case, settings)
+            if diff:
+                reasons.append(f"{who} approved, but read a different " + ", ".join(d[0].lower() for d in diff) + " from the ID's")
+    sc = case.get("screening") or {}
+    if sc.get("error"):
+        reasons.append("The watchlist search failed: search again on the Screening tab")
+    hits = open_hits(case)
+    reviewing = [h for h in hits if (h.get("ai") or {}).get("status") == "pending"]
+    if reviewing:
+        waiting.append(f"The AI is reviewing {len(reviewing)} hit{'s' if len(reviewing) != 1 else ''}")
+    decided = [h for h in hits if h not in reviewing]
+    if decided:
+        reasons.append(f"{len(decided)} hit{'s' if len(decided) != 1 else ''} wait{'s' if len(decided) == 1 else ''} for an analyst's outcome"
+                       + ("" if settings.get("auto_verify") else " (auto-verify is off on Settings)") + ": "
+                       + "; ".join(f"{h['name']}: {_hit_reason(h, settings)}" for h in decided[:3])
+                       + ("; …" if len(decided) > 3 else ""))
+    if case.get("qc_sample"):
+        reasons.append("A QC sample: the AI screening rule would have closed it; an analyst checks the AI")
+    if read and is_id(read) and sc and not sc.get("error") and not sc.get("hits") and not reasons and not waiting:
+        reasons.append("No record matched: an analyst confirms no match"
+                       + ("" if settings.get("auto_verify") and settings.get("auto_no_hit") else " (auto-verify of a case with no hit is off on Settings)"))
+    if not reasons and waiting:
+        return {"label": "In progress", "tone": "blue", "reasons": waiting}
+    if not reasons:
+        return {"label": "Open", "tone": "blue", "reasons": ["An analyst confirms the case"]}
+    return {"label": "Needs a person", "tone": "rose" if severe else "amber", "reasons": reasons + waiting}
+
+
 def qc_sampled(case_id, settings):
     """Is the case one of the QC sample (a fixed share, by its ID)?"""
     pct = int(settings.get("auto_qc_pct") or 0)
