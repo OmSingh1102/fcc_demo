@@ -2471,7 +2471,8 @@ def scan_result(scan_id):
                            outcomes=id_screening.ALERT_OUTCOME, sop=id_screening.sop_current(_sop_stored()),
                            aadhaar_pre=_aadhaar_prefill(rec), aadhaar_price=SCREEN_SETTINGS["didit"].get("aadhaar_price", 0),
                            aml_monitor_price=SCREEN_SETTINGS["didit"].get("aml_monitoring_price", 0),
-                           summary=id_screening.case_summary(rec, SCREEN_SETTINGS))
+                           summary=id_screening.case_summary(rec, SCREEN_SETTINGS),
+                           checklist=id_screening.checklist(rec, SCREEN_SETTINGS))
 
 
 def _aadhaar_prefill(rec):

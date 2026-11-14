@@ -634,6 +634,18 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 .case-summary.rose  { border-color: #fecdd3; border-left-color: #e11d48; background: #fff1f2; color: #881337; }
 .case-summary.amber { border-color: #fde68a; border-left-color: #d97706; background: #fffbeb; color: #78350f; }
 .case-summary.blue  { border-color: #bfdbfe; border-left-color: #2563eb; background: #eff6ff; color: #1e3a8a; }
+/* The SOP checklist on a screening case (id_screening.checklist). */
+.ck-table td:first-child { width: 34%; }
+.ck-table td:last-child { width: 15%; }
+.ck-step td { background: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted-foreground); }
+.ck-mark { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%;
+           font-size: 11px; font-weight: 800; margin-right: 4px; vertical-align: -3px; }
+.ck-mark.ok   { background: #dcfce7; color: #15803d; }
+.ck-mark.fail { background: #ffe4e6; color: #be123c; }
+.ck-mark.warn { background: #fef3c7; color: #b45309; }
+.ck-mark.wait { background: #dbeafe; color: #1d4ed8; }
+.ck-mark.info, .ck-mark.na { background: #f1f5f9; color: #64748b; }
+.ck-table tr.ck-na td { color: var(--muted-foreground); }
 .rail-actions .btn-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
 .rail-actions .btn-row.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .rail-actions .btn-row .btn, .rail-actions .btn-row form { width: 100%; }

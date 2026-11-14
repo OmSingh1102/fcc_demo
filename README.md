@@ -269,6 +269,18 @@ limit, a blurred photo, and a utility bill sent as an ID. A sample is read
 and screened exactly as an upload is (it costs the same: the page says what
 on Didit's account), and its case is marked as a sample.
 
+**SOP checklist** (first on a case's Overview tab; `id_screening.checklist`).
+Every rule the case was checked against, in the workflow's order: 1 read
+the ID (an identity document, the photo, the main fields, unsure fields),
+2 check the document (expiry, age, the MRZ check digits, the printed details
+against the MRZ, Didit's genuine-document check and whether it read the same
+details), 3 screen the name (no match, or each hit with the AI's suggestion
+and the analyst's outcome), 4 the outcome; each passed, failed, to look at,
+waiting or not run, with what was found and who checked it (code, the
+reader, Didit, the AI, an analyst). Built from what the case holds: nothing
+is checked again. Above it, the case's rail says where it stands (Needs a
+person / In progress, with the reasons: `id_screening.case_summary`).
+
 **Screening cases** (`/scan`, the tool's home page in the default book; `fincrime/documents/id_scan.py`,
 `fincrime/watchlist.py`, `fincrime/id_screening.py`, `fincrime/adapters/world_check.py`).
 Start from an ID document, with no CSV: every uploaded ID becomes a case.

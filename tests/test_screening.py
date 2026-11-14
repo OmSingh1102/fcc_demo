@@ -597,12 +597,55 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertEqual((rec["idv"]["status"], rec["status"], rec["closed"]["by"]), ("Approved", "closed", id_screening.AUTO_ACTOR))
         self.assertIsNone(id_screening.case_summary(rec, fcc.SCREEN_SETTINGS))                # closed: its outcome says it
         self.assertNotIn('id="case-summary"', c.get(f"/scan/{sid}").data.decode("utf-8"))
+        ck = id_screening.checklist(rec, fcc.SCREEN_SETTINGS)
+        rows = {r["rule"]: r for st in ck["steps"] for r in st["rows"]}
+        self.assertEqual((rows["Genuine document (ID vendor)"]["state"], rows["Didit read the same details as the ID"]["state"]), ("ok", "ok"))
+        self.assertEqual(ck["steps"][3]["rows"][0]["rule"], "Closed: No match")
         with mock.patch.object(didit, "_send", lambda req: (403, b'{"error": "no credits"}')):
             sid = self.upload(c, a_read(name="ZEBEDIAH QUARTERMAINE", surname="QUARTERMAINE", given="ZEBEDIAH"), "ivory")
         rec = fcc._scan(sid)
         self.assertEqual((rec["idv"]["status"], rec["status"]), ("error", "open"))      # not checked: an analyst's
         self.assertIn("refused the call", rec["idv"]["error"])
         self.assertEqual(c.get(f"/api/v1/cases/{sid}").status_code, 401)             # the API never takes a session
+
+    def test_the_sop_checklist_lists_every_rule_in_the_workflows_order(self):
+        c = self.client()
+        hit_read = a_read()                                                         # ASHISH UPADHYAY: hits on the stand-in
+        sid = self.upload(c, hit_read)
+        rec = fcc._scan(sid)
+        ck = id_screening.checklist(rec, fcc.SCREEN_SETTINGS)
+        self.assertEqual([s["step"] for s in ck["steps"]], ["1 · Read the ID", "2 · Check the document: SOP rules and fraud",
+                                                            "3 · Screen the name", "4 · Outcome"])
+        rules = [[r["rule"] for r in s["rows"]] for s in ck["steps"]]
+        self.assertEqual(rules[0], ["It is an identity document", "Photo good enough to read", "Name, date of birth and number read",
+                                    "No field the reader is unsure of"])
+        self.assertEqual(rules[1][:3], ["Not expired", "Holder is 18 or over", "MRZ check digits add up"])
+        self.assertEqual(rules[1][-1], "Genuine document (ID vendor)")
+        self.assertEqual(ck["steps"][1]["rows"][-1]["state"], "na")                # Didit off: not run, and said so
+        hits = rec["screening"]["hits"]
+        self.assertEqual(rules[2], [f"Hit: {h['name']} ({h['uid']})" for h in hits])
+        self.assertTrue(all(r["state"] == "warn" and "Waiting for an analyst" in r["detail"] for r in ck["steps"][2]["rows"]))
+        self.assertEqual(ck["steps"][3]["rows"][0]["rule"], "Needs a person")
+        self.assertEqual(ck["rules"], sum(len(s["rows"]) for s in ck["steps"][:3]))
+        self.assertEqual(sum(ck["totals"].values()), ck["rules"])
+        page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        overview = page.split('data-panel="overview"')[1]
+        self.assertTrue(overview.index('id="sop-checklist"') < overview.index('class="fact-cards"'))   # first on the case
+        for needle in ("SOP checklist", "1 · Read the ID", "3 · Screen the name", f"Hit: {hits[0]['name']}", "to look at", "not run"):
+            self.assertIn(needle, page)
+        # an analyst's outcome on a hit: the row says it and who gave it
+        uid = hits[0]["uid"]
+        c.post(f"/scan/{sid}/hits/outcome", data={"alert_id": uid, "outcome": "True Positive", "risk": "High", "comment": "same person"})
+        rec = fcc._scan(sid)
+        row = id_screening.checklist(rec, fcc.SCREEN_SETTINGS)["steps"][2]["rows"][0]
+        self.assertEqual((row["state"], row["effect"], row["by"]), ("fail", "An analyst's outcome", "amara.iyer@straive.com"))
+        self.assertIn("Outcome: True match.", row["detail"])
+        # an ID that was not read: the checklist says so, and nothing after it ran
+        nothing = dict(rec, read=None, checks=[], screening={}, idv={}, error="The model could not read the image.")
+        ck = id_screening.checklist(nothing, fcc.SCREEN_SETTINGS)
+        self.assertEqual(ck["steps"][0]["rows"][0], {"rule": "The ID was read", "state": "fail", "detail": "The model could not read the image.",
+                                                     "by": "Model", "effect": id_screening.RULE_EFFECT["fail"]})
+        self.assertEqual(ck["steps"][2]["rows"][0]["state"], "na")
 
     def test_didit_must_approve_this_very_document(self):
         from fincrime.adapters import didit

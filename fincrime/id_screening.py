@@ -566,6 +566,125 @@ def case_summary(case, settings):
     return {"label": "Needs a person", "tone": "rose" if severe else "amber", "reasons": reasons + waiting}
 
 
+# The document checks (documents/id_scan.checks) by the step they belong to, as the checklist names them.
+_READ_CHECKS = {"Identity document": "It is an identity document", "Photo": "Photo good enough to read",
+                "Main fields": "Name, date of birth and number read", "Fields the model is unsure of": "No field the reader is unsure of"}
+_DOC_CHECKS = {"Expiry": "Not expired", "Printed fields against the MRZ": "Printed details match the MRZ",
+               "MRZ": "Machine-readable zone (MRZ)"}
+RULE_EFFECT = {"fail": "Fail: the case never closes by itself", "warn": "Check: a person looks", "info": "Note only"}
+
+
+def _row(rule, state, detail="", by="", effect=""):
+    return {"rule": rule, "state": state, "detail": detail, "by": by, "effect": effect or RULE_EFFECT.get(state, "")}
+
+
+def checklist(case, settings):
+    """The case's SOP checklist: every rule it was checked against, in the
+    workflow's order (1 read the ID, 2 check the document, 3 screen the name,
+    4 the outcome), each ok, fail, warn (a person looks), info, wait or na
+    (not run), with what was found and who checked it. Built from what the
+    case holds: nothing is checked again, nothing is called."""
+    settings = settings or {}
+    read, checks = case.get("read"), case.get("checks") or []
+    reader = (case.get("model") or {}).get("label") or "the reader"
+    found = {c["label"]: c for c in checks}
+
+    read_rows = []
+    if not read:
+        read_rows.append(_row("The ID was read", "fail", case.get("error") or "No reader read it.", reader))
+    else:
+        if "Identity document" in found:
+            c = found["Identity document"]
+            read_rows.append(_row(_READ_CHECKS["Identity document"], c["state"], c["detail"], reader))
+        else:
+            read_rows.append(_row(_READ_CHECKS["Identity document"], "ok",
+                                  ", ".join(x for x in (read.get("document_type"), read.get("issuing_country")) if x), reader))
+        for label in ("Photo", "Main fields"):
+            if label in found:
+                read_rows.append(_row(_READ_CHECKS[label], found[label]["state"], found[label]["detail"], "Code, on the read"))
+        c = found.get("Fields the model is unsure of")
+        read_rows.append(_row(_READ_CHECKS["Fields the model is unsure of"], c["state"], c["detail"], reader) if c
+                         else _row(_READ_CHECKS["Fields the model is unsure of"], "ok", "None.", reader))
+
+    doc_rows = []
+    if read and is_id(read):
+        for label in ("Expiry", "Age"):
+            c = found.get(label)
+            name = f"Holder is {settings.get('min_age', 18)} or over" if label == "Age" else _DOC_CHECKS[label]
+            doc_rows.append(_row(name, c["state"], c["detail"], "Code") if c
+                            else _row(name, "na", "No date printed to check." if label == "Expiry" else "No date of birth read."))
+        digits = next((c for c in checks if c["label"].startswith("MRZ check digits")), None)
+        if digits:
+            doc_rows.append(_row("MRZ check digits add up", digits["state"], digits["detail"], "Code (ICAO 9303)"))
+        for label in ("Printed fields against the MRZ", "MRZ"):
+            if label in found:
+                doc_rows.append(_row(_DOC_CHECKS[label], found[label]["state"], found[label]["detail"], "Code"))
+        if not digits and "MRZ" not in found:
+            doc_rows.append(_row("MRZ check digits add up", "na", "No machine-readable zone on this document."))
+    idv = case.get("idv") or {}
+    who = idv.get("provider", "Didit")
+    if not idv:
+        dd = settings.get("didit") or {}
+        doc_rows.append(_row("Genuine document (ID vendor)", "na", "Not checked: "
+                             + ("Didit checks only when asked on this case." if didit.configured(dd) else "Didit's check is off on Settings."), "Didit"))
+    elif idv.get("status") == "pending":
+        doc_rows.append(_row("Genuine document (ID vendor)", "wait", f"{who} is checking it.", who))
+    elif idv.get("status") == "error":
+        doc_rows.append(_row("Genuine document (ID vendor)", "warn", f"Not checked: {idv.get('error', '')}", who))
+    elif didit.is_sandbox(idv):
+        doc_rows.append(_row("Genuine document (ID vendor)", "warn", f"{who}'s sandbox answered with its sample: not a real check.", who))
+    else:
+        why = [w.get("text") for w in idv.get("warnings") or [] if isinstance(w, dict) and w.get("text")]
+        status = idv.get("status") or "Unknown"
+        doc_rows.append(_row("Genuine document (ID vendor)", "ok" if status == "Approved" else "fail" if status == "Declined" else "warn",
+                             status + (": " + "; ".join(why[:4]) if why and status != "Approved" else ""), who,
+                             "" if status == "Approved" else "The case never closes by itself" if settings.get("auto_needs_idv", True) else ""))
+        if status == "Approved":
+            diff = idv_differences(case, settings)
+            doc_rows.append(_row(f"{who} read the same details as the ID", "fail" if diff else "ok",
+                                 "; ".join(f"{w}: {who} {a}, the ID {b}" for w, a, b in diff) if diff else "Name, date of birth and number agree.",
+                                 who))
+
+    sc = case.get("screening") or {}
+    screen_rows = []
+    if not sc:
+        screen_rows.append(_row("Name screened on the watchlist", "na", "Not screened: the ID was not read as an identity document."))
+    elif sc.get("error"):
+        screen_rows.append(_row("Name screened on the watchlist", "fail", sc["error"], list_name(sc)))
+    elif not sc.get("hits"):
+        screen_rows.append(_row("No sanctions, PEP or adverse-media record matches", "ok",
+                                f"Searched {sc.get('searched', {}).get('name', '')} on {sc.get('source_label') or list_name(sc)}.", list_name(sc)))
+    else:
+        for h in sc["hits"]:
+            ai, res = h.get("ai") or {}, h.get("resolution") or {}
+            said = (f"AI: {ai.get('suggested') or ai.get('label', '')} at {ai.get('confidence')}%" if ai.get("status") == "done"
+                    else "AI: reviewing" if ai.get("status") == "pending" else "AI: no answer")
+            detail = (f"{h.get('category', '')}; name match {h.get('score')}% ({h.get('strength', '')}); date of birth "
+                      f"{(h.get('dob_result') or 'unknown').lower()}; country {(h.get('country_result') or 'unknown').lower()}. {said}.")
+            if res:
+                state = {"False positive": "ok", "True match": "fail", "Possible match": "warn"}.get(res.get("status"), "warn")
+                screen_rows.append(_row(f"Hit: {h['name']} ({h['uid']})", state, detail + f" Outcome: {res['status']}.",
+                                        res.get("by", ""), "Cleared by the AI screening rule" if res.get("auto") else "An analyst's outcome"))
+            else:
+                screen_rows.append(_row(f"Hit: {h['name']} ({h['uid']})", "wait" if ai.get("status") == "pending" else "warn",
+                                        detail + f" Waiting for an analyst: {_hit_reason(h, settings)}.", "AI", "A person gives the outcome"))
+
+    if case.get("status") == "closed":
+        c = case.get("closed") or {}
+        outcome_rows = [_row(f"Closed: {c.get('outcome', '')}", {"True match": "fail", "Possible match": "warn"}.get(c.get("outcome"), "ok"),
+                             c.get("note", ""), c.get("by", ""), "Auto-verified by the AI screening rule" if c.get("auto") else "Closed by an analyst")]
+    else:
+        summary = case_summary(case, settings) or {}
+        reasons = summary.get("reasons") or []
+        outcome_rows = [_row(summary.get("label", "Open"), "wait" if summary.get("label") == "In progress" else "warn",
+                             "; ".join(reasons[:2]) + ("; …" if len(reasons) > 2 else ""), "", "A person decides")]
+    steps = [{"step": "1 · Read the ID", "rows": read_rows}, {"step": "2 · Check the document: SOP rules and fraud", "rows": doc_rows},
+             {"step": "3 · Screen the name", "rows": screen_rows}, {"step": "4 · Outcome", "rows": outcome_rows}]
+    counted = [r["state"] for s in steps[:3] for r in s["rows"]]
+    totals = {k: counted.count(k) for k in ("ok", "fail", "warn", "wait", "info", "na")}
+    return {"steps": steps, "totals": totals, "rules": len(counted)}
+
+
 def qc_sampled(case_id, settings):
     """Is the case one of the QC sample (a fixed share, by its ID)?"""
     pct = int(settings.get("auto_qc_pct") or 0)
