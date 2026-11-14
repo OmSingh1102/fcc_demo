@@ -271,11 +271,83 @@ class ScreeningBookPageTests(unittest.TestCase):
     def test_an_empty_start_and_a_screening_menu(self):
         self.assertEqual((len(fcc.KYC_CASES), len(fcc.ALERT_CASES), len(fcc.WC_CASES)), (0, 0, 0))
         c = self.client()
-        self.assertTrue(c.get("/").headers["Location"].endswith("/scan"))
+        self.assertTrue(c.get("/").headers["Location"].endswith("/overview"))       # the landing page first
         page = c.get("/scan").data.decode("utf-8")
-        for needle in ('id="scan-empty"', "Screening SOP", "Settings", "Stand-in World-Check"):
+        for needle in ('id="scan-empty"', "Screening SOP", "Settings", "Stand-in World-Check", "How it works"):
             self.assertIn(needle, page)
         self.assertNotIn("Due Diligence", page)
+
+    def test_the_landing_page_explains_the_demo_before_the_tool(self):
+        c = fcc.app.test_client()
+        r = c.post("/login", data={"analyst": "amara.iyer", "password": "1234"})
+        self.assertTrue(r.headers["Location"].endswith("/overview"))                # signing in opens it
+        page = c.get("/overview").data.decode("utf-8")
+        for needle in ('id="lp-workflow"', 'id="lp-step-read"', 'id="lp-step-checks"', 'id="lp-step-screen"', 'id="lp-ai-calls"',
+                       'id="lp-human"', 'id="lp-qa"', 'id="lp-plugins"', 'id="lp-demo-data"', "Start the demo", "Try one of 10 sample IDs",
+                       "Auto-verify off", "Stand-in World-Check (demo data)", "World-Check One (LSEG)", "LexisNexis, Dow Jones and others",
+                       "Gemini", "Tesseract OCR", "Azure AI Document Intelligence"):
+            self.assertIn(needle, page)
+        labels = fcc._model_labels()
+        self.assertIn(labels[fcc.SCREEN_SETTINGS["reader_model"]], page)
+        self.assertIn(labels[fcc.SCREEN_SETTINGS["decision_model"]], page)
+        # the page says what Settings says, not what the code assumed
+        fcc.SCREEN_SETTINGS.update(auto_verify=True, auto_min_confidence=75, auto_qc_pct=10, auto_person_lists="Sanctions")
+        page = c.get("/overview").data.decode("utf-8")
+        for needle in ("Auto-verify on", "under 75% sure", "10% of the cases the AI would close", "always for a Sanctions record",
+                       "The MRZ check digits do not add up"):
+            self.assertIn(needle, page)
+        self.assertNotIn("Sanctions or PEP", page)
+        # the steps of the workflow, in order, before the triggers and the plug-ins
+        order = [page.index(x) for x in ('id="lp-step-read"', 'id="lp-step-checks"', 'id="lp-step-screen"', 'id="lp-step-ai"',
+                                         'id="lp-step-outcome"', 'id="lp-human"', 'id="lp-plugins"')]
+        self.assertEqual(order, sorted(order))
+
+    def test_sample_ids_are_made_up_and_read_as_an_upload_is(self):
+        from fincrime.documents import samples
+        self.assertEqual(len(samples.SAMPLES), 10)
+        expected_hits = {"adverse-media-dob-differs": "WC-814837", "pep-match": "WC-636638", "sanctions-match": "WC-409909"}
+        for x in samples.SAMPLES:
+            drawn = samples.svg(x["id"])
+            self.assertIn("SPECIMEN", drawn)
+            self.assertIn("Not a real document", drawn)
+            dob = samples._dob(x, __import__("datetime").date.today())
+            hits = watchlist.search({"name": x["name"].upper(), "dob": dob, "nationality": x["nationality"]}, 65, 5)
+            if x["id"] in expected_hits:                                            # the listed names are records of the stand-in
+                self.assertIn(expected_hits[x["id"]], [h["uid"] for h in hits])
+            else:
+                self.assertEqual(hits, [], x["id"])                                 # the made-up ones match nobody
+        self.assertIn("02 NOV 1984", samples.svg("mrz-mismatch"))                   # printed: the 2nd; the MRZ keeps the 20th
+        self.assertIn("8411202", samples.svg("mrz-mismatch").replace("&lt;", "<"))
+        self.assertIn("EXPIRED", samples.svg("expired-passport"))
+        self.assertIsNone(samples.svg("nope"))
+        c = self.client()
+        page = c.get("/scan").data.decode("utf-8")
+        self.assertIn('id="scan-samples"', page)
+        self.assertEqual(page.count('class="sample-tile"'), 10)
+        self.assertIn("nothing on Didit's account", page)
+        r = c.get("/scan/samples/clean-passport.svg")
+        self.assertEqual((r.status_code, r.mimetype), (200, "image/svg+xml"))
+        self.assertEqual(c.get("/scan/samples/nope.svg").status_code, 404)
+        # picked: the console's image goes to the reader, the case says it is a sample
+        seen = []
+        read = a_read("ELENA MARIE CASTELLANO", "CASTELLANO", "ELENA MARIE", "1989-04-17")
+        result = {"read": read, "model": {"model": "m", "label": "Model", "tokens_in": 1, "tokens_out": 1, "cost": 0.0, "seconds": 1.0},
+                  "checks": id_scan.checks(read), "error": ""}
+        with mock.patch.object(id_scan, "scan", lambda jpeg, *a, **k: seen.append(jpeg) or dict(result)), \
+                mock.patch.object(id_screening, "decide", self.decide):
+            r = c.post("/scan", data={"sample": "clean-passport", "model": "gemini-2.5-flash", "via": "ai"})
+        sid = r.headers["Location"].rsplit("/", 1)[-1]
+        rec = fcc._scan(sid)
+        self.assertTrue(seen and seen[0][:2] == b"\xff\xd8")                       # a JPEG, prepared as any upload
+        self.assertEqual((rec["sample"], rec["file"]), ({"id": "clean-passport", "title": "Clean passport"}, "sample-clean-passport.png"))
+        self.assertIn('id="sample-tag"', c.get(f"/scan/{sid}").data.decode("utf-8"))
+        self.assertIn(">sample</span>", c.get("/scan").data.decode("utf-8"))
+        self.assertEqual(c.get(f"/scan/{sid}/data.json").get_json()["sample"], "clean-passport")
+        self.assertIn("pick a sample ID", c.post("/scan", data={"sample": "nope"}, follow_redirects=True).data.decode("utf-8"))
+        # Didit on: the page says what a sample costs on Didit's account
+        fcc.SCREEN_SETTINGS["didit"].update(api_key="key", auto=True)
+        fcc.SCREEN_SETTINGS["screening_source"] = "didit_aml"
+        self.assertIn("Didit&#39;s ID check and Didit&#39;s AML screening ($0.40 on Didit's account)", c.get("/scan").data.decode("utf-8"))
 
     def test_upload_to_closed_case(self):
         c = self.client()

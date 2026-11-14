@@ -52,7 +52,7 @@ from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
 from fincrime.data.seed import analyst as seed_analyst
 from fincrime.data.state_store import StateStore
-from fincrime.documents import id_scan, ocr, svg_cards, uploads
+from fincrime.documents import id_scan, ocr, samples, svg_cards, uploads
 from fincrime.engines import (ai_agent, ai_review, ai_screening, case_documents, investigation, qc, recommendation, routing, screening,
                               segregation, sla, sop, worldcheck, workflow)
 from fincrime.engines.errors import WorkflowError
@@ -115,6 +115,13 @@ if CASE_BOOK == "screening" and not os.environ.get("FCC_STATE_DB"):
 
 def _home_endpoint():
     return "scan_id" if CASE_BOOK == "screening" else "kyc_list"
+
+
+def _landing_url():
+    """Where signing in (and the site's root) opens: the ID screening demo's
+    overview page, which explains the workflow before the tool; the console's
+    home in the other books."""
+    return url_for("overview" if CASE_BOOK == "screening" else _home_endpoint())
 # The records the console owns in the state store; a new seed stamp clears
 # only these.
 CONSOLE_KINDS = ("kyc", "alert", "wc", "analyst", "settings", "upload")
@@ -235,7 +242,7 @@ _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
               ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"), ("model_evaluation", "model_evaluation"), ("scan", "scan_id"),
-              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"))
+              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"), ("overview", "overview"))
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -268,6 +275,8 @@ def _side_nav():
     if CASE_BOOK == "screening":
         return [
             {"title": "Screening", "items": [
+                {"label": "How it works", "title": "The demo's workflow, before the tool", "icon": "home", "endpoint": "overview",
+                 "active": owner == "overview"},
                 {"label": "Cases", "title": "Upload an ID, screen it on World-Check", "icon": "user-check", "endpoint": "scan_id",
                  "active": owner == "scan_id", "count": sum(1 for s in _scans() if s.get("status") == "open")}]},
             {"title": "Setup", "items": setup},
@@ -651,8 +660,8 @@ def state_version():
 
 @app.route("/")
 def portal():
-    """The console's front door: the case list when signed in, else sign-in."""
-    return redirect(url_for(_home_endpoint() if session.get("user") in ANALYST_BY_KEY else "login"))
+    """The console's front door: the landing page when signed in, else sign-in."""
+    return redirect(_landing_url() if session.get("user") in ANALYST_BY_KEY else url_for("login"))
 
 
 def _login_page(error="", selected="", next_url="", status=200):
@@ -681,9 +690,9 @@ def login():
         if not _check_password(request.form.get("password", "")):
             return _login_page(error="Incorrect password.", selected=key, next_url=next_url, status=401)
         _sign_in(analyst)
-        return redirect(_safe_next(next_url))
+        return redirect(_safe_next(next_url, _landing_url()))
     if session.get("user") in ANALYST_BY_KEY:
-        return redirect(_safe_next(next_url))
+        return redirect(_safe_next(next_url, _landing_url()))
     return _login_page(next_url=next_url)
 
 
@@ -1902,6 +1911,67 @@ def routing_capacity():
     return redirect(url_for("routing_console"))
 
 
+# ─── How it works: the landing page, before the tool ─────────────────────────
+@app.route("/overview")
+def overview():
+    """The demo's workflow on one page, before the tool: the three steps (read
+    the ID, the SOP checks, the screening), the AI's two calls, when a person
+    decides, how the AI is checked, and what plugs in. Every name and number
+    is the console's own, from Settings and the cases."""
+    s = SCREEN_SETTINGS
+    labels = _model_labels()
+    labels.update({AZURE_READER["id"]: AZURE_READER["label"], OCR_READER["id"]: OCR_READER["label"]})
+    catalogue = {m["id"]: m for m in s.get("models") or []}
+    rule = dict(id_scan.CHECK_RULES, **{k: v for k, v in (s.get("check_rules") or {}).items() if k in id_scan.CHECK_RULES})
+    src, dd = id_screening.source(s), s["didit"]
+    dd_ready, idv_on = didit.configured(dd), _idv_wanted()
+
+    def state(in_use, ready, idle="Ready for a key"):
+        return "In use" if in_use else "Connected" if ready else idle
+
+    def model_rows(models, chosen):
+        """The model in use, then the others by provider (Claude, GPT, Gemini …)."""
+        rows, others = [], {}
+        for m in models:
+            provider = MODEL_PROVIDERS.get((catalogue.get(m["id"]) or m).get("provider", ""), "Other")
+            if m["id"] == chosen:
+                rows.append((m["label"], "In use", provider + " · through LLM Foundry"))
+            else:
+                others.setdefault(provider, []).append(m["label"])
+        return rows + [(provider, "Connected", ", ".join(names) + " · through LLM Foundry") for provider, names in others.items()]
+
+    plugins = [
+        ("Read the ID", model_rows(id_scan.models(s.get("models")), s["reader_model"])
+         + [("Tesseract OCR", state(s["reader_model"] == OCR_READER["id"], ocr.available(), "Not installed"),
+             "free, on this machine: a passport's machine-readable zone"),
+            ("Azure AI Document Intelligence", state(s["reader_model"] == AZURE_READER["id"], azure_docintel.configured(s["azure"])),
+             "an OCR service by API"),
+            ("Another OCR service", "Can be added", "Google Document AI, AWS Textract …: one adapter, as Azure's")]),
+        ("Check the document is genuine", [
+            ("Didit ID verification", state(idv_on, dd_ready),
+             f"screen captures, printed copies, a replaced portrait · ${float(dd.get('price_per_call') or 0):.2f} a check")]),
+        ("Screen the name", [
+            ("Stand-in World-Check (demo data)", state(src == "stand-in", True, ""), f"the {len(watchlist.profiles()):,} World-Check records of the demo's case file"),
+            ("Didit AML screening", state(src == "didit_aml", dd_ready),
+             f"sanctions, PEP, warnings and the news · ${float(dd.get('aml_price') or 0):.2f} a screening"),
+            ("World-Check One (LSEG)", state(src == "world_check", world_check.configured(s["world_check"]), "Ready for a licence key"),
+             "written to LSEG's API; runs once a licence key is entered"),
+            ("LexisNexis, Dow Jones and others", "Can be added", "one adapter each, as World-Check's and Didit's")]),
+        ("Decide each hit", model_rows(id_screening.decision_models(s), s["decision_model"])),
+    ]
+    t = upload_eval.totals(_scans())
+    return render_template(
+        "overview.html", s=s, reader_label=labels.get(s["reader_model"], s["reader_model"]),
+        decider_label=labels.get(s["decision_model"], s["decision_model"]), source_key=src,
+        source_label=id_screening.source_label(s), idv_on=idv_on, dd_ready=dd_ready,
+        fails=[label for key, label, _ in id_scan.RULES if rule.get(key) == "fail"],
+        looks=[label for key, label, _ in id_scan.RULES if rule.get(key) == "warn"], n_checks=len(id_scan.RULES),
+        person_lists=[x.strip() for x in str(s.get("auto_person_lists", "")).split(",") if x.strip()],
+        sop=id_screening.sop_current(_sop_stored()), plugins=plugins, totals=t,
+        agree_pct=round(100 * t["agreed"] / t["confirmed"]) if t["confirmed"] else None, n_samples=len(samples.SAMPLES),
+        watchlist_size=len(watchlist.profiles()), llm_ready=ai_review.configured())
+
+
 # ─── Architecture: what the console is built of, and the models evaluated ───
 @app.route("/architecture")
 def architecture():
@@ -2057,19 +2127,44 @@ def scan_id():
                                model_ready=id_scan.model_ready(), scans=shown, status=status,
                                counts={k: sum(1 for s in scans if kind(s) == k) for k in ("open", "auto", "closed")} | {"all": len(scans)},
                                auto_on=SCREEN_SETTINGS.get("auto_verify"), watched=sum(1 for s in scans if _watched(s)),
-                               source=id_screening.source_label(SCREEN_SETTINGS), outcome=id_screening.outcome)
-    f = request.files.get("image")
-    if not f or not f.filename:
-        flash("Choose a photo or scan of the ID document.", "error")
-        return redirect(url_for("scan_id"))
+                               source=id_screening.source_label(SCREEN_SETTINGS), outcome=id_screening.outcome,
+                               samples=samples.SAMPLES, sample_cost=_sample_cost())
+    sample = samples.get(request.form.get("sample", ""))
+    if sample:                                      # a sample ID: the console's own image, read as an upload is
+        data, name = samples.png(sample["id"]), f"sample-{sample['id']}.png"
+    else:
+        f = request.files.get("image")
+        if not f or not f.filename:
+            flash("Choose a photo or scan of the ID document, or pick a sample ID.", "error")
+            return redirect(url_for("scan_id"))
+        data, name = f.read(), f.filename
     reader = OCR_READER["id"] if request.form.get("via") == "ocr" else (request.form.get("model") or None)
-    ok, record = _run_action(_new_scan, f.read(), f.filename, reader, _actor())
+    ok, record = _run_action(_new_scan, data, name, reader, _actor(), sample=sample)
     if not ok:
         return redirect(url_for("scan_id"))
     for message in (record.get("fallback"), record["error"], (record.get("screening") or {}).get("error")):
         if message:
             flash(message, "error")
     return redirect(url_for("scan_result", scan_id=record["id"]))
+
+
+@app.route("/scan/samples/<sample_id>.svg")
+def scan_sample_image(sample_id):
+    """A sample ID as the page shows it (the reader gets the same card as an image)."""
+    body = samples.svg(sample_id)
+    return Response(body, mimetype="image/svg+xml") if body else abort(404)
+
+
+def _sample_cost():
+    """What reading a sample costs now, as the upload page says it: the AI
+    read, and Didit's ID check and AML screening when Settings has them on."""
+    dd = SCREEN_SETTINGS["didit"]
+    didit_parts = []
+    if _idv_wanted():
+        didit_parts.append(("Didit's ID check", float(dd.get("price_per_call") or 0)))
+    if id_screening.source(SCREEN_SETTINGS) == "didit_aml":
+        didit_parts.append(("Didit's AML screening", float(dd.get("aml_price") or 0)))
+    return {"didit": didit_parts, "didit_total": round(sum(p for _, p in didit_parts), 2)}
 
 
 AZURE_READER = {"id": azure_docintel.MODEL["model"], "label": azure_docintel.MODEL["label"], "price": None}
@@ -2118,11 +2213,13 @@ def _read_id(jpeg, reader):
     return result
 
 
-def _new_scan(data, filename, reader, actor, reference=""):
+def _new_scan(data, filename, reader, actor, reference="", sample=None):
     """A new screening case from an ID image, for the upload page and the
     intake API: prepared, read, searched on World-Check, and the rule run on
     a case with no hit; its hits go to the AI and the ID to the verification
-    service in the background. WorkflowError when the image is unusable."""
+    service in the background. `sample`: one of the console's sample IDs
+    (documents/samples), named on the case. WorkflowError when the image is
+    unusable."""
     jpeg, info = uploads.prepare(data, "The ID image")
     result = _read_id(jpeg, reader or SCREEN_SETTINGS["reader_model"])
     at = dates.now_str()
@@ -2133,6 +2230,8 @@ def _new_scan(data, filename, reader, actor, reference=""):
                   image=uploads.store("scans", sid, jpeg), verdict=id_scan.verdict(result))
     if reference:
         record["reference"] = str(reference)[:120]
+    if sample:
+        record["sample"] = {"id": sample["id"], "title": sample["title"]}
     if id_screening.is_id(result["read"]):
         _screen_search(record)
         if _idv_wanted():
@@ -2523,7 +2622,8 @@ def _scan_export(rec):
                                                        approved=id_screening.idv_approved(rec, SCREEN_SETTINGS)[0],
                                                        differs=[{"field": w, "verification": a, "id": b}
                                                                 for w, a, b in id_screening.idv_differences(rec, SCREEN_SETTINGS)]),
-            "reader_fallback": rec.get("fallback", ""), "aadhaar_check": rec.get("aadhaar")}
+            "reader_fallback": rec.get("fallback", ""), "aadhaar_check": rec.get("aadhaar"),
+            "sample": (rec.get("sample") or {}).get("id", "")}
     return body
 
 

@@ -59,7 +59,7 @@
     <div class="rail-section">
         <div class="rail-label">Case</div>
         <div class="rail-facts">
-            <div><span class="l">Source</span><span class="v">ID upload</span></div>
+            <div><span class="l">Source</span><span class="v">{% if s.sample %}Sample ID <span class="tag" id="sample-tag" title="A made-up specimen document from the upload page">{{ s.sample.title }}</span>{% else %}ID upload{% endif %}</span></div>
             <div><span class="l">Uploaded by</span><span class="v">{{ s.by|who }}</span></div>
             <div><span class="l">Uploaded</span><span class="v">{{ s.at }}</span></div>
             <div><span class="l">File</span><span class="v">{{ s.file }}</span></div>

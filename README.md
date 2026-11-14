@@ -244,7 +244,32 @@ an ID-verification provider, World-Check One, the client's onboarding
 system); the models in use (from Settings) with what the Model evaluation
 page has measured on the uploads so far.
 
-**Screening cases** (`/scan`, the home page of the default book; `fincrime/documents/id_scan.py`,
+**How it works** (`/overview`, first in the left menu; signing in, and the
+site's root, open it in the screening book). The landing page, shown before
+the tool: the workflow in five steps (read the ID, the SOP checks and
+Didit's genuine-document check, the compliance and sanctions screening, the
+AI's review of each hit, the outcome), each with an amber line saying when a
+person takes over; the AI's two calls (what is sent, what comes back, which
+model); the human-in-the-loop triggers and when a case closes by itself;
+the AI QA loop (the AI suggests, the analyst confirms or changes, agreement
+measured on Model evaluation, the SOP improved, the QC sample); and what
+plugs in (the reader models by provider, Tesseract, Azure, another OCR
+service; Didit; the stand-in demo data, Didit AML, World-Check One,
+LexisNexis or Dow Jones by one more connector; the deciding models), each
+marked in use, connected, ready for a key or can be added. Every name and
+number on it is read from Settings and the cases, not written in.
+
+**Sample IDs** (`fincrime/documents/samples.py`; *Or pick a sample ID* on
+`/scan`). Ten made-up documents drawn by `svg_cards`, each marked SPECIMEN
+with a silhouette for a photo, so a demo needs no real person's ID: a clean
+passport, a US driving licence, an adverse-media name with another date of
+birth, a PEP, a sanctions match among namesakes, an expired passport, a
+printed date of birth that differs from the MRZ, a holder under the age
+limit, a blurred photo, and a utility bill sent as an ID. A sample is read
+and screened exactly as an upload is (it costs the same: the page says what
+on Didit's account), and its case is marked as a sample.
+
+**Screening cases** (`/scan`, the tool's home page in the default book; `fincrime/documents/id_scan.py`,
 `fincrime/watchlist.py`, `fincrime/id_screening.py`, `fincrime/adapters/world_check.py`).
 Start from an ID document, with no CSV: every uploaded ID becomes a case.
 1. *Read.* The image is checked and cleaned (upright, resized, EXIF and GPS

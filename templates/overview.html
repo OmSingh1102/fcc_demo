@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}How it works{% endblock %}
+
+{% block extra_css %}
+<style>
+    .lp-head { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+    .lp-head p { max-width: 760px; }
+    .lp-flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 30px; }
+    .lp-step { position: relative; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xl);
+               padding: 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow-sm); }
+    .lp-step:not(:last-child)::after { content: "→"; position: absolute; right: -24px; top: 18px; font-size: 22px; font-weight: 700;
+                                       color: var(--primary-strong); }
+    .lp-num { width: 28px; height: 28px; border-radius: 50%; background: var(--primary); color: var(--primary-foreground);
+              display: inline-flex; align-items: center; justify-content: center; font-weight: 700; flex: none; }
+    .lp-step-head { display: flex; gap: 10px; align-items: center; }
+    .lp-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted-foreground); }
+    .lp-step h4 { margin: 0; font-size: 15px; }
+    .lp-uses { font-size: 12px; background: var(--primary-tint); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 6px 8px; }
+    .lp-human { margin-top: auto; border: 1px dashed #f59e0b; background: #fffbeb; color: #92400e; border-radius: var(--radius-md);
+                padding: 6px 8px; font-size: 12px; }
+    .lp-human b { color: #78350f; }
+    .lp-pass { border-color: #34d399; background: #ecfdf5; color: #065f46; }
+    .lp-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .lp-call { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 14px; }
+    .lp-call h5 { margin: 0 0 6px; font-size: 14px; }
+    .lp-call dt { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted-foreground); margin-top: 8px; }
+    .lp-call dd { margin: 2px 0 0; font-size: 13px; }
+    .lp-loop { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+    .lp-node { flex: 1 1 170px; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px 12px; background: var(--primary-tint); }
+    .lp-node b { display: block; margin-bottom: 4px; }
+    .lp-arrow { align-self: center; color: var(--primary-strong); font-size: 20px; font-weight: 700; }
+    .lp-back { margin-top: 10px; font-size: 12px; color: var(--muted-foreground); }
+    .lp-plugins { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .lp-plug-col h5 { margin: 0 0 6px; font-size: 13px; }
+    .lp-plug { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 7px 0; border-top: 1px solid var(--border); }
+    .lp-plug .tiny { display: block; }
+    .lp-triggers td:first-child { width: 58%; }
+    @media (max-width: 1200px) { .lp-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .lp-step::after { display: none; }
+                                 .lp-plugins { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 760px) { .lp-flow, .lp-two, .lp-plugins { grid-template-columns: 1fr; } .lp-arrow { display: none; } }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set bar = s.auto_min_confidence %}{% set qc = s.auto_qc_pct %}
+<div class="page-head lp-head">
+    <div><h2>How the demo works</h2>
+        <p>An identity document goes in. The AI reads it, the checks of the SOP run on what it read, the name is screened against compliance and sanctions lists, the AI suggests an outcome for every hit, and a person decides whatever the AI should not. Below: each step, what is plugged in today, and when a person takes over.</p></div>
+    <div class="row" style="gap:8px">
+        <a class="btn btn-primary" href="{{ url_for('scan_id') }}" id="lp-start">{{ icon('arrow-right') }} Start the demo</a>
+        <a class="btn btn-outline" href="{{ url_for('scan_id') }}#scan-samples" id="lp-samples">{{ icon('image') }} Try one of {{ n_samples }} sample IDs</a>
+    </div>
+</div>
+
+<div class="card mt-12" id="lp-workflow">
+    <div class="card-head"><div><div class="card-title">The workflow</div>
+        <div class="card-sub">three steps on every ID (read, check, screen), then the AI's review and the outcome; the amber line under each step is when a person takes over</div></div></div>
+    <div class="card-body">
+        <div class="lp-flow">
+            <div class="lp-step" id="lp-step-read">
+                <div class="lp-step-head"><span class="lp-num">1</span><div><div class="lp-kicker">Extraction</div><h4>Read the ID</h4></div></div>
+                <div class="small">The AI reads every field as printed, the machine-readable zone (MRZ), and judges the photo: blurred, glare, cut off, covered.</div>
+                <div class="lp-uses">Now: <b>{{ reader_label }}</b><br><span class="tiny muted">or Gemini, GPT, OCR, Azure: see "What plugs in"</span></div>
+                <div class="lp-human">→ <b>A person</b> when the ID cannot be read, or is not an identity document: nobody is screened.</div>
+            </div>
+            <div class="lp-step" id="lp-step-checks">
+                <div class="lp-step-head"><span class="lp-num">2</span><div><div class="lp-kicker">SOP validation &amp; fraud</div><h4>Check the document</h4></div></div>
+                <div class="small">{{ n_checks }} checks in code on what was read: MRZ check digits, printed fields against the MRZ, expiry, age under {{ s.min_age }}, photo quality, missing or unsure fields.</div>
+                <div class="lp-uses">{% if idv_on %}Plus <b>Didit</b>: is the document genuine (screen captures, printed copies, a replaced portrait)?{% else %}Didit's genuine-document check: {{ 'connected, off for uploads' if dd_ready else 'ready for a key' }} (Settings){% endif %}</div>
+                <div class="lp-human">→ <b>A person</b> when a check fails or asks for a look{% if idv_on and s.auto_needs_idv %}, or Didit does not approve the document{% endif %}.</div>
+            </div>
+            <div class="lp-step" id="lp-step-screen">
+                <div class="lp-step-head"><span class="lp-num">3</span><div><div class="lp-kicker">Compliance &amp; sanctions</div><h4>Screen the name</h4></div></div>
+                <div class="small">The name, date of birth and nationality are searched for sanctions, PEP and adverse-media records. The search only finds candidates; it never decides.</div>
+                <div class="lp-uses">Now: <b>{{ source_label }}</b></div>
+                <div class="lp-human lp-pass">No match{% if s.auto_no_hit and s.auto_verify %}, and every check passed: the case can close by itself{% else %}: an analyst confirms it{% endif %}.</div>
+            </div>
+            <div class="lp-step" id="lp-step-ai">
+                <div class="lp-step-head"><span class="lp-num">4</span><div><div class="lp-kicker">AI review</div><h4>Decide each hit</h4></div></div>
+                <div class="small">The AI reads each hit under the screening SOP (version {{ sop.version }}) with {{ s.examples }} similar resolved cases, and suggests: clear it, a true match, ask the customer, or escalate, with a confidence and its reasons.</div>
+                <div class="lp-uses">Now: <b>{{ decider_label }}</b></div>
+                <div class="lp-human">→ <b>A person</b> when the AI is under {{ bar }}% sure or does not say false positive{% if s.auto_dob_differs %}, or the record's date of birth is the ID's{% endif %}{% if person_lists %}, and always for a {{ person_lists|join(' or ') }} record{% endif %}.</div>
+            </div>
+            <div class="lp-step" id="lp-step-outcome">
+                <div class="lp-step-head"><span class="lp-num">5</span><div><div class="lp-kicker">Human in the loop</div><h4>The outcome</h4></div></div>
+                <div class="small">{% if s.auto_verify %}A case the rules call safe closes by itself (auto-verified). Every other case goes to an analyst, who has the final say on each hit: true positive, potential match or false positive, with a risk and a reason.{% else %}Auto-verify is off: an analyst decides every case, hit by hit, with the AI's suggestion beside each.{% endif %}</div>
+                <div class="lp-uses">Analysts work the case page and the alert review; L2 / QC on Settings and the SOP</div>
+                <div class="lp-human">{% if s.auto_verify %}→ <b>{{ qc }}%</b> of the cases the AI would close stay with a person anyway, as a spot check of the AI.{% else %}→ <b>A person</b> on every case.{% endif %}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-12" id="lp-ai-calls">
+    <div class="card-head"><div><div class="card-title">How the AI is asked</div>
+        <div class="card-sub">two calls per case; the rules around them are code and Settings, so the AI never decides alone</div></div></div>
+    <div class="card-body">
+        <div class="lp-two">
+            <div class="lp-call" id="lp-call-read">
+                <h5>{{ icon('zoom-in') }} Call 1 · Read the ID</h5>
+                <dl>
+                    <dt>Sent</dt><dd>The ID image (turned upright, resized, EXIF and GPS removed) and the reader's instructions: transcribe what is printed, never guess.</dd>
+                    <dt>Returned</dt><dd>The document type and country, each field as printed, the MRZ lines, the fields it is unsure of, and any photo problem.</dd>
+                    <dt>Then</dt><dd>Code runs the {{ n_checks }} checks on that read; the model's own opinion is not one of them.</dd>
+                    <dt>Model</dt><dd>{{ reader_label }} (Settings)</dd>
+                </dl>
+            </div>
+            <div class="lp-call" id="lp-call-decide">
+                <h5>{{ icon('activity') }} Call 2 · Decide a hit (once per hit)</h5>
+                <dl>
+                    <dt>Sent</dt><dd>The person on the ID, the record that was hit (names, date of birth, places, why listed), the screening SOP (version {{ sop.version }}), and the {{ s.examples }} most similar resolved cases with what the analysts decided; never the case behind the record itself.</dd>
+                    <dt>Returned</dt><dd>One of: clear (false positive), true match, ask the customer, escalate; a confidence (0–100%); the reasons; the name and address differences.</dd>
+                    <dt>Then</dt><dd>The auto-verify rule (below) decides whether the hit may clear by itself; otherwise an analyst sees the suggestion beside the hit.</dd>
+                    <dt>Model</dt><dd>{{ decider_label }} (Settings)</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-12 pad-0" id="lp-human">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">When a person decides (human in the loop)</div>
+        <div class="card-sub">the triggers as Settings has them now; the QC lead changes them there</div></div>
+        <span class="badge {{ 'emerald' if s.auto_verify else 'slate' }}">Auto-verify {{ 'on' if s.auto_verify else 'off' }}</span></div>
+    <table class="tbl lp-triggers">
+        <thead><tr><th>When</th><th>What happens</th></tr></thead>
+        <tbody>
+        <tr><td>The ID cannot be read, or is not an identity document</td><td>Nobody is screened; an analyst asks for a clearer photo</td></tr>
+        {% if fails %}<tr><td>A check marked <b>Fail</b>: {{ fails|join('; ') }}</td><td>The case never closes by itself</td></tr>{% endif %}
+        {% if looks %}<tr><td>A check marked <b>Check</b>: {{ looks|join('; ') }}</td><td>The case never closes by itself: an analyst looks</td></tr>{% endif %}
+        {% if s.auto_needs_idv %}<tr><td>Didit does not approve this very document, or reads it differently ({{ s.idv_must_agree|join(', ')|lower }})</td><td>The case never closes by itself</td></tr>{% endif %}
+        <tr><td>The AI does not say false positive on a hit, or is under {{ bar }}% sure</td><td>The hit waits for an analyst</td></tr>
+        {% if s.auto_dob_differs %}<tr><td>The record's date of birth is the ID's, or unknown</td><td>The hit waits for an analyst</td></tr>{% endif %}
+        {% if person_lists %}<tr><td>A {{ person_lists|join(' or ') }} record</td><td>Always an analyst, whatever the AI says</td></tr>{% endif %}
+        <tr><td>The AI could not answer (the gateway was busy)</td><td>The hit waits for an analyst, who can ask the AI again</td></tr>
+        {% if s.auto_verify and qc %}<tr><td>{{ qc }}% of the cases the AI would close</td><td>Kept for an analyst: a spot check of the AI (QC sample)</td></tr>{% endif %}
+        </tbody>
+    </table>
+    <div class="card-body small" id="lp-closes" style="padding:12px 16px">{% if s.auto_verify %}<b>A case closes by itself only when</b> every check passed{% if s.auto_needs_idv %}, Didit approved this very document{% endif %}, and {% if s.auto_no_hit %}no record matched, or {% endif %}every hit was cleared by the rule above; and it is not a QC sample. The rule writes its reason on every hit it clears.{% else %}Auto-verify is off on Settings: an analyst decides every case.{% endif %}</div>
+</div>
+
+<div class="card mt-12" id="lp-qa">
+    <div class="card-head"><div><div class="card-title">How the AI is checked (AI QA)</div>
+        <div class="card-sub">the analysts' outcomes are the measure of the AI, case by case</div></div>
+        <div class="row" style="gap:8px"><a class="btn btn-outline btn-sm" href="{{ url_for('model_evaluation') }}">Model evaluation</a><a class="btn btn-outline btn-sm" href="{{ url_for('screening_sop') }}">Screening SOP</a></div></div>
+    <div class="card-body">
+        <div class="lp-loop">
+            <div class="lp-node"><b>1 · The AI suggests</b><span class="small">an outcome, a confidence and its reasons on every hit</span></div>
+            <span class="lp-arrow">→</span>
+            <div class="lp-node"><b>2 · An analyst confirms or changes it</b><span class="small">the analyst's outcome is final, and kept beside the AI's</span></div>
+            <span class="lp-arrow">→</span>
+            <div class="lp-node" id="lp-agreement"><b>3 · Agreement is measured</b><span class="small">{% if agree_pct is not none %}the analysts agreed with the AI on {{ totals.agreed }} of {{ totals.confirmed }} hits ({{ agree_pct }}%){% else %}on Model evaluation, as analysts confirm hits{% endif %}{% if totals.decided %}; {{ totals.decided }} hit{{ 's' if totals.decided != 1 }} decided so far{% endif %}</span></div>
+            <span class="lp-arrow">→</span>
+            <div class="lp-node"><b>4 · The SOP is improved</b><span class="small">a new version on the Screening SOP page; every open hit goes back to the AI under it</span></div>
+        </div>
+        <div class="lp-back">↺ and round again. Beside the loop: {% if s.auto_verify %}{{ qc }}% of the cases the AI would close stay with a person (QC sample); {% endif %}the models are compared on the same cases on <a href="{{ url_for('architecture') }}">Architecture</a>, accuracy against cost, before one is chosen on Settings.</div>
+    </div>
+</div>
+
+<div class="card mt-12" id="lp-plugins">
+    <div class="card-head"><div><div class="card-title">What plugs in</div>
+        <div class="card-sub">every service sits behind its own connector: switching one is a choice on Settings, adding one is one more connector</div></div>
+        <a class="btn btn-outline btn-sm" href="{{ url_for('screening_settings') }}">{{ icon('sliders') }} Settings</a></div>
+    <div class="card-body">
+        <div class="lp-plugins">
+            {% for step, rows in plugins %}
+            <div class="lp-plug-col">
+                <h5>{{ step }}</h5>
+                {% for name, status, note in rows %}
+                <div class="lp-plug"><div class="small"><b>{{ name }}</b><span class="tiny muted">{{ note }}</span></div>
+                    {% if status %}<span class="badge {{ {'In use': 'emerald', 'Connected': 'blue', 'Can be added': 'violet'}.get(status, 'slate') }} nowrap">{{ status }}</span>{% endif %}</div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="note info mt-12" id="lp-demo-data"><b>Demo data.</b> The {{ n_samples }} sample IDs are made up and marked SPECIMEN; the screening runs on {% if source_key == 'stand-in' %}demo data: the {{ '{:,}'.format(watchlist_size) }} World-Check records of the demo's case file{% else %}{{ source_label }}{% endif %}. A licence key on Settings plugs in World-Check One, and another screening vendor (LexisNexis, Dow Jones …) is one more connector. Real IDs uploaded here are kept until their case is deleted.{% if not llm_ready %} <b>No AI model is configured on this machine: IDs cannot be read.</b>{% endif %}</div>
+{% endblock %}
