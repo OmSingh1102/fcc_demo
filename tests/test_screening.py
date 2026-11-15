@@ -375,6 +375,56 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertIn("Didit&#39;s ID check and Didit&#39;s AML screening ($0.40 on Didit's account).", page)
         self.assertIn("<b>Didit declines made-up documents</b>", page)
 
+    def test_the_ai_qa_page_scores_the_ai_against_the_analyst(self):
+        from fincrime import ai_qa
+        c = self.client()
+        self.assertIn('href="/qa"', c.get("/scan").data.decode("utf-8"))                       # in the menu
+        self.assertIn('id="lp-qa-link"', c.get("/overview").data.decode("utf-8"))             # and from the QA loop
+        page = c.get("/qa").data.decode("utf-8")
+        for needle in ('id="qa-kpis"', 'id="qa-hits"', 'id="qa-bands"', 'id="qa-alone"', 'id="qa-qc"', 'id="qa-didit"', "No hit yet"):
+            self.assertIn(needle, page)
+        # the AI says false positive (80%); the analyst finds a true match: the override that matters most
+        first = self.upload(c, a_read())
+        uid = fcc._scan(first)["screening"]["hits"][0]["uid"]
+        page = c.get("/qa").data.decode("utf-8")
+        self.assertIn("Waits for an analyst", page)
+        self.assertIn("No hit decided by an analyst yet: 1 waits", page)
+        c.post(f"/scan/{first}/hits/outcome", data={"alert_id": uid, "outcome": "True Positive", "risk": "High",
+                                                    "reason": "Confirmed by identification", "comment": "same date of birth"})
+        # a second case: the analyst agrees with the AI
+        second = self.upload(c, a_read())
+        c.post(f"/scan/{second}/hits/outcome", data={"alert_id": uid, "outcome": "False Positive", "comment": "different person"})
+        qa = ai_qa.page(fcc._scans(), fcc.SCREEN_SETTINGS)
+        self.assertEqual({k: qa["totals"][k] for k in ("scored", "agreed", "agree_pct", "missed", "overridden", "waiting")},
+                         {"scored": 2, "agreed": 1, "agree_pct": 50, "missed": 1, "overridden": 1, "waiting": 0})
+        self.assertEqual([r["key"] for r in qa["rows"]], ["missed", "agreed"])                 # the override first
+        self.assertEqual(qa["bands"][0]["label"], "Under 90% sure")
+        self.assertEqual((qa["bands"][0]["scored"], qa["bands"][0]["pct"], qa["bands"][0]["missed"]), (2, 50, 1))
+        page = c.get("/qa").data.decode("utf-8")
+        for needle in ("Overridden: the AI would have cleared a match", "The analyst agreed", "50%", "same date of birth"):
+            self.assertIn(needle, page)
+        # auto-verify on: a clean ID with no hit closes by itself, and shows to be spot checked
+        fcc.SCREEN_SETTINGS.update(auto_verify=True, auto_qc_pct=0)
+        alone = self.upload(c, a_read("ELENA MARIE CASTELLANO", "CASTELLANO", "ELENA MARIE", "1989-04-17"))
+        self.assertTrue(fcc._scan(alone)["closed"]["auto"])
+        qa = ai_qa.page(fcc._scans(), fcc.SCREEN_SETTINGS)
+        self.assertEqual([r["id"] for r in qa["alone"]], [alone])
+        self.assertIn(alone, c.get("/qa").data.decode("utf-8"))
+        # the QC sample and Didit against our checks, on records as the console keeps them
+        scans = [{"id": "S1", "at": "2026-11-01 10:00:00", "status": "open", "verdict": "Pass", "read": a_read(), "screening": {"hits": []},
+                  "idv": {"status": "Declined", "warnings": [{"risk": "PORTRAIT_IMAGE_NOT_DETECTED", "text": "Portrait image not detected"}]}},
+                 {"id": "S2", "at": "2026-11-02 10:00:00", "status": "closed", "verdict": "Check", "read": a_read(), "screening": {"hits": []},
+                  "closed": {"outcome": "No match", "by": "amara.iyer"}, "qc_sample": {"at": "2026-11-02 10:00:01", "pct": 5},
+                  "idv": {"status": "Approved", "warnings": [{"risk": "UNPARSED_ADDRESS", "text": "Unable to determine address location"}]}},
+                 {"id": "S3", "at": "2026-11-03 10:00:00", "status": "open", "verdict": "Pass", "read": a_read(), "screening": {"hits": []},
+                  "qc_sample": {"at": "2026-11-03 10:00:01", "pct": 5}, "idv": {"status": "Approved", "warnings": []}}]
+        qa = ai_qa.page(scans, {"auto_min_confidence": 90, "auto_qc_pct": 5})
+        self.assertEqual([(r["id"], r["key"]) for r in qa["qc"]], [("S3", "waiting"), ("S2", "agreed")])
+        self.assertEqual([(r["id"], r["didit"], r["verdict"]) for r in qa["didit"]["rows"]], [("S2", "Approved", "Check"), ("S1", "Declined", "Pass")])
+        self.assertEqual((qa["didit"]["checked"], qa["totals"]["disagree"], qa["totals"]["qc_waiting"]), (3, 2, 1))
+        self.assertEqual(qa["didit"]["warnings"], [{"text": "Portrait image not detected", "cases": 1},
+                                                   {"text": "Unable to determine address location", "cases": 1}])
+
     def test_upload_to_closed_case(self):
         c = self.client()
         sid = self.upload(c, a_read())

@@ -46,7 +46,7 @@ from fincrime.analytics.queues import QueueConsole
 from fincrime.analytics.routing_console import RoutingConsole
 from fincrime.analytics.trackers import TrackerConsole, to_csv
 from fincrime.analytics.work import WorkConsole
-from fincrime import benchmark, decision_model, id_screening, upload_eval, watchlist
+from fincrime import ai_qa, benchmark, decision_model, id_screening, upload_eval, watchlist
 from fincrime.data import vocab
 from fincrime.data import recon_book
 from fincrime.data.loader import SEED_VERSION, book_from, index_by_id, load_seed, relabel
@@ -242,7 +242,7 @@ _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
               ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"), ("model_evaluation", "model_evaluation"), ("scan", "scan_id"),
-              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"), ("overview", "overview"))
+              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"), ("overview", "overview"), ("quality", "quality"))
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -280,7 +280,9 @@ def _side_nav():
                 {"label": "Cases", "title": "Upload an ID, screen it on World-Check", "icon": "user-check", "endpoint": "scan_id",
                  "active": owner == "scan_id", "count": sum(1 for s in _scans() if s.get("status") == "open")}]},
             {"title": "Setup", "items": setup},
-            {"title": "Insights", "items": insights},
+            {"title": "Insights", "items": [
+                {"label": "AI QA", "title": "Where people checked the AI, and where it acted alone", "icon": "shield-check",
+                 "endpoint": "quality", "active": owner == "quality"}] + insights},
         ]
     levels = _levels()
     tenant = _tenant()
@@ -3020,6 +3022,15 @@ def model_evaluation():
     return render_template("model_evaluation.html", reading=upload_eval.reading(scans), deciding=deciding,
                            by_sop=upload_eval.by_sop(scans), totals=upload_eval.totals(scans), reader=reader, decider=decider,
                            reader_label=labels.get(reader, reader), decider_label=labels.get(decider, decider))
+
+
+# ─── AI QA: where people checked the AI, and where it acted alone ───
+@app.route("/qa")
+def quality():
+    """The AI QA page (fincrime/ai_qa): the analysts' outcomes against the
+    AI's suggestions, the cases it closed alone, the QC sample, and where
+    Didit and the console's own checks disagree."""
+    return render_template("qa.html", qa=ai_qa.page(_scans(), SCREEN_SETTINGS), s=SCREEN_SETTINGS)
 
 
 # ─── Analytics ─────────────────────────────────────────────────────────────────

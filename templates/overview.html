@@ -153,7 +153,7 @@
             <span class="lp-arrow">→</span>
             <div class="lp-node"><b>4 · The SOP is improved</b><span class="small">a new version on the Screening SOP page; every open hit goes back to the AI under it</span></div>
         </div>
-        <div class="lp-back">↺ and round again. Beside the loop: {% if s.auto_verify %}{{ qc }}% of the cases the AI would close stay with a person (QC sample); {% endif %}the models are compared on the same cases on <a href="{{ url_for('architecture') }}">Architecture</a>, accuracy against cost, before one is chosen on Settings.</div>
+        <div class="lp-back">↺ and round again. Beside the loop: {% if s.auto_verify %}{{ qc }}% of the cases the AI would close stay with a person (QC sample); {% endif %}the AI's record (the analysts' agreement, its overrides, the cases it closed alone) is on <a href="{{ url_for('quality') }}" id="lp-qa-link">AI QA</a>; the models are compared on the same cases on <a href="{{ url_for('architecture') }}">Architecture</a>, accuracy against cost, before one is chosen on Settings.</div>
     </div>
 </div>
 

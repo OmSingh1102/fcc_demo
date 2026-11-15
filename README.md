@@ -284,6 +284,18 @@ reader, Didit, the AI, an analyst). Built from what the case holds: nothing
 is checked again. Above it, the case's rail says where it stands (Needs a
 person / In progress, with the reasons: `id_screening.case_summary`).
 
+**AI QA** (`/qa`, first under Insights; `fincrime/ai_qa.py`). How far the AI
+can be trusted, measured on the console's own cases, for the L2 / QC
+reviewer: the analysts' agreement with the AI's suggestions; every hit with
+what became of the AI's suggestion (agreed, overridden, cleared by the rule,
+waiting, the AI could not answer), the override that matters most first
+(the AI calling a hit a false positive the analyst did not clear); the
+agreement under and over the confidence bar on Settings; the cases that
+closed by themselves, to spot check; the QC sample and whether the person
+did what the AI would have done; and the cases where Didit's answer and
+our own checks disagree, with Didit's warnings across the cases. Built
+from the cases each time: nothing stored.
+
 **Screening cases** (`/scan`, the tool's home page in the default book; `fincrime/documents/id_scan.py`,
 `fincrime/watchlist.py`, `fincrime/id_screening.py`, `fincrime/adapters/world_check.py`).
 Start from an ID document, with no CSV: every uploaded ID becomes a case.

@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}AI QA{% endblock %}
+
+{% set T = qa.totals %}
+{% set TONE = {'agreed': 'emerald', 'auto': 'blue', 'overridden': 'amber', 'missed': 'rose', 'waiting': 'slate',
+               'failed': 'amber', 'deciding': 'slate', 'analyst': 'slate'} %}
+{% macro result(key, words) %}<span class="badge {{ TONE.get(key, 'slate') }}">{{ words }}</span>{% endmacro %}
+{% macro case_cell(r) %}<a href="{{ url_for('scan_result', scan_id=r.id) }}" class="mono tiny">{{ r.id }}</a>{% if r.sample %} <span class="tag" title="Sample ID: {{ r.sample }}">sample</span>{% endif %}<div class="tiny muted">{{ r.at[:16] }}</div>{% endmacro %}
+{% macro plural(n, word) %}{{ n }} {{ word }}{{ 's' if n != 1 }}{% endmacro %}
+
+{% block content %}
+<div class="page-head">
+    <div><h2>AI QA</h2>
+        <p>How far the AI can be trusted, measured on this console's own cases: every place a person checked the AI, and every place the AI acted alone. For the L2 / QC reviewer: the overrides first, the cases to spot check, the QC sample, and where Didit and our own checks disagree. The page follows every case as it is read, decided and closed.</p></div>
+</div>
+
+<div class="kpi-strip" id="qa-kpis">
+    <div class="kpi" id="qa-kpi-agree"><div class="l">Analysts agree with the AI</div>
+        <div class="v">{% if T.agree_pct is not none %}{{ T.agree_pct }}%{% else %}—{% endif %}</div>
+        <div class="hint">{% if T.scored %}on {{ T.agreed }} of the {{ plural(T.scored, 'hit') }} an analyst decided after the AI{% else %}No hit decided by an analyst yet{% if T.waiting %}: {{ T.waiting }} wait{{ 's' if T.waiting == 1 }}{% endif %}{% endif %}</div></div>
+    <div class="kpi" id="qa-kpi-missed"><div class="l">AI would have cleared a match</div>
+        <div class="v">{{ T.missed }}</div>
+        <div class="hint">hits the AI called a false positive that the analyst did not clear{% if T.overridden > T.missed %} · {{ T.overridden - T.missed }} other override{{ 's' if T.overridden - T.missed != 1 }}{% endif %}</div></div>
+    <div class="kpi" id="qa-kpi-alone"><div class="l">Closed by the AI alone</div>
+        <div class="v">{{ T.closed_auto }}</div>
+        <div class="hint">of {{ plural(T.cases, 'case') }}{% if T.auto_cleared %} · {{ plural(T.auto_cleared, 'hit') }} cleared by the rule{% endif %}{% if not s.auto_verify %} · auto-verify is off on Settings{% endif %}</div></div>
+    <div class="kpi" id="qa-kpi-qc"><div class="l">QC sample</div>
+        <div class="v">{{ T.qc }}</div>
+        <div class="hint">{% if T.qc_pct %}{{ T.qc_pct }}% of the cases the AI would close stay with a person{% else %}0% on Settings: none kept{% endif %}{% if T.qc_waiting %} · {{ T.qc_waiting }} waiting{% endif %}</div></div>
+    <div class="kpi" id="qa-kpi-didit"><div class="l">Didit and our checks disagree</div>
+        <div class="v">{{ T.disagree }}</div>
+        <div class="hint">{% if qa.didit.checked %}of the {{ plural(qa.didit.checked, 'case') }} Didit checked{% else %}Didit has checked no case{% endif %}</div></div>
+</div>
+
+{# ── the AI's suggestion against the analyst's outcome, hit by hit ── #}
+<div class="card mt-12 pad-0" id="qa-hits">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Each hit: the AI's suggestion and the analyst's outcome</div>
+        <div class="card-sub">overrides first · the analyst's outcome is the answer the AI is scored on · a hit the rule cleared has no analyst's answer, so it is not scored</div></div></div>
+    {% if qa.rows %}
+    <div class="tbl-scroll">
+    <table class="tbl" id="qa-hits-table">
+        <thead><tr><th>Case</th><th>Person on the ID</th><th>Hit</th><th>AI suggested</th><th>Analyst</th><th>Result</th></tr></thead>
+        <tbody>
+        {% for r in qa.rows %}
+        <tr class="qa-{{ r.key }}">
+            <td class="nowrap">{{ case_cell(r) }}</td>
+            <td class="strong">{{ r.name }}</td>
+            <td>{{ r.hit }}<div class="tiny muted">{{ r.uid }}{% if r.category %} · {{ r.category }}{% endif %}</div></td>
+            <td class="nowrap">{% if r.suggested %}{{ r.suggested }}<div class="tiny muted">{{ r.confidence }}% sure</div>{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{% if r.outcome and r.key != 'auto' %}{{ r.outcome }}<div class="tiny muted">{{ r.by|who }} · {{ r.when[:16] }}</div>{% if r.note %}<div class="tiny muted qa-note" title="{{ r.note }}">“{{ r.note|truncate(90) }}”</div>{% endif %}{% elif r.key == 'auto' %}<span class="muted">—</span><div class="tiny muted">{{ r.when[:16] }}</div>{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{{ result(r.key, r.result) }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="card-body small muted">No hit yet: a case gets hits when the name on the ID matches a watchlist record. Try a watchlist sample on <a href="{{ url_for('scan_id') }}#scan-samples">Cases</a>.</div>
+    {% endif %}
+</div>
+
+{# ── is the confidence bar right? ── #}
+<div class="card mt-12 pad-0" id="qa-bands">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Is the confidence bar right?</div>
+        <div class="card-sub">The rule clears a hit by itself only when the AI is at least <b>{{ qa.bar }}%</b> sure (<a href="{{ url_for('screening_settings') }}#settings-auto">Settings</a>). If analysts overrule the AI at or over the bar, raise it; if they agree with it under the bar, it can come down.</div></div></div>
+    <div class="tbl-scroll">
+    <table class="tbl" id="qa-bands-table">
+        <thead><tr><th>How sure the AI was</th><th class="num">Hits</th><th class="num">Decided by an analyst</th><th class="num">Agreed</th><th class="num">Agreement</th><th class="num">AI would have cleared a match</th><th class="num">Cleared by the rule</th><th class="num">Waiting</th></tr></thead>
+        <tbody>
+        {% for b in qa.bands %}
+        <tr><td class="strong">{{ b.label }}</td><td class="num">{{ b.hits }}</td><td class="num">{{ b.scored }}</td><td class="num">{{ b.agreed }}</td>
+            <td class="num">{% if b.pct is not none %}{{ b.pct }}%{% else %}—{% endif %}</td><td class="num">{{ b.missed }}</td><td class="num">{{ b.auto }}</td><td class="num">{{ b.waiting }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% if not T.scored %}<div class="card-body small muted" style="padding:8px 16px 14px">The agreement fills in as analysts give the waiting hits their outcome.</div>{% endif %}
+</div>
+
+{# ── what the AI closed alone: to spot check ── #}
+<div class="card mt-12 pad-0" id="qa-alone">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Cases the AI closed alone</div>
+        <div class="card-sub">auto-verify closed these with no person: open one to spot check what it saw · newest first</div></div></div>
+    {% if qa.alone %}
+    <div class="tbl-scroll">
+    <table class="tbl" id="qa-alone-table">
+        <thead><tr><th>Case</th><th>Person on the ID</th><th>Closed</th><th>Outcome</th><th>Why it closed</th><th>Didit</th></tr></thead>
+        <tbody>
+        {% for r in qa.alone %}
+        <tr><td class="nowrap">{{ case_cell(r) }}</td><td class="strong">{{ r.name }}</td><td class="nowrap">{{ r.closed_at[:16] }}</td>
+            <td class="nowrap">{{ r.outcome }}</td><td class="small">{{ r.why }}</td>
+            <td>{% if r.idv %}<span class="badge {{ 'emerald' if r.idv == 'Approved' else 'rose' if r.idv == 'Declined' else 'slate' }}">{{ r.idv }}</span>{% else %}<span class="muted tiny">off</span>{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="card-body small muted">No case has closed by itself{% if not s.auto_verify %}: auto-verify is off on Settings, so an analyst closes every case{% endif %}.</div>
+    {% endif %}
+</div>
+
+{# ── the QC sample ── #}
+<div class="card mt-12 pad-0" id="qa-qc">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">QC sample: cases the AI would have closed, kept for a person</div>
+        <div class="card-sub">{% if T.qc_pct %}{{ T.qc_pct }}% of them, picked by the case's ID{% else %}the QC sample is 0% on Settings{% endif %} · whether the person then did what the AI would have done{% if T.qc - T.qc_waiting %} · {{ T.qc_agreed }} of {{ T.qc - T.qc_waiting }} did{% endif %}</div></div></div>
+    {% if qa.qc %}
+    <div class="tbl-scroll">
+    <table class="tbl" id="qa-qc-table">
+        <thead><tr><th>Case</th><th>Person on the ID</th><th>Kept for a person</th><th>The AI would have</th><th>The analyst</th><th>Result</th></tr></thead>
+        <tbody>
+        {% for r in qa.qc %}
+        <tr><td class="nowrap">{{ case_cell(r) }}</td><td class="strong">{{ r.name }}</td><td class="nowrap">{{ r.sampled_at[:16] }}</td>
+            <td>{% if r.hits %}Cleared its {{ plural(r.hits, 'hit') }}{% else %}Closed it: no match{% endif %}</td>
+            <td>{% if r.outcome %}{{ r.outcome }}<div class="tiny muted">{{ r.by|who }}</div>{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{{ result(r.key, r.result) }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="card-body small muted">No QC sample yet: a case is kept for a person only when the AI would otherwise close it.</div>
+    {% endif %}
+</div>
+
+{# ── Didit against our own checks ── #}
+<div class="card mt-12 pad-0" id="qa-didit">
+    <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Didit against our own checks</div>
+        <div class="card-sub">the cases where Didit's answer on the document and the console's own checks disagree · Didit declines the drawn sample IDs by design (no real photo)</div></div></div>
+    {% if qa.didit.rows %}
+    <div class="tbl-scroll">
+    <table class="tbl" id="qa-didit-table">
+        <thead><tr><th>Case</th><th>Person on the ID</th><th>Didit</th><th>Our checks</th><th>Didit's warnings</th></tr></thead>
+        <tbody>
+        {% for r in qa.didit.rows %}
+        <tr><td class="nowrap">{{ case_cell(r) }}</td><td class="strong">{{ r.name }}</td>
+            <td><span class="badge {{ 'emerald' if r.didit == 'Approved' else 'rose' }}">{{ r.didit }}</span>{% if r.sandbox %} <span class="tag">sandbox</span>{% endif %}</td>
+            <td class="small">{{ r.ours|capitalize }}</td>
+            <td class="small">{{ r.warnings|join('; ') or '—' }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="card-body small muted">{% if qa.didit.checked %}Didit and our checks agree on every case Didit checked.{% else %}Didit has checked no case: its ID check is off on Settings.{% endif %}</div>
+    {% endif %}
+    {% if qa.didit.warnings %}
+    <div class="card-body small" style="padding:8px 16px 14px" id="qa-didit-warnings"><b>Didit's warnings across the cases:</b>
+        {% for w in qa.didit.warnings %}<span class="badge slate" style="margin:2px 4px 2px 0">{{ w.text }} · {{ plural(w.cases, 'case') }}</span>{% endfor %}</div>
+    {% endif %}
+</div>
+{% endblock %}
