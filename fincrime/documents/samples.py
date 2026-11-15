@@ -19,8 +19,8 @@ records of it.
 
 One sample is a photo, not a drawing: the sample ID card Nebraska's DMV
 publishes (holder SAMPLECARD, JOHN ALEXANDER), kept in sample_images/. It
-has a real photo and a real card design, so it is the one to show Didit's
-check on; its fields are written below as the card prints them.
+has a real photo and a real card design, and Didit approves it (it did on
+2, 3 and 14 November 2026), so it is the one to show Didit's check on; its fields are written below as the card prints them.
 """
 from datetime import date
 from functools import lru_cache
@@ -41,7 +41,7 @@ SAMPLES = (
      "number": "D7315528", "address": "77 Harbor View Road, Portland, OR 97205"},
     {"id": "nebraska-id-card", "title": "Nebraska ID card (the state's sample)", "group": "Passes",
      "shows": "The sample card Nebraska's DMV publishes: a real photo and a real card design, no MRZ.",
-     "expect": "No watchlist match and the checks pass: with Didit's check off it closes by itself. With it on, Didit judges a real card design with a photo (it may still flag the state's published sample).",
+     "expect": "No watchlist match, the checks pass and Didit approves it: the case closes by itself. Sent again, Didit adds two warnings: a possible duplicate user (the same card in an earlier session) and an address it cannot place.",
      "kind": "id_card", "name": "John Alexander Samplecard", "nationality": "US", "gender": "M", "dob": "1990-05-25",
      "number": "123456789", "address": "1234 Example St, South Sioux City, SA 12345-0000", "image": "nebraska-id-card.png"},
     {"id": "adverse-media-dob-differs", "title": "Name on the watchlist, another date of birth", "group": "Watchlist",
