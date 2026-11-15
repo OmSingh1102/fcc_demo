@@ -1,0 +1,81 @@
+{# The segmented bar the AI QA page and the landing page share: its macro, its styles and its tooltip.
+   A page imports what it needs:  {% from "_segbar.html" import segbar, segbar_css, segbar_tip %}
+   then puts {{ segbar_css() }} inside its <style>, and {{ segbar_tip() }} in its extra_js block. #}
+
+{# One whole split into parts, each part's share inside it when it fits, a legend naming the parts in
+   block order with their counts, the details on hover or focus, and a table view. #}
+{% macro segbar(id, b, title, sub) %}
+<div class="qa-chart" id="{{ id }}">
+    <div class="qa-chart-title">{{ title }}</div>
+    <div class="tiny muted">{{ sub }}</div>
+    {% if b.total %}
+    <div class="qa-seg" role="img" aria-label="{{ title }}: {% for p in b.parts %}{{ p.name }} {{ p.n }} ({{ p.pct }}%){{ '; ' if not loop.last }}{% endfor %}">
+        {%- for p in b.parts %}<span class="qa-part qa-c-{{ p.key }}" style="flex: {{ p.n }} 1 0" tabindex="0" data-tip="{{ p.n }} {{ b.of }}{{ 's' if p.n != 1 }} · {{ p.pct }}%" data-name="{{ p.name }}">{% if p.inside %}{{ p.pct }}%{% endif %}</span>{% endfor -%}
+    </div>
+    <ul class="qa-legend">{% for p in b.parts %}<li><span class="qa-swatch qa-c-{{ p.key }}"></span>{{ p.name }} <b>{{ p.n }}</b></li>{% endfor %}</ul>
+    <details class="qa-tv"><summary>Show as a table</summary>
+        <table class="tbl"><thead><tr><th></th><th class="num">{{ b.of|capitalize }}s</th><th class="num">Share</th></tr></thead>
+            <tbody>{% for p in b.parts %}<tr><td>{{ p.name }}</td><td class="num">{{ p.n }}</td><td class="num">{{ p.pct }}%</td></tr>{% endfor %}
+            <tr><td class="strong">All</td><td class="num strong">{{ b.total }}</td><td class="num">100%</td></tr></tbody></table></details>
+    {% else %}
+    <div class="small muted mt-8">None yet.</div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro segbar_css() %}
+    /* the charts: roles, validated as adjacent pairs on the white card (dataviz validator) */
+    .qa-c-alone, .qa-c-auto { --c: #2a78d6; }
+    .qa-c-qc { --c: #1baf7a; }
+    .qa-c-analyst, .qa-c-agreed { --c: #008300; }
+    .qa-c-waiting { --c: #eda100; }
+    .qa-c-overridden { --c: #6250d6; }
+    .qa-c-missed { --c: #e34948; }
+    .qa-c-failed { --c: #e87ba4; }
+    .qa-chart-title { font-weight: 600; font-size: 14px; }
+    .qa-seg { display: flex; gap: 2px; height: 28px; margin-top: 10px; }
+    .qa-part { min-width: 6px; border-radius: 4px; background: var(--c); color: #fff; font-size: 12px; font-weight: 600;
+               display: flex; align-items: center; padding-left: 8px; white-space: nowrap; overflow: visible; cursor: default; outline-offset: 2px; }
+    .qa-part.qa-c-waiting { color: #0b0b0b; }
+    .qa-part:hover, .qa-part:focus-visible { filter: brightness(1.08); box-shadow: 0 0 0 2px var(--card), 0 0 0 3px var(--c); }
+    .qa-legend { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted-foreground); }
+    .qa-legend li { display: inline-flex; align-items: center; gap: 6px; }
+    .qa-legend b { color: var(--foreground); font-weight: 600; }
+    .qa-swatch { width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
+    .qa-tv { margin-top: 8px; font-size: 12px; }
+    .qa-tv summary { cursor: pointer; color: var(--muted-foreground); }
+    .qa-tv table { margin-top: 6px; max-width: 460px; }
+    #qa-tip { position: fixed; z-index: 50; pointer-events: none; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md);
+              box-shadow: var(--shadow-lift); padding: 6px 9px; font-size: 12px; max-width: 280px; }
+    #qa-tip b { display: block; font-size: 13px; }
+    #qa-tip div { color: var(--muted-foreground); }
+{% endmacro %}
+
+{# The page puts <div id="qa-tip" hidden></div> at the end of its content. #}
+{% macro segbar_tip() %}
+<script>
+// One tooltip for every bar and segment: the value first, then its name; on hover and on keyboard focus.
+(function () {
+    var tip = document.getElementById('qa-tip');
+    if (!tip) return;
+    function place(x, y) {
+        var w = tip.offsetWidth, h = tip.offsetHeight;
+        tip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, x + 12)) + 'px';
+        tip.style.top = Math.max(8, y - h - 10) + 'px';
+    }
+    function show(el, x, y) {
+        tip.textContent = '';
+        var v = document.createElement('b'); v.textContent = el.getAttribute('data-tip');
+        var n = document.createElement('div'); n.textContent = el.getAttribute('data-name') || '';
+        tip.appendChild(v); tip.appendChild(n); tip.hidden = false; place(x, y);
+    }
+    function hide() { tip.hidden = true; }
+    document.querySelectorAll('[data-tip]').forEach(function (el) {
+        el.addEventListener('pointermove', function (e) { show(el, e.clientX, e.clientY); });
+        el.addEventListener('pointerleave', hide);
+        el.addEventListener('focus', function () { var r = el.getBoundingClientRect(); show(el, r.left + r.width / 2, r.top); });
+        el.addEventListener('blur', hide);
+    });
+})();
+</script>
+{% endmacro %}

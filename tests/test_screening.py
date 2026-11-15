@@ -15,6 +15,7 @@ import hmac
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -380,6 +381,15 @@ class ScreeningBookPageTests(unittest.TestCase):
         c = self.client()
         self.assertIn('href="/qa"', c.get("/scan").data.decode("utf-8"))                       # in the menu
         self.assertIn('id="lp-qa-link"', c.get("/overview").data.decode("utf-8"))             # and from the QA loop
+
+        def live(key):
+            """A number of the landing page's live strip, and the line under it."""
+            page = c.get("/overview").data.decode("utf-8")
+            found = re.search(r'id="lp-kpi-%s">.*?<div class="v">\s*(.*?)\s*</div>\s*<div class="hint">(.*?)</div>' % key, page, re.S)
+            return found.groups()
+
+        self.assertEqual(live("cases"), ("0", "none yet: start with a sample ID"))
+        self.assertEqual(live("agree"), ("—", "no hit decided by an analyst yet"))
         page = c.get("/qa").data.decode("utf-8")
         for needle in ('id="qa-kpis"', 'id="qa-hits"', 'id="qa-bands"', 'id="qa-alone"', 'id="qa-qc"', 'id="qa-didit"', "No hit yet"):
             self.assertIn(needle, page)
@@ -420,6 +430,16 @@ class ScreeningBookPageTests(unittest.TestCase):
         for needle in ('id="qa-flow"', 'id="qa-step-outcome"', 'id="qa-chart-cases"', 'id="qa-chart-hits"', 'class="qa-part qa-c-missed"',
                        "2 hits to an analyst", "Show as a table"):
             self.assertIn(needle, page)
+        # the landing page's live strip: the same numbers and the same bar, with a way to the full page
+        self.assertEqual(live("cases"), ("3", "0 open · 3 closed"))
+        self.assertEqual(live("alone"), ("1", "33% of the cases, no person needed"))
+        self.assertEqual(live("person"), ("2", "0 waiting now · 2 closed by an analyst"))
+        self.assertEqual(live("agree"), ("50%", "on 1 of the 2 hits an analyst decided"))
+        page = c.get("/overview").data.decode("utf-8")
+        for needle in ('id="lp-live"', 'id="lp-live-qa"', 'id="lp-chart-cases"', 'class="qa-part qa-c-alone"', '<div id="qa-tip" hidden>',
+                       'aria-label="Where the cases are: Closed by the AI alone 1 (33%); Closed by an analyst 2 (67%)"'):
+            self.assertIn(needle, page)
+        self.assertLess(page.index('id="lp-live"'), page.index('id="lp-workflow"'))           # on top, before the workflow
         # the QC sample and Didit against our checks, on records as the console keeps them
         scans = [{"id": "S1", "at": "2026-11-01 10:00:00", "status": "open", "verdict": "Pass", "read": a_read(), "screening": {"hits": []},
                   "idv": {"status": "Declined", "warnings": [{"risk": "PORTRAIT_IMAGE_NOT_DETECTED", "text": "Portrait image not detected"}]}},

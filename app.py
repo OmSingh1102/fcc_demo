@@ -1918,8 +1918,9 @@ def routing_capacity():
 def overview():
     """The demo's workflow on one page, before the tool: the three steps (read
     the ID, the SOP checks, the screening), the AI's two calls, when a person
-    decides, how the AI is checked, and what plugs in. Every name and number
-    is the console's own, from Settings and the cases."""
+    decides, how the AI is checked, and what plugs in; on top, a live strip from
+    the AI QA page (fincrime/ai_qa). Every name and number is the console's
+    own, from Settings and the cases."""
     s = SCREEN_SETTINGS
     labels = _model_labels()
     labels.update({AZURE_READER["id"]: AZURE_READER["label"], OCR_READER["id"]: OCR_READER["label"]})
@@ -1961,9 +1962,10 @@ def overview():
             ("LexisNexis, Dow Jones and others", "Can be added", "one adapter each, as World-Check's and Didit's")]),
         ("Decide each hit", model_rows(id_screening.decision_models(s), s["decision_model"])),
     ]
-    t = upload_eval.totals(_scans())
+    scans = _scans()
+    t = upload_eval.totals(scans)
     return render_template(
-        "overview.html", s=s, reader_label=labels.get(s["reader_model"], s["reader_model"]),
+        "overview.html", s=s, qa=ai_qa.page(scans, s), reader_label=labels.get(s["reader_model"], s["reader_model"]),
         decider_label=labels.get(s["decision_model"], s["decision_model"]), source_key=src,
         source_label=id_screening.source_label(s), idv_on=idv_on, dd_ready=dd_ready,
         fails=[label for key, label, _ in id_scan.RULES if rule.get(key) == "fail"],

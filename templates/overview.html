@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}How it works{% endblock %}
+{% from "_segbar.html" import segbar, segbar_css, segbar_tip %}
 
 {% block extra_css %}
 <style>
@@ -35,9 +36,20 @@
     .lp-plug { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 7px 0; border-top: 1px solid var(--border); }
     .lp-plug .tiny { display: block; }
     .lp-triggers td:first-child { width: 58%; }
+    /* the live strip: four numbers and where the cases are, from the AI QA page */
+    .lp-live { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+    .lp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .lp-stat { padding: 0 14px; border-left: 1px solid var(--border); }
+    .lp-stat:first-child { padding-left: 0; border-left: 0; }
+    .lp-stat .l { font-size: 11.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; color: var(--muted-foreground);
+                  min-height: 2.8em; }  /* two lines, so the numbers line up when a label wraps */
+    .lp-stat .v { font-size: 26px; font-weight: 600; line-height: 1.2; margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .lp-stat .hint { font-size: 12px; color: var(--muted-foreground); margin-top: 4px; }
+{{ segbar_css() }}
     @media (max-width: 1200px) { .lp-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .lp-step::after { display: none; }
-                                 .lp-plugins { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 760px) { .lp-flow, .lp-two, .lp-plugins { grid-template-columns: 1fr; } .lp-arrow { display: none; } }
+                                 .lp-plugins { grid-template-columns: repeat(2, minmax(0, 1fr)); } .lp-live { grid-template-columns: 1fr; gap: 18px; } }
+    @media (max-width: 760px) { .lp-flow, .lp-two, .lp-plugins { grid-template-columns: 1fr; } .lp-arrow { display: none; }
+                                .lp-stats { grid-template-columns: 1fr 1fr; gap: 14px 0; } .lp-stat:nth-child(3) { padding-left: 0; border-left: 0; } }
 </style>
 {% endblock %}
 
@@ -49,6 +61,28 @@
     <div class="row" style="gap:8px">
         <a class="btn btn-primary" href="{{ url_for('scan_id') }}" id="lp-start">{{ icon('arrow-right') }} Start the demo</a>
         <a class="btn btn-outline" href="{{ url_for('scan_id') }}#scan-samples" id="lp-samples">{{ icon('image') }} Try one of {{ n_samples }} sample IDs</a>
+    </div>
+</div>
+
+{% set T = qa.totals %}{% set where = qa.charts.cases.parts|map(attribute='key')|list %}
+{% macro n_where(key) %}{{ qa.charts.cases.parts|selectattr('key', 'equalto', key)|map(attribute='n')|sum }}{% endmacro %}
+<div class="card mt-12" id="lp-live">
+    <div class="card-head"><div><div class="card-title">Live now</div>
+        <div class="card-sub">from the cases in the console as they stand; AI QA has them case by case</div></div>
+        <a class="btn btn-outline btn-sm" href="{{ url_for('quality') }}" id="lp-live-qa">See the full AI QA →</a></div>
+    <div class="card-body lp-live">
+        <div class="lp-stats">
+            <div class="lp-stat" id="lp-kpi-cases"><div class="l">IDs uploaded</div><div class="v">{{ T.cases }}</div>
+                <div class="hint">{% if T.cases %}{{ T.open }} open · {{ T.cases - T.open }} closed{% else %}none yet: start with a sample ID{% endif %}</div></div>
+            <div class="lp-stat" id="lp-kpi-alone"><div class="l">Closed by the AI alone</div><div class="v">{{ T.closed_auto }}</div>
+                <div class="hint">{% if not s.auto_verify %}auto-verify is off on Settings{% elif T.cases %}{{ (100 * T.closed_auto / T.cases)|round|int }}% of the cases, no person needed{% else %}no person needed{% endif %}</div></div>
+            <div class="lp-stat" id="lp-kpi-person"><div class="l">Sent to a person</div><div class="v">{{ T.cases - T.closed_auto }}</div>
+                <div class="hint">{{ n_where('waiting') }} waiting now{% if 'analyst' in where %} · {{ n_where('analyst') }} closed by an analyst{% endif %}{% if 'qc' in where %} · {{ n_where('qc') }} QC sample{% endif %}</div></div>
+            <div class="lp-stat" id="lp-kpi-agree"><div class="l">Analysts agree with the AI</div>
+                <div class="v">{% if T.agree_pct is not none %}{{ T.agree_pct }}%{% else %}—{% endif %}</div>
+                <div class="hint">{% if T.scored %}on {{ T.agreed }} of the {{ T.scored }} hit{{ 's' if T.scored != 1 }} an analyst decided{% else %}no hit decided by an analyst yet{% if T.waiting %}: {{ T.waiting }} wait{{ 's' if T.waiting == 1 }}{% endif %}{% endif %}</div></div>
+        </div>
+        {{ segbar('lp-chart-cases', qa.charts.cases, 'Where the cases are', 'Every case, by who closed it or who has it now') }}
     </div>
 </div>
 
@@ -177,4 +211,9 @@
 </div>
 
 <div class="note info mt-12" id="lp-demo-data"><b>Demo data.</b> {{ n_drawn }} of the {{ n_samples }} sample IDs are made up and marked SPECIMEN (Didit's genuine-document check declines them: they have no real photo, so rehearse them with Didit off); the other is the sample ID card Nebraska's DMV publishes, with a real photo, which Didit approves; the screening runs on {% if source_key == 'stand-in' %}demo data: the {{ '{:,}'.format(watchlist_size) }} World-Check records of the demo's case file{% else %}{{ source_label }}{% endif %}. A licence key on Settings plugs in World-Check One, and another screening vendor (LexisNexis, Dow Jones …) is one more connector. Real IDs uploaded here are kept until their case is deleted.{% if not llm_ready %} <b>No AI model is configured on this machine: IDs cannot be read.</b>{% endif %}</div>
+<div id="qa-tip" hidden></div>
+{% endblock %}
+
+{% block extra_js %}
+{{ segbar_tip() }}
 {% endblock %}

@@ -246,7 +246,11 @@ page has measured on the uploads so far.
 
 **How it works** (`/overview`, first in the left menu; signing in, and the
 site's root, open it in the screening book). The landing page, shown before
-the tool: the workflow in five steps (read the ID, the SOP checks and
+the tool. On top, a live strip from AI QA (`fincrime/ai_qa.py`): the IDs
+uploaded, the cases closed by the AI alone, the cases sent to a person, how
+often the analysts agree with the AI, and the "Where the cases are" bar (one
+macro, `templates/_segbar.html`, draws it on both pages), with a link to the
+full AI QA page. Then the workflow in five steps (read the ID, the SOP checks and
 Didit's genuine-document check, the compliance and sanctions screening, the
 AI's review of each hit, the outcome), each with an amber line saying when a
 person takes over; the AI's two calls (what is sent, what comes back, which
