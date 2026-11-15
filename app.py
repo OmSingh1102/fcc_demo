@@ -1968,7 +1968,7 @@ def overview():
         looks=[label for key, label, _ in id_scan.RULES if rule.get(key) == "warn"], n_checks=len(id_scan.RULES),
         person_lists=[x.strip() for x in str(s.get("auto_person_lists", "")).split(",") if x.strip()],
         sop=id_screening.sop_current(_sop_stored()), plugins=plugins, totals=t,
-        agree_pct=round(100 * t["agreed"] / t["confirmed"]) if t["confirmed"] else None, n_samples=len(samples.SAMPLES),
+        agree_pct=round(100 * t["agreed"] / t["confirmed"]) if t["confirmed"] else None, n_samples=len(samples.SAMPLES), n_drawn=sum(1 for x in samples.SAMPLES if not x.get("image")),
         watchlist_size=len(watchlist.profiles()), llm_ready=ai_review.configured())
 
 
@@ -2153,6 +2153,13 @@ def scan_sample_image(sample_id):
     """A sample ID as the page shows it (the reader gets the same card as an image)."""
     body = samples.svg(sample_id)
     return Response(body, mimetype="image/svg+xml") if body else abort(404)
+
+
+@app.route("/scan/samples/<sample_id>.png")
+def scan_sample_photo(sample_id):
+    """A sample that is a photo (the Nebraska card), as the page shows it and the reader gets it."""
+    s = samples.get(sample_id)
+    return Response(samples.png(sample_id), mimetype="image/png") if s and s.get("image") else abort(404)
 
 
 def _sample_cost():

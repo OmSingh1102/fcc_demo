@@ -260,8 +260,11 @@ marked in use, connected, ready for a key or can be added. Every name and
 number on it is read from Settings and the cases, not written in.
 
 **Sample IDs** (`fincrime/documents/samples.py`; *Or pick a sample ID* on
-`/scan`). Ten made-up documents drawn by `svg_cards`, each marked SPECIMEN
-with a silhouette for a photo, so a demo needs no real person's ID: a clean
+`/scan`). Eleven sample IDs. Ten are made-up documents drawn by `svg_cards`,
+each marked SPECIMEN with a silhouette for a photo; the eleventh is a photo,
+the sample ID card Nebraska's DMV publishes (SAMPLECARD, JOHN ALEXANDER;
+`fincrime/documents/sample_images/`), with a real photo and card design: the
+one to show Didit's check on. So a demo needs no customer's ID: a clean
 passport, a US driving licence, an adverse-media name with another date of
 birth, a PEP, a sanctions match among namesakes, an expired passport, a
 printed date of birth that differs from the MRZ, a holder under the age

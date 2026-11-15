@@ -9,16 +9,22 @@ the age limit, a printed date of birth that differs from the MRZ, a blurred
 photo, a US driving licence, and a document that is not an ID. A sample
 goes through the console exactly as an upload does (the AI reads it, the
 checks run, the name is screened, the AI decides each hit): only the image
-is the console's. Didit's ID verification declines every one of them (no
+is the console's. Didit's ID verification declines every drawn one (no
 real photo, no real document template), so with Didit's check on a sample
 always goes to an analyst; with it off, each does what its card says. Dates
 are drawn from today's date, so the clean ones stay
 in date and the under-age holder stays under the limit. The made-up names
 match no record of the stand-in watchlist; the three listed names are
 records of it.
+
+One sample is a photo, not a drawing: the sample ID card Nebraska's DMV
+publishes (holder SAMPLECARD, JOHN ALEXANDER), kept in sample_images/. It
+has a real photo and a real card design, so it is the one to show Didit's
+check on; its fields are written below as the card prints them.
 """
 from datetime import date
 from functools import lru_cache
+from pathlib import Path
 
 from fincrime.documents import raster, svg_cards
 
@@ -33,6 +39,11 @@ SAMPLES = (
      "expect": "No watchlist match; the checks pass.",
      "kind": "driving_licence", "name": "Daniel Robert Ashford", "nationality": "US", "gender": "M", "dob": "1986-09-12",
      "number": "D7315528", "address": "77 Harbor View Road, Portland, OR 97205"},
+    {"id": "nebraska-id-card", "title": "Nebraska ID card (the state's sample)", "group": "Passes",
+     "shows": "The sample card Nebraska's DMV publishes: a real photo and a real card design, no MRZ.",
+     "expect": "No watchlist match and the checks pass: with Didit's check off it closes by itself. With it on, Didit judges a real card design with a photo (it may still flag the state's published sample).",
+     "kind": "id_card", "name": "John Alexander Samplecard", "nationality": "US", "gender": "M", "dob": "1990-05-25",
+     "number": "123456789", "address": "1234 Example St, South Sioux City, SA 12345-0000", "image": "nebraska-id-card.png"},
     {"id": "adverse-media-dob-differs", "title": "Name on the watchlist, another date of birth", "group": "Watchlist",
      "shows": "The name matches an adverse-media record exactly, but the record's date of birth is 25 years earlier.",
      "expect": "The AI should call both hits false positives; with Didit's check off, the rule clears them and closes the case.",
@@ -75,6 +86,7 @@ SAMPLES = (
      "number": "", "address": "21 Lake View Apartments, Pune, MH 411001"},
 )
 GROUPS = ("Passes", "Watchlist", "Fails a check", "Needs a person")
+IMAGES = Path(__file__).with_name("sample_images")
 
 
 def get(sample_id):
@@ -91,9 +103,10 @@ def _dob(s, today):
 
 
 def svg(sample_id, today=None):
-    """The sample drawn, as SVG (for the page's thumbnails); None when there is no such sample."""
+    """The sample drawn, as SVG (for the page's thumbnails); None when there is
+    no such sample, or it is a photo (see png)."""
     s = get(sample_id)
-    if not s:
+    if not s or s.get("image"):
         return None
     today = today or date.today()
     dob = _dob(s, today)
@@ -109,6 +122,9 @@ def svg(sample_id, today=None):
 
 @lru_cache(maxsize=32)
 def _png(sample_id, day):
+    s = get(sample_id)
+    if s.get("image"):
+        return (IMAGES / s["image"]).read_bytes()
     return raster.svg_to_png(svg(sample_id, date.fromisoformat(day)), zoom=1.5)
 
 

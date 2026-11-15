@@ -283,7 +283,7 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertTrue(r.headers["Location"].endswith("/overview"))                # signing in opens it
         page = c.get("/overview").data.decode("utf-8")
         for needle in ('id="lp-workflow"', 'id="lp-step-read"', 'id="lp-step-checks"', 'id="lp-step-screen"', 'id="lp-ai-calls"',
-                       'id="lp-human"', 'id="lp-qa"', 'id="lp-plugins"', 'id="lp-demo-data"', "Start the demo", "Try one of 10 sample IDs",
+                       'id="lp-human"', 'id="lp-qa"', 'id="lp-plugins"', 'id="lp-demo-data"', "Start the demo", "Try one of 11 sample IDs",
                        "Auto-verify off", "Stand-in World-Check (demo data)", "World-Check One (LSEG)", "LexisNexis, Dow Jones and others",
                        "Gemini", "Tesseract OCR", "Azure AI Document Intelligence"):
             self.assertIn(needle, page)
@@ -304,10 +304,14 @@ class ScreeningBookPageTests(unittest.TestCase):
 
     def test_sample_ids_are_made_up_and_read_as_an_upload_is(self):
         from fincrime.documents import samples
-        self.assertEqual(len(samples.SAMPLES), 10)
+        self.assertEqual(len(samples.SAMPLES), 11)
         expected_hits = {"adverse-media-dob-differs": "WC-814837", "pep-match": "WC-636638", "sanctions-match": "WC-409909"}
         for x in samples.SAMPLES:
             drawn = samples.svg(x["id"])
+            if x.get("image"):                                                      # the Nebraska card: a photo, not drawn
+                self.assertIsNone(drawn)
+                self.assertTrue(samples.png(x["id"]).startswith(bytes([0x89]) + b"PNG"))
+                continue
             self.assertIn("SPECIMEN", drawn)
             self.assertIn("Not a real document", drawn)
             dob = samples._dob(x, __import__("datetime").date.today())
@@ -323,11 +327,16 @@ class ScreeningBookPageTests(unittest.TestCase):
         c = self.client()
         page = c.get("/scan").data.decode("utf-8")
         self.assertIn('id="scan-samples"', page)
-        self.assertEqual(page.count('class="sample-tile"'), 10)
+        self.assertEqual(page.count('class="sample-tile"'), 11)
         self.assertIn("nothing on Didit's account", page)
         r = c.get("/scan/samples/clean-passport.svg")
         self.assertEqual((r.status_code, r.mimetype), (200, "image/svg+xml"))
         self.assertEqual(c.get("/scan/samples/nope.svg").status_code, 404)
+        self.assertIn('src="/scan/samples/nebraska-id-card.png"', page)                # the photo sample shows itself
+        r = c.get("/scan/samples/nebraska-id-card.png")
+        self.assertEqual((r.status_code, r.mimetype), (200, "image/png"))
+        self.assertEqual([c.get(u).status_code for u in ("/scan/samples/nebraska-id-card.svg", "/scan/samples/clean-passport.png")],
+                         [404, 404])
         # picked: the console's image goes to the reader, the case says it is a sample
         seen = []
         read = a_read("ELENA MARIE CASTELLANO", "CASTELLANO", "ELENA MARIE", "1989-04-17")
@@ -344,6 +353,11 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertIn(">sample</span>", c.get("/scan").data.decode("utf-8"))
         self.assertEqual(c.get(f"/scan/{sid}/data.json").get_json()["sample"], "clean-passport")
         self.assertIn("pick a sample ID", c.post("/scan", data={"sample": "nope"}, follow_redirects=True).data.decode("utf-8"))
+        with mock.patch.object(id_scan, "scan", lambda jpeg, *a, **k: seen.append(jpeg) or dict(result)), \
+                mock.patch.object(id_screening, "decide", self.decide):
+            r = c.post("/scan", data={"sample": "nebraska-id-card", "model": "gemini-2.5-flash", "via": "ai"})
+        self.assertTrue(len(seen) == 2 and seen[1][:2] == bytes([0xFF, 0xD8]))             # the photo goes to the reader as any upload
+        self.assertEqual(fcc._scan(r.headers["Location"].rsplit("/", 1)[-1])["sample"]["id"], "nebraska-id-card")
         # the hits waiting for an analyst, each with its own reason
         summary = id_screening.case_summary(rec, fcc.SCREEN_SETTINGS)
         self.assertEqual(summary["label"], "Needs a person")
