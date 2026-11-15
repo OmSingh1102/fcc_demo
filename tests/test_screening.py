@@ -410,6 +410,16 @@ class ScreeningBookPageTests(unittest.TestCase):
         qa = ai_qa.page(fcc._scans(), fcc.SCREEN_SETTINGS)
         self.assertEqual([r["id"] for r in qa["alone"]], [alone])
         self.assertIn(alone, c.get("/qa").data.decode("utf-8"))
+        # the workflow, live, and the two pictures
+        flow = {st["id"]: st for st in qa["flow"]}
+        self.assertEqual((flow["read"]["n"], flow["screen"]["n"], flow["ai"]["n"], flow["ai"]["person"]), (3, 3, 2, 2))
+        self.assertEqual([x for x in flow["outcome"]["lines"] if x[2]], [("ok", "Closed by the AI alone", 1), ("info", "Closed by an analyst", 2)])
+        self.assertEqual([(x["key"], x["n"], x["pct"]) for x in qa["charts"]["cases"]["parts"]], [("alone", 1, 33), ("analyst", 2, 67)])
+        self.assertEqual([(x["key"], x["n"]) for x in qa["charts"]["hits"]["parts"]], [("agreed", 1), ("missed", 1)])
+        page = c.get("/qa").data.decode("utf-8")
+        for needle in ('id="qa-flow"', 'id="qa-step-outcome"', 'id="qa-chart-cases"', 'id="qa-chart-hits"', 'class="qa-part qa-c-missed"',
+                       "2 hits to an analyst", "Show as a table"):
+            self.assertIn(needle, page)
         # the QC sample and Didit against our checks, on records as the console keeps them
         scans = [{"id": "S1", "at": "2026-11-01 10:00:00", "status": "open", "verdict": "Pass", "read": a_read(), "screening": {"hits": []},
                   "idv": {"status": "Declined", "warnings": [{"risk": "PORTRAIT_IMAGE_NOT_DETECTED", "text": "Portrait image not detected"}]}},
@@ -424,6 +434,8 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertEqual((qa["didit"]["checked"], qa["totals"]["disagree"], qa["totals"]["qc_waiting"]), (3, 2, 1))
         self.assertEqual(qa["didit"]["warnings"], [{"text": "Portrait image not detected", "cases": 1},
                                                    {"text": "Unable to determine address location", "cases": 1}])
+        self.assertEqual([(w["text"], w["width"], w["share"]) for w in qa["charts"]["warnings"]],
+                         [("Portrait image not detected", 100, 33), ("Unable to determine address location", 100, 33)])
 
     def test_upload_to_closed_case(self):
         c = self.client()

@@ -139,6 +139,81 @@ def didit(scans):
             "warnings": [{"text": t, "cases": n} for t, n in seen.most_common()]}
 
 
+def _where(scan):
+    """Where a case is now: alone, analyst, qc or waiting."""
+    if scan.get("status") == "closed":
+        return "alone" if (scan.get("closed") or {}).get("auto") else "analyst"
+    return "qc" if scan.get("qc_sample") else "waiting"
+
+
+def flow(scans, rows):
+    """The workflow's five steps, live: what each step saw and where it sent
+    it. Each line is (mark, words, count): ok goes on by itself, warn and
+    fail go to a person, wait is still in progress, info is a note; each step
+    says how many it sent to a person."""
+    read = [s for s in scans if id_screening.is_id(s.get("read"))]
+    verdicts = Counter(s.get("verdict", "") for s in read)
+    didit_said = Counter((s.get("idv") or {}).get("status") for s in read)
+    sc = lambda s: s.get("screening") or {}                                     # noqa: E731
+    screened = [s for s in read if sc(s) and not sc(s).get("error")]
+    errors = sum(1 for s in read if sc(s).get("error"))
+    with_hits = [s for s in screened if sc(s).get("hits")]
+    keys = Counter(r["key"] for r in rows)
+    where = Counter(_where(s) for s in scans)
+    answered = len(rows) - keys["failed"] - keys["deciding"] - keys["analyst"]
+    to_analyst = len(rows) - keys["auto"]
+    steps = [
+        {"id": "read", "kicker": "Extraction", "title": "Read the ID", "n": len(scans), "unit": "ID", "lines": [
+            ("ok", "Read by the AI", len(read)), ("warn", "Not read, or not an ID", len(scans) - len(read))],
+         "person": len(scans) - len(read)},
+        {"id": "checks", "kicker": "SOP validation & fraud", "title": "Check the document", "n": len(read), "unit": "ID", "lines": [
+            ("ok", "Every check passes", verdicts["Pass"]), ("warn", "A check to look at", verdicts["Check"]),
+            ("fail", "A check failed", verdicts["Fail"])]
+            + ([("ok", "Didit approved", didit_said["Approved"]), ("fail", "Didit declined", didit_said["Declined"])]
+               if didit_said["Approved"] or didit_said["Declined"] else []),
+         "person": verdicts["Check"] + verdicts["Fail"]},
+        {"id": "screen", "kicker": "Compliance & sanctions", "title": "Screen the name", "n": len(screened), "unit": "name", "lines": [
+            ("ok", "No record matched", len(screened) - len(with_hits)), ("info", f"Matched a record ({len(rows)} hit{'s' if len(rows) != 1 else ''})", len(with_hits))]
+            + ([("fail", "The search failed", errors)] if errors else []),
+         "person": errors, "next": f"{len(with_hits)} case{'s' if len(with_hits) != 1 else ''} to the AI" if with_hits else ""},
+        {"id": "ai", "kicker": "AI decision", "title": "The AI decides each hit", "n": len(rows), "unit": "hit", "lines": [
+            ("ok", "The AI answered", answered), ("warn", "The AI could not answer", keys["failed"] + keys["analyst"])]
+            + ([("wait", "The AI is deciding", keys["deciding"])] if keys["deciding"] else [])
+            + [("ok", "Cleared by the AI screening rule", keys["auto"])],
+         "person": to_analyst},
+        {"id": "outcome", "kicker": "Human in the loop", "title": "Outcome", "n": len(scans), "unit": "case", "lines": [
+            ("ok", "Closed by the AI alone", where["alone"]), ("info", "Closed by an analyst", where["analyst"]),
+            ("warn", "QC sample: kept for a person", where["qc"]), ("wait", "Waiting for an analyst", where["waiting"])],
+         "person": where["qc"] + where["waiting"]},
+    ]
+    return steps
+
+
+def _bar(parts, of):
+    """A segmented bar's parts: (key, name, n) with their share; a part at
+    zero draws nothing, and a part under 10% prints no figure inside."""
+    total = sum(n for _k, _name, n in parts)
+    out = [{"key": k, "name": name, "n": n, "pct": round(100 * n / total) if total else 0} for k, name, n in parts if n]
+    for p in out:
+        p["inside"] = p["pct"] >= 10
+    return {"parts": out, "total": total, "of": of}
+
+
+def charts(scans, rows, dd):
+    where = Counter(_where(s) for s in scans)
+    keys = Counter(r["key"] for r in rows)
+    cases = _bar([("alone", "Closed by the AI alone", where["alone"]), ("qc", "QC sample: kept for a person", where["qc"]),
+                  ("analyst", "Closed by an analyst", where["analyst"]), ("waiting", "Waiting for an analyst", where["waiting"])], "case")
+    hits = _bar([("agreed", "The analyst agreed", keys["agreed"]), ("overridden", "Overridden by the analyst", keys["overridden"]),
+                 ("missed", "Overridden: the AI would have cleared a match", keys["missed"]),
+                 ("auto", "Cleared by the AI screening rule", keys["auto"]),
+                 ("waiting", "Waiting for an analyst", keys["waiting"] + keys["deciding"]),
+                 ("failed", "The AI could not answer", keys["failed"] + keys["analyst"])], "hit")
+    top = max((w["cases"] for w in dd["warnings"]), default=0)
+    warnings = [dict(w, width=round(100 * w["cases"] / top) if top else 0, share=_pct(w["cases"], dd["checked"])) for w in dd["warnings"]]
+    return {"cases": cases, "hits": hits, "warnings": warnings}
+
+
 def page(scans, settings):
     """Everything the page draws, with the headline counts."""
     rows = checked(scans)
@@ -147,6 +222,7 @@ def page(scans, settings):
     gone, sample, dd = alone(scans), qc(scans), didit(scans)
     bar = int(settings.get("auto_min_confidence", 90))
     return {"rows": rows, "bands": bands(rows, bar), "bar": bar, "alone": gone, "qc": sample, "didit": dd,
+            "flow": flow(scans, rows), "charts": charts(scans, rows, dd),
             "totals": {"cases": len(scans), "open": sum(s.get("status", "open") == "open" for s in scans),
                        "closed_auto": len(gone), "closed_analyst": sum(s.get("status") == "closed" and not (s.get("closed") or {}).get("auto")
                                                                        for s in scans),

@@ -7,6 +7,89 @@
 {% macro result(key, words) %}<span class="badge {{ TONE.get(key, 'slate') }}">{{ words }}</span>{% endmacro %}
 {% macro case_cell(r) %}<a href="{{ url_for('scan_result', scan_id=r.id) }}" class="mono tiny">{{ r.id }}</a>{% if r.sample %} <span class="tag" title="Sample ID: {{ r.sample }}">sample</span>{% endif %}<div class="tiny muted">{{ r.at[:16] }}</div>{% endmacro %}
 {% macro plural(n, word) %}{{ n }} {{ word }}{{ 's' if n != 1 }}{% endmacro %}
+{% set MARK = {'ok': '✓', 'warn': '!', 'fail': '✕', 'wait': '…', 'info': 'i', 'na': '–'} %}
+{% set PERSON = {'read': 'to a person: not read', 'checks': 'to a person: a check flagged', 'screen': 'to a person: the search failed',
+                 'ai': 'to an analyst', 'outcome': 'with a person now'} %}
+
+{# A segmented bar: one whole split into parts, each part's share inside it when it fits, a legend
+   naming the parts in block order with their counts, the details on hover or focus, and a table view. #}
+{% macro segbar(id, b, title, sub) %}
+<div class="qa-chart" id="{{ id }}">
+    <div class="qa-chart-title">{{ title }}</div>
+    <div class="tiny muted">{{ sub }}</div>
+    {% if b.total %}
+    <div class="qa-seg" role="img" aria-label="{{ title }}: {% for p in b.parts %}{{ p.name }} {{ p.n }} ({{ p.pct }}%){{ '; ' if not loop.last }}{% endfor %}">
+        {%- for p in b.parts %}<span class="qa-part qa-c-{{ p.key }}" style="flex: {{ p.n }} 1 0" tabindex="0" data-tip="{{ p.n }} {{ b.of }}{{ 's' if p.n != 1 }} · {{ p.pct }}%" data-name="{{ p.name }}">{% if p.inside %}{{ p.pct }}%{% endif %}</span>{% endfor -%}
+    </div>
+    <ul class="qa-legend">{% for p in b.parts %}<li><span class="qa-swatch qa-c-{{ p.key }}"></span>{{ p.name }} <b>{{ p.n }}</b></li>{% endfor %}</ul>
+    <details class="qa-tv"><summary>Show as a table</summary>
+        <table class="tbl"><thead><tr><th></th><th class="num">{{ b.of|capitalize }}s</th><th class="num">Share</th></tr></thead>
+            <tbody>{% for p in b.parts %}<tr><td>{{ p.name }}</td><td class="num">{{ p.n }}</td><td class="num">{{ p.pct }}%</td></tr>{% endfor %}
+            <tr><td class="strong">All</td><td class="num strong">{{ b.total }}</td><td class="num">100%</td></tr></tbody></table></details>
+    {% else %}
+    <div class="small muted mt-8">None yet.</div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% block extra_css %}
+<style>
+    /* the workflow, live */
+    .qa-flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 30px; }
+    .qa-step { position: relative; border: 1px solid var(--border); border-radius: var(--radius-xl); padding: 12px 14px; background: var(--card);
+               display: flex; flex-direction: column; gap: 8px; }
+    .qa-step:not(:last-child)::after { content: "→"; position: absolute; right: -24px; top: 16px; font-size: 22px; font-weight: 700; color: var(--primary-strong); }
+    .qa-step-head { display: flex; gap: 10px; align-items: center; }
+    .qa-num { width: 26px; height: 26px; flex: none; border-radius: 50%; background: var(--primary); color: var(--primary-foreground);
+              display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; }
+    .qa-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted-foreground); }
+    .qa-big { font-size: 30px; font-weight: 600; line-height: 1.1; }
+    .qa-big span { font-size: 13px; font-weight: 500; color: var(--muted-foreground); }
+    .qa-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
+    .qa-lines li { display: grid; grid-template-columns: 18px 1fr auto; gap: 7px; align-items: center; }
+    .qa-lines li b { font-variant-numeric: tabular-nums; }
+    .qa-lines li.qa-zero { color: var(--muted-foreground); }
+    .qa-lines li.qa-zero .ck-mark { opacity: .45; }
+    .qa-next { font-size: 12px; color: var(--primary-strong); font-weight: 600; }
+    .qa-person { margin-top: auto; border: 1px dashed #f59e0b; background: #fffbeb; color: #92400e; border-radius: var(--radius-md);
+                 padding: 6px 8px; font-size: 12px; font-weight: 600; display: flex; gap: 6px; align-items: center; }
+    .qa-person.none { border-color: var(--border); background: var(--muted); color: var(--muted-foreground); font-weight: 500; }
+    @media (max-width: 1200px) { .qa-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .qa-step::after { display: none; } }
+    @media (max-width: 700px) { .qa-flow, .qa-charts { grid-template-columns: 1fr; } }
+
+    /* the charts: roles, validated as adjacent pairs on the white card (dataviz validator) */
+    .qa-c-alone, .qa-c-auto { --c: #2a78d6; }
+    .qa-c-qc { --c: #1baf7a; }
+    .qa-c-analyst, .qa-c-agreed { --c: #008300; }
+    .qa-c-waiting { --c: #eda100; }
+    .qa-c-overridden { --c: #6250d6; }
+    .qa-c-missed { --c: #e34948; }
+    .qa-c-failed { --c: #e87ba4; }
+    .qa-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    .qa-chart-title { font-weight: 600; font-size: 14px; }
+    .qa-seg { display: flex; gap: 2px; height: 28px; margin-top: 10px; }
+    .qa-part { min-width: 6px; border-radius: 4px; background: var(--c); color: #fff; font-size: 12px; font-weight: 600;
+               display: flex; align-items: center; padding-left: 8px; white-space: nowrap; overflow: visible; cursor: default; outline-offset: 2px; }
+    .qa-part.qa-c-waiting { color: #0b0b0b; }
+    .qa-part:hover, .qa-part:focus-visible { filter: brightness(1.08); box-shadow: 0 0 0 2px var(--card), 0 0 0 3px var(--c); }
+    .qa-legend { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted-foreground); }
+    .qa-legend li { display: inline-flex; align-items: center; gap: 6px; }
+    .qa-legend b { color: var(--foreground); font-weight: 600; }
+    .qa-swatch { width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
+    .qa-tv { margin-top: 8px; font-size: 12px; }
+    .qa-tv summary { cursor: pointer; color: var(--muted-foreground); }
+    .qa-tv table { margin-top: 6px; max-width: 460px; }
+    .qa-hbars { display: grid; grid-template-columns: minmax(160px, 34%) 1fr; gap: 8px 12px; align-items: center; font-size: 12.5px; margin-top: 10px; }
+    .qa-hbar-track { display: flex; align-items: center; gap: 8px; }
+    .qa-hbar { height: 14px; border-radius: 0 4px 4px 0; background: #2a78d6; min-width: 3px; }
+    .qa-hbar:hover, .qa-hbar:focus-visible { filter: brightness(1.1); }
+    .qa-hbar-v { font-weight: 600; font-variant-numeric: tabular-nums; }
+    #qa-tip { position: fixed; z-index: 50; pointer-events: none; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md);
+              box-shadow: var(--shadow-lift); padding: 6px 9px; font-size: 12px; max-width: 280px; }
+    #qa-tip b { display: block; font-size: 13px; }
+    #qa-tip div { color: var(--muted-foreground); }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="page-head">
@@ -14,7 +97,26 @@
         <p>How far the AI can be trusted, measured on this console's own cases: every place a person checked the AI, and every place the AI acted alone. For the L2 / QC reviewer: the overrides first, the cases to spot check, the QC sample, and where Didit and our own checks disagree. The page follows every case as it is read, decided and closed.</p></div>
 </div>
 
-<div class="kpi-strip" id="qa-kpis">
+{# ── the workflow, live ── #}
+<div class="card" id="qa-flow">
+    <div class="card-head"><div><div class="card-title">The workflow, live</div>
+        <div class="card-sub">The five steps of <a href="{{ url_for('overview') }}">How it works</a>, with this console's {{ plural(T.cases, 'case') }}: what each step saw, and how many it sent to a person (<span class="ck-mark warn">!</span> and <span class="ck-mark fail">✕</span>, counted in the amber line).</div></div></div>
+    <div class="card-body">
+        <div class="qa-flow">
+            {% for st in qa.flow %}
+            <div class="qa-step" id="qa-step-{{ st.id }}">
+                <div class="qa-step-head"><span class="qa-num">{{ loop.index }}</span><div><div class="qa-kicker">{{ st.kicker }}</div><div class="strong">{{ st.title }}</div></div></div>
+                <div class="qa-big">{{ st.n }} <span>{{ st.unit }}{{ 's' if st.n != 1 }}</span></div>
+                <ul class="qa-lines">{% for mark, words, n in st.lines %}<li{% if not n %} class="qa-zero"{% endif %}><span class="ck-mark {{ mark }}">{{ MARK[mark] }}</span><span>{{ words }}</span><b>{{ n }}</b></li>{% endfor %}</ul>
+                {% if st.next %}<div class="qa-next">→ {{ st.next }}</div>{% endif %}
+                <div class="qa-person{% if not st.person %} none{% endif %}">{{ icon('user') }} {% if st.person %}{{ plural(st.person, st.unit) }} {{ PERSON[st.id] }}{% else %}None to a person here{% endif %}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="kpi-strip mt-12" id="qa-kpis">
     <div class="kpi" id="qa-kpi-agree"><div class="l">Analysts agree with the AI</div>
         <div class="v">{% if T.agree_pct is not none %}{{ T.agree_pct }}%{% else %}—{% endif %}</div>
         <div class="hint">{% if T.scored %}on {{ T.agreed }} of the {{ plural(T.scored, 'hit') }} an analyst decided after the AI{% else %}No hit decided by an analyst yet{% if T.waiting %}: {{ T.waiting }} wait{{ 's' if T.waiting == 1 }}{% endif %}{% endif %}</div></div>
@@ -30,6 +132,14 @@
     <div class="kpi" id="qa-kpi-didit"><div class="l">Didit and our checks disagree</div>
         <div class="v">{{ T.disagree }}</div>
         <div class="hint">{% if qa.didit.checked %}of the {{ plural(qa.didit.checked, 'case') }} Didit checked{% else %}Didit has checked no case{% endif %}</div></div>
+</div>
+
+{# ── the two pictures: where the cases are, and what became of the AI's suggestions ── #}
+<div class="card" id="qa-charts">
+    <div class="card-body qa-charts">
+        {{ segbar('qa-chart-cases', qa.charts.cases, 'Where the cases are', 'Every case, by who closed it or who has it now') }}
+        {{ segbar('qa-chart-hits', qa.charts.hits, "What became of the AI's suggestions", "Every watchlist hit, by what the analyst or the rule did with the AI's answer") }}
+    </div>
 </div>
 
 {# ── the AI's suggestion against the analyst's outcome, hit by hit ── #}
@@ -142,9 +252,46 @@
     {% else %}
     <div class="card-body small muted">{% if qa.didit.checked %}Didit and our checks agree on every case Didit checked.{% else %}Didit has checked no case: its ID check is off on Settings.{% endif %}</div>
     {% endif %}
-    {% if qa.didit.warnings %}
-    <div class="card-body small" style="padding:8px 16px 14px" id="qa-didit-warnings"><b>Didit's warnings across the cases:</b>
-        {% for w in qa.didit.warnings %}<span class="badge slate" style="margin:2px 4px 2px 0">{{ w.text }} · {{ plural(w.cases, 'case') }}</span>{% endfor %}</div>
+    {% if qa.charts.warnings %}
+    <div class="card-body" style="padding:10px 16px 16px" id="qa-didit-warnings">
+        <div class="qa-chart-title">Didit's warnings across the cases</div>
+        <div class="tiny muted">How many of the {{ plural(qa.didit.checked, 'case') }} Didit checked raised each warning, most common first</div>
+        <div class="qa-hbars" role="img" aria-label="Didit's warnings: {% for w in qa.charts.warnings %}{{ w.text }} {{ w.cases }}{{ '; ' if not loop.last }}{% endfor %}">
+            {% for w in qa.charts.warnings %}
+            <div class="small">{{ w.text }}</div>
+            <div class="qa-hbar-track"><span class="qa-hbar" style="width: {{ w.width * 0.85 }}%" tabindex="0" data-tip="{{ plural(w.cases, 'case') }} · {{ w.share }}% of those Didit checked" data-name="{{ w.text }}"></span><span class="qa-hbar-v">{{ w.cases }}</span></div>
+            {% endfor %}
+        </div>
+    </div>
     {% endif %}
 </div>
+<div id="qa-tip" hidden></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// One tooltip for every bar and segment: the value first, then its name; on hover and on keyboard focus.
+(function () {
+    var tip = document.getElementById('qa-tip');
+    if (!tip) return;
+    function place(x, y) {
+        var w = tip.offsetWidth, h = tip.offsetHeight;
+        tip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, x + 12)) + 'px';
+        tip.style.top = Math.max(8, y - h - 10) + 'px';
+    }
+    function show(el, x, y) {
+        tip.textContent = '';
+        var v = document.createElement('b'); v.textContent = el.getAttribute('data-tip');
+        var n = document.createElement('div'); n.textContent = el.getAttribute('data-name') || '';
+        tip.appendChild(v); tip.appendChild(n); tip.hidden = false; place(x, y);
+    }
+    function hide() { tip.hidden = true; }
+    document.querySelectorAll('[data-tip]').forEach(function (el) {
+        el.addEventListener('pointermove', function (e) { show(el, e.clientX, e.clientY); });
+        el.addEventListener('pointerleave', hide);
+        el.addEventListener('focus', function () { var r = el.getBoundingClientRect(); show(el, r.left + r.width / 2, r.top); });
+        el.addEventListener('blur', hide);
+    });
+})();
+</script>
 {% endblock %}
