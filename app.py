@@ -1972,7 +1972,7 @@ def overview():
         looks=[label for key, label, _ in id_scan.RULES if rule.get(key) == "warn"], n_checks=len(id_scan.RULES),
         person_lists=[x.strip() for x in str(s.get("auto_person_lists", "")).split(",") if x.strip()],
         sop=id_screening.sop_current(_sop_stored()), plugins=plugins, totals=t,
-        agree_pct=round(100 * t["agreed"] / t["confirmed"]) if t["confirmed"] else None, n_samples=len(samples.SAMPLES), n_drawn=sum(1 for x in samples.SAMPLES if not x.get("image")),
+        agree_pct=round(100 * t["agreed"] / t["confirmed"]) if t["confirmed"] else None, n_samples=len(samples.SHOWN), n_drawn=sum(1 for x in samples.shown() if not x.get("image")),
         watchlist_size=len(watchlist.profiles()), llm_ready=ai_review.configured())
 
 
@@ -2132,7 +2132,7 @@ def scan_id():
                                counts={k: sum(1 for s in scans if kind(s) == k) for k in ("open", "auto", "closed")} | {"all": len(scans)},
                                auto_on=SCREEN_SETTINGS.get("auto_verify"), watched=sum(1 for s in scans if _watched(s)),
                                source=id_screening.source_label(SCREEN_SETTINGS), outcome=id_screening.outcome,
-                               samples=samples.SAMPLES, sample_cost=_sample_cost())
+                               samples=samples.shown(), sample_cost=_sample_cost())
     sample = samples.get(request.form.get("sample", ""))
     if sample:                                      # a sample ID: the console's own image, read as an upload is
         data, name = samples.png(sample["id"]), f"sample-{sample['id']}.png"

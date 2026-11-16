@@ -6,7 +6,7 @@
 {% set TONE = {'agreed': 'emerald', 'auto': 'blue', 'overridden': 'amber', 'missed': 'rose', 'waiting': 'slate',
                'failed': 'amber', 'deciding': 'slate', 'analyst': 'slate'} %}
 {% macro result(key, words) %}<span class="badge {{ TONE.get(key, 'slate') }}">{{ words }}</span>{% endmacro %}
-{% macro case_cell(r) %}<a href="{{ url_for('scan_result', scan_id=r.id) }}" class="mono tiny">{{ r.id }}</a>{% if r.sample %} <span class="tag" title="Sample ID: {{ r.sample }}">sample</span>{% endif %}<div class="tiny muted">{{ r.at[:16] }}</div>{% endmacro %}
+{% macro case_cell(r) %}<a href="{{ url_for('scan_result', scan_id=r.id) }}" class="mono tiny">{{ r.id }}</a>{% if r.sample %} <span class="tag" title="From the sample IDs on the Scan ID page">sample</span>{% endif %}<div class="tiny muted">{{ r.at[:16] }}</div>{% endmacro %}
 {% macro plural(n, word) %}{{ n }} {{ word }}{{ 's' if n != 1 }}{% endmacro %}
 {% set MARK = {'ok': '✓', 'warn': '!', 'fail': '✕', 'wait': '…', 'info': 'i', 'na': '–'} %}
 {% set PERSON = {'read': 'to a person: not read', 'checks': 'to a person: a check flagged', 'screen': 'to a person: the search failed',

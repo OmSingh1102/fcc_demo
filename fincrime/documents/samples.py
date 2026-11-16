@@ -21,6 +21,12 @@ One sample is a photo, not a drawing: the sample ID card Nebraska's DMV
 publishes (holder SAMPLECARD, JOHN ALEXANDER), kept in sample_images/. It
 has a real photo and a real card design, and Didit approves it (it did on
 2, 3 and 14 November 2026), so it is the one to show Didit's check on; its fields are written below as the card prints them.
+
+The Scan ID page shows seven of them (SHOWN), as pictures only: no title, no
+group and no "expect" line, so a client watching the demo sees the result
+appear live, not written in advance. The titles and notes below stay for
+the presenter (this file, the README) and the tests; a form may still send
+any of the eleven.
 """
 from datetime import date
 from functools import lru_cache
@@ -89,8 +95,21 @@ GROUPS = ("Passes", "Watchlist", "Fails a check", "Needs a person")
 IMAGES = Path(__file__).with_name("sample_images")
 
 
+# The seven the Scan ID page shows, in its order: a clean passport, the Nebraska card, a watchlist name with
+# another date of birth, a sanctions match among namesakes, a printed date that differs from the MRZ, and two
+# a person takes over: a blurred photo and a utility bill sent as an ID. The expired passport is left out:
+# its picture carries an EXPIRED stamp, which gives its result away.
+SHOWN = ("clean-passport", "nebraska-id-card", "adverse-media-dob-differs", "sanctions-match", "mrz-mismatch",
+         "blurred-photo", "not-an-id")
+
+
 def get(sample_id):
     return next((s for s in SAMPLES if s["id"] == sample_id), None)
+
+
+def shown():
+    """The samples the Scan ID page shows."""
+    return [get(i) for i in SHOWN]
 
 
 def _dob(s, today):

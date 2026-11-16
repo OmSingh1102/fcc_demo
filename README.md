@@ -275,6 +275,14 @@ printed date of birth that differs from the MRZ, a holder under the age
 limit, a blurred photo, and a utility bill sent as an ID. A sample is read
 and screened exactly as an upload is (it costs the same: the page says what
 on Didit's account), and its case is marked as a sample.
+The page shows seven of them (`samples.SHOWN`: the clean passport, the
+Nebraska card, the adverse-media name, the sanctions match, the MRZ
+mismatch, and two a person takes over: the blurred photo and the utility
+bill) as pictures only, each with its Read with AI button: no title, no
+group, no "expect" line, and the case page says "Sample ID", not which one,
+so a client sees each result appear live. The notes on what each shows stay
+in `samples.py` for the presenter; the expired passport is left out, its
+EXPIRED stamp giving its result away.
 
 **SOP checklist** (first on a case's Overview tab; `id_screening.checklist`).
 Folded: the bar shows the counts (passed, failed, to look at, not run), and a

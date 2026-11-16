@@ -284,7 +284,7 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertTrue(r.headers["Location"].endswith("/overview"))                # signing in opens it
         page = c.get("/overview").data.decode("utf-8")
         for needle in ('id="lp-workflow"', 'id="lp-step-read"', 'id="lp-step-checks"', 'id="lp-step-screen"', 'id="lp-ai-calls"',
-                       'id="lp-human"', 'id="lp-qa"', 'id="lp-plugins"', 'id="lp-demo-data"', "Start the demo", "Try one of 11 sample IDs",
+                       'id="lp-human"', 'id="lp-qa"', 'id="lp-plugins"', 'id="lp-demo-data"', "Start the demo", "Try one of 7 sample IDs",
                        "Auto-verify off", "Stand-in World-Check (demo data)", "World-Check One (LSEG)", "LexisNexis, Dow Jones and others",
                        "Gemini", "Tesseract OCR", "Azure AI Document Intelligence"):
             self.assertIn(needle, page)
@@ -328,7 +328,13 @@ class ScreeningBookPageTests(unittest.TestCase):
         c = self.client()
         page = c.get("/scan").data.decode("utf-8")
         self.assertIn('id="scan-samples"', page)
-        self.assertEqual(page.count('class="sample-tile"'), 11)
+        self.assertEqual(page.count('class="sample-tile"'), 7)                         # seven, as pictures only
+        self.assertEqual(re.findall(r'class="sample-tile" id="sample-([a-z-]+)"', page), list(samples.SHOWN))
+        for x in samples.shown():                                                   # nothing says what one should do
+            self.assertNotIn(x["shows"], page)
+            self.assertNotIn(x["group"], page.split('id="scan-samples"')[1].split('id="scan-cases"')[0])
+        for words in ("Expect:", "Clean passport", "A sanctions match, among namesakes", "Printed date differs from the MRZ"):
+            self.assertNotIn(words, page)
         self.assertIn("nothing on Didit's account", page)
         r = c.get("/scan/samples/clean-passport.svg")
         self.assertEqual((r.status_code, r.mimetype), (200, "image/svg+xml"))
@@ -350,7 +356,9 @@ class ScreeningBookPageTests(unittest.TestCase):
         rec = fcc._scan(sid)
         self.assertTrue(seen and seen[0][:2] == b"\xff\xd8")                       # a JPEG, prepared as any upload
         self.assertEqual((rec["sample"], rec["file"]), ({"id": "clean-passport", "title": "Clean passport"}, "sample-clean-passport.png"))
-        self.assertIn('id="sample-tag"', c.get(f"/scan/{sid}").data.decode("utf-8"))
+        case_page = c.get(f"/scan/{sid}").data.decode("utf-8")
+        self.assertIn('id="sample-tag"', case_page)
+        self.assertNotIn("Clean passport", case_page)                               # the case says Sample ID, not what it shows
         self.assertIn(">sample</span>", c.get("/scan").data.decode("utf-8"))
         self.assertEqual(c.get(f"/scan/{sid}/data.json").get_json()["sample"], "clean-passport")
         self.assertIn("pick a sample ID", c.post("/scan", data={"sample": "nope"}, follow_redirects=True).data.decode("utf-8"))
@@ -369,12 +377,12 @@ class ScreeningBookPageTests(unittest.TestCase):
         with_hit = dict(rec, screening=dict(rec["screening"], hits=[hit]))
         self.assertIn("1 hit waits for an analyst's outcome (auto-verify is off on Settings): SARAH MURPHY: the AI was 80% sure, under "
                       "the 90% bar", id_screening.case_summary(with_hit, fcc.SCREEN_SETTINGS)["reasons"])
-        # Didit on: the page says what a sample costs on Didit's account, and that Didit declines made-up documents
+        # Didit on: the page says what a sample costs on Didit's account, and nothing of what Didit will answer
         fcc.SCREEN_SETTINGS["didit"].update(api_key="key", auto=True)
         fcc.SCREEN_SETTINGS["screening_source"] = "didit_aml"
         page = c.get("/scan").data.decode("utf-8")
         self.assertIn("Didit&#39;s ID check and Didit&#39;s AML screening ($0.40 on Didit's account).", page)
-        self.assertIn("<b>Didit declines made-up documents</b>", page)
+        self.assertNotIn("Didit declines", page)
 
     def test_the_ai_qa_page_scores_the_ai_against_the_analyst(self):
         from fincrime import ai_qa
