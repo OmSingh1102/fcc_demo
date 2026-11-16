@@ -396,6 +396,9 @@ class ScreeningBookPageTests(unittest.TestCase):
             found = re.search(r'id="lp-kpi-%s">.*?<div class="v">\s*(.*?)\s*</div>\s*<div class="hint">(.*?)</div>' % key, page, re.S)
             return found.groups()
 
+        landing, qa_page = c.get("/overview").data.decode("utf-8"), c.get("/qa").data.decode("utf-8")
+        for words in ("rehearse", "Didit approves", "declines the drawn", "watchlist sample"):   # nothing says what a sample will do
+            self.assertNotIn(words, landing + qa_page)
         self.assertEqual(live("cases"), ("0", "none yet: start with a sample ID"))
         self.assertEqual(live("agree"), ("—", "no hit decided by an analyst yet"))
         page = c.get("/qa").data.decode("utf-8")

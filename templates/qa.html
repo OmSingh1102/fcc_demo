@@ -120,7 +120,7 @@
     </table>
     </div>
     {% else %}
-    <div class="card-body small muted">No hit yet: a case gets hits when the name on the ID matches a watchlist record. Try a watchlist sample on <a href="{{ url_for('scan_id') }}#scan-samples">Cases</a>.</div>
+    <div class="card-body small muted">No hit yet: a case gets hits when the name on the ID matches a watchlist record. Try a sample ID on <a href="{{ url_for('scan_id') }}#scan-samples">Cases</a>.</div>
     {% endif %}
 </div>
 
@@ -190,7 +190,7 @@
 {# ── Didit against our own checks ── #}
 <div class="card mt-12 pad-0" id="qa-didit">
     <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Didit against our own checks</div>
-        <div class="card-sub">the cases where Didit's answer on the document and the console's own checks disagree · Didit declines the drawn sample IDs by design (no real photo)</div></div></div>
+        <div class="card-sub">the cases where Didit's answer on the document and the console's own checks disagree</div></div></div>
     {% if qa.didit.rows %}
     <div class="tbl-scroll">
     <table class="tbl" id="qa-didit-table">
