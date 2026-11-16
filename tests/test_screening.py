@@ -727,6 +727,8 @@ class ScreeningBookPageTests(unittest.TestCase):
         page = c.get(f"/scan/{sid}").data.decode("utf-8")
         overview = page.split('data-panel="overview"')[1]
         self.assertTrue(overview.index('id="sop-checklist"') < overview.index('class="fact-cards"'))   # first on the case
+        self.assertIn('<details class="card pad-0 mb-12 ck-fold" id="sop-checklist">', page)         # folded: a click opens it
+        self.assertRegex(page.split('id="sop-checklist"')[1].split("</summary>")[0], r"(?s)passed.*to look at")  # the counts on the fold
         for needle in ("SOP checklist", "1 · Read the ID", "3 · Screen the name", f"Hit: {hits[0]['name']}", "to look at", "not run"):
             self.assertIn(needle, page)
         # an analyst's outcome on a hit: the row says it and who gave it

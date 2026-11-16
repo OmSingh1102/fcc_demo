@@ -646,6 +646,12 @@ table.tbl .cell-hex { font-family: ui-monospace, 'Consolas', monospace; font-siz
 .ck-mark.wait { background: #dbeafe; color: #1d4ed8; }
 .ck-mark.info, .ck-mark.na { background: #f1f5f9; color: #64748b; }
 .ck-table tr.ck-na td { color: var(--muted-foreground); }
+.ck-fold > summary { cursor: pointer; }
+.ck-fold:not([open]) > summary { padding-bottom: 14px; }
+.ck-fold[open] > summary { padding-bottom: 10px; }
+.ck-fold > summary .caret { display: inline-flex; margin-left: 4px; color: var(--muted-foreground); transition: transform .18s; }
+.ck-fold[open] > summary .caret { transform: rotate(180deg); }
+.ck-fold > summary:hover .card-title { color: var(--primary-strong); }
 .rail-actions .btn-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
 .rail-actions .btn-row.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .rail-actions .btn-row .btn, .rail-actions .btn-row form { width: 100%; }

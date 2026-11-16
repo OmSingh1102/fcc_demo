@@ -277,7 +277,8 @@ and screened exactly as an upload is (it costs the same: the page says what
 on Didit's account), and its case is marked as a sample.
 
 **SOP checklist** (first on a case's Overview tab; `id_screening.checklist`).
-Every rule the case was checked against, in the workflow's order: 1 read
+Folded: the bar shows the counts (passed, failed, to look at, not run), and a
+click opens the table. Every rule the case was checked against, in the workflow's order: 1 read
 the ID (an identity document, the photo, the main fields, unsure fields),
 2 check the document (expiry, age, the MRZ check digits, the printed details
 against the MRZ, Didit's genuine-document check and whether it read the same
