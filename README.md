@@ -474,7 +474,10 @@ it is on Settings.
 check digits add up, what the AI answered); what each finding does is a rule
 on Settings (*Rules: what each finding does*): for each of the eleven ID
 check findings (`id_scan.RULES`) whether it fails the check, sends the case
-to an analyst, or is a note only; for each of the AI's four answers which
+to an analyst, is a note only, or is switched off (*Off: not checked*: the
+check does not run, the case's checklist says Not run, How it works lists it;
+the identity-document and the name, date of birth and number checks are
+always on, since without them nobody can be screened); for each of the AI's four answers which
 hit outcome it suggests (auto-verify clears only a suggested false
 positive); and, on the auto-verify card, whether Didit must approve the
 document and which fields its read must agree on (name, date of birth,

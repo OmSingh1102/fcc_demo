@@ -162,6 +162,7 @@
         <tr><td>The ID cannot be read, or is not an identity document</td><td>Nobody is screened; an analyst asks for a clearer photo</td></tr>
         {% if fails %}<tr><td>A check marked <b>Fail</b>: {{ fails|join('; ') }}</td><td>The case never closes by itself</td></tr>{% endif %}
         {% if looks %}<tr><td>A check marked <b>Check</b>: {{ looks|join('; ') }}</td><td>The case never closes by itself: an analyst looks</td></tr>{% endif %}
+        {% if offs %}<tr id="lp-offs"><td>Switched off on Settings: {{ offs|join('; ') }}</td><td>Not checked on any case</td></tr>{% endif %}
         {% if s.auto_needs_idv %}<tr><td>Didit does not approve this very document, or reads it differently ({{ s.idv_must_agree|join(', ')|lower }})</td><td>The case never closes by itself</td></tr>{% endif %}
         <tr><td>The AI does not say false positive on a hit, or is under {{ bar }}% sure</td><td>The hit waits for an analyst</td></tr>
         {% if s.auto_dob_differs %}<tr><td>The record's date of birth is the ID's, or unknown</td><td>The hit waits for an analyst</td></tr>{% endif %}

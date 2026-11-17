@@ -53,7 +53,7 @@ def reading(scans):
         r["not_id"] += read.get("document_type") == "Not an identity document"
         for key, prefix in (("mrz", "MRZ check digits"), ("mrz_fields", "Printed fields against the MRZ")):
             state = _check(s, prefix)
-            if state:
+            if state and state != "na":             # a check switched off on Settings says nothing of the model
                 r[key].append(state == "ok")
         r["seconds"].append(m.get("seconds") or 0)
         r["costs"].append(m.get("cost") or 0)

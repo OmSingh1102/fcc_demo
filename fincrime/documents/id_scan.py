@@ -118,7 +118,8 @@ def scan(jpeg, model_id=None, min_age=18, catalogue=None, instructions="", rules
 # The code measures (is the ID expired, do the MRZ digits add up); what each
 # finding does to the ID check is a rule, and Settings may change any of them:
 # "fail" fails the check, "warn" sends the case to an analyst (the check says
-# Check), "info" only notes it (the check can still pass).
+# Check), "info" only notes it (the check can still pass), "off" does not
+# check it at all (the case's checklist says Not run: switched off).
 
 RULES = (
     ("not_id", "Not an identity document", "fail"),
@@ -134,7 +135,12 @@ RULES = (
     ("mrz_differs", "The printed fields differ from the MRZ", "fail"),
 )
 CHECK_RULES = {k: state for k, _, state in RULES}
-SEVERITIES = (("fail", "Fail"), ("warn", "Check: an analyst looks"), ("info", "Note only"))
+SEVERITIES = (("fail", "Fail"), ("warn", "Check: an analyst looks"), ("info", "Note only"), ("off", "Off: not checked"))
+OFF = "off"
+OFF_NOTE = "Not checked: switched off on Settings."
+# Never off: without an identity document, or without the name, date of birth and number, nobody can be
+# screened, and an empty search would let the case close as "No match".
+ALWAYS_ON = ("not_id", "fields_missing")
 
 def _iso(text):
     try:
@@ -206,8 +212,12 @@ def checks(read, today=None, min_age=18, rules=None):
     today = today or date.today()
     out = []
     rule = dict(CHECK_RULES, **{k: v for k, v in (rules or {}).items() if k in CHECK_RULES and v in dict(SEVERITIES)})
+    rule.update({k: CHECK_RULES[k] for k in ALWAYS_ON if rule[k] == OFF})
+    off = lambda *keys: all(rule[k] == OFF for k in keys)                                  # noqa: E731
 
     def add(label, state, detail):
+        if state == OFF:                            # switched off on Settings: shown as not run, never counted
+            state, detail = "na", OFF_NOTE
         out.append({"label": label, "state": state, "detail": detail})
 
     if read is not None:
@@ -221,22 +231,28 @@ def checks(read, today=None, min_age=18, rules=None):
         elif read.get("problems"):
             add("Photo", rule["photo_problem"], f"Readable, but {', '.join(read['problems'])}.")
         else:
-            add("Photo", "ok", "Clear: nothing spoils it.")
+            add("Photo", OFF if off("photo_not_judged", "photo_unreadable", "photo_problem") else "ok", "Clear: nothing spoils it.")
         f = read["fields"]
         missing = [FIELD_LABEL[k] for k in ("full_name", "date_of_birth", "document_number") if not f.get(k)]
         add("Main fields", rule["fields_missing"] if missing else "ok",
             f"Not read: {', '.join(missing)}." if missing else "Name, date of birth and document number read.")
-        if read.get("uncertain"):
+        if off("uncertain"):
+            add("Fields the model is unsure of", OFF, "")
+        elif read.get("uncertain"):
             names = [FIELD_LABEL.get(u, u) for u in read["uncertain"]]
             add("Fields the model is unsure of", rule["uncertain"], ", ".join(names) + ": check them against the image.")
         exp = _iso(f.get("date_of_expiry"))
-        if exp:
+        if off("expired", "expiry_unreadable"):
+            add("Expiry", OFF, "")
+        elif exp:
             add("Expiry", rule["expired"] if exp < today else "ok",
                 f"Expired on {exp.isoformat()}." if exp < today else f"Valid until {exp.isoformat()}.")
         elif f.get("date_of_expiry"):
             add("Expiry", rule["expiry_unreadable"], f"Printed as {f['date_of_expiry']}: not a date the check can read.")
         dob = _iso(f.get("date_of_birth"))
-        if dob:
+        if off("under_age"):
+            add("Age", OFF, "")
+        elif dob:
             age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
             add("Age", rule["under_age"] if age < min_age else "ok", f"{age} years old" + (f": under {min_age}." if age < min_age else "."))
         printed = read.get("mrz") or []
@@ -247,11 +263,13 @@ def checks(read, today=None, min_age=18, rules=None):
             else:
                 bad = [k for k, v in parsed["checks"].items() if not v]
                 by = read.get("mrz_by") or "the model's transcription"
-                add(f"MRZ check digits ({by})", "ok" if parsed["valid"] else rule["mrz_digits"],
+                add(f"MRZ check digits ({by})", OFF if off("mrz_digits") else "ok" if parsed["valid"] else rule["mrz_digits"],
                     "All five add up." if parsed["valid"] else f"Do not add up: {', '.join(bad)} (a misread character, or a forged zone).")
                 agree, differ = _mrz_vs(read, parsed, "MRZ")
                 if read.get("fields_from_mrz"):         # the fields are the zone's: nothing printed to hold to it
                     pass
+                elif off("mrz_differs"):
+                    add("Printed fields against the MRZ", OFF, "")
                 elif differ:
                     add("Printed fields against the MRZ", rule["mrz_differs"], "; ".join(differ) + ".")
                 elif agree:

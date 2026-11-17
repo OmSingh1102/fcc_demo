@@ -1038,6 +1038,23 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertIn("Each ID check finding", bad)
         self.assertEqual(s["check_rules"]["expired"], "warn")
         self.assertEqual(id_screening.settings_from({"check_rules": {"expired": "info"}})["check_rules"]["mrz_differs"], "fail")
+        # a check switched off is not run and never counts; the identity-document and main-fields checks are always on
+        offd = id_scan.checks(old, rules={"expired": "off", "expiry_unreadable": "off"})
+        self.assertEqual(next(c for c in offd if c["label"] == "Expiry"), {"label": "Expiry", "state": "na", "detail": id_scan.OFF_NOTE})
+        self.assertEqual(id_scan.verdict({"read": old, "checks": offd}), "Pass")
+        rows = [r for st in id_screening.checklist({"read": old, "checks": offd}, s)["steps"] for r in st["rows"]]
+        self.assertEqual([(r["state"], r["detail"]) for r in rows if r["rule"] == "Not expired"], [("na", id_scan.OFF_NOTE)])
+        nameless = dict(old, fields=dict(old["fields"], full_name="", surname="", given_names=""))
+        self.assertEqual(next(c for c in id_scan.checks(nameless, rules={"fields_missing": "off"}) if c["label"] == "Main fields")["state"], "warn")
+        page = qc.get("/screening/settings").data.decode("utf-8")
+        self.assertEqual(page.count('<option value="off"'), len(id_scan.RULES) - len(id_scan.ALWAYS_ON))
+        self.assertIn("always on", page)
+        locked = qc.post("/screening/settings", data=dict(form, rule_not_id="off"), follow_redirects=True).data.decode("utf-8")
+        self.assertIn("cannot be switched off", locked)
+        self.assertEqual(s["check_rules"]["not_id"], "fail")
+        qc.post("/screening/settings", data=dict(form, rule_under_age="off"))
+        self.assertEqual(s["check_rules"]["under_age"], "off")
+        self.assertIn("Switched off on Settings: The holder is under the age limit", qc.get("/overview").data.decode("utf-8"))
         # the reader's checks follow them
         with mock.patch.object(id_scan, "model_ready", lambda: True), \
                 mock.patch.object(id_scan, "_model_read", lambda jpeg, model, system=None: (old, {"model": model["id"]})):

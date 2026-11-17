@@ -1970,6 +1970,7 @@ def overview():
         source_label=id_screening.source_label(s), idv_on=idv_on, dd_ready=dd_ready,
         fails=[label for key, label, _ in id_scan.RULES if rule.get(key) == "fail"],
         looks=[label for key, label, _ in id_scan.RULES if rule.get(key) == "warn"], n_checks=len(id_scan.RULES),
+        offs=[label for key, label, _ in id_scan.RULES if rule.get(key) == id_scan.OFF],
         person_lists=[x.strip() for x in str(s.get("auto_person_lists", "")).split(",") if x.strip()],
         sop=id_screening.sop_current(_sop_stored()), plugins=plugins, totals=t,
         agree_pct=round(100 * t["agreed"] / t["confirmed"]) if t["confirmed"] else None, n_samples=len(samples.SHOWN), n_drawn=sum(1 for x in samples.shown() if not x.get("image")),
@@ -2849,7 +2850,7 @@ def screening_settings():
                            providers=MODEL_PROVIDERS, reader_instructions=s.get("reader_instructions") or id_scan.SYSTEM,
                            team=s.get("team") or [{"name": a["name"], "email": a["email"], "roles": a["roles"]} for a in ANALYSTS],
                            team_roles=TEAM_ROLES,
-                           check_rules=id_scan.RULES, severities=id_scan.SEVERITIES, severity_label=dict(id_scan.SEVERITIES),
+                           check_rules=id_scan.RULES, severities=id_scan.SEVERITIES, severity_label=dict(id_scan.SEVERITIES), always_on=id_scan.ALWAYS_ON,
                            ai_answers=decision_model.OUTCOMES, default_suggestion=id_screening.SUGGESTION,
                            resolutions=id_screening.RESOLUTIONS, idv_fields=id_screening.IDV_FIELDS,
                            source=id_screening.source_label(s), can_edit="QC" in _levels(), model_ready=id_scan.model_ready(),
@@ -2932,7 +2933,10 @@ def _rules_update(s, f):
     """What each ID check finding does and what each AI answer suggests, from the form ("" when saved, else what is wrong)."""
     rules = {k: f.get(f"rule_{k}", s["check_rules"].get(k, default)) for k, _, default in id_scan.RULES}
     if any(v not in dict(id_scan.SEVERITIES) for v in rules.values()):
-        return "Each ID check finding fails the check, sends the case to an analyst, or is a note only."
+        return "Each ID check finding fails the check, sends the case to an analyst, is a note only, or is switched off."
+    if any(rules[k] == id_scan.OFF for k in id_scan.ALWAYS_ON):
+        return ("The identity-document check and the name, date of birth and number check cannot be switched off: "
+                "without them nobody can be screened.")
     suggest = {k: f.get(f"suggest_{k}", s["ai_suggestion"].get(k)) for k in id_screening.SUGGESTION}
     if any(v not in id_screening.RESOLUTIONS for v in suggest.values()):
         return "Each AI answer suggests a true match, a possible match or a false positive."
