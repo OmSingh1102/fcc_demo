@@ -263,6 +263,20 @@ LexisNexis or Dow Jones by one more connector; the deciding models), each
 marked in use, connected, ready for a key or can be added. Every name and
 number on it is read from Settings and the cases, not written in.
 
+**New application** (`/application`, opened by *Start the demo* on How it
+works, and second in the left menu; `templates/application.html`,
+`app._application`). One application on one page. Empty, it imports an ID
+(an upload, or one of the sample pictures) with the sections it fills
+waiting below, shimmering while the AI reads. Filled
+(`/application/<case>`): a step bar (import, data captured, verification,
+export as JSON); the ID verification details (created on, workflow, case
+ID, the reader; the ID image, the data captured, the watchlist result); the
+verification results, the SOP checklist's four steps as modules, each
+opening its checks; and beside them the status, why a person is needed,
+the flags found (the hits in one line) and the comments, with links to the
+full case, the hits and the export. An upload from it comes back to it;
+nothing on it is stored apart from the case itself.
+
 **Sample IDs** (`fincrime/documents/samples.py`; *Or pick a sample ID* on
 `/scan`). Eleven sample IDs. Ten are made-up documents drawn by `svg_cards`,
 each marked SPECIMEN with a silhouette for a photo; the eleventh is a photo,

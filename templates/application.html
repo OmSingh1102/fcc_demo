@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+{# One application on one page: the demo's start. Empty, it imports an ID (an upload or a sample ID) with the
+   sections it fills waiting below; filled, it shows the ID and the data captured, the verification results by
+   module (the SOP checklist's steps), and beside them the status, the flags found and the comments. #}
+{% if s %}{% set f = (s.read or {}).fields or {} %}{% set name = f.full_name or ((f.surname or '') ~ ' ' ~ (f.given_names or ''))|trim or s.id %}{% endif %}
+{% block title %}{% if s %}{{ name }} · Application{% else %}New application{% endif %}{% endblock %}
+{% set MARK = {'ok': '✓', 'fail': '✕', 'warn': '!', 'wait': '…', 'info': 'i', 'na': '–'} %}
+{% set TONE = {'ok': 'emerald', 'fail': 'rose', 'warn': 'amber', 'wait': 'blue', 'info': 'slate', 'na': 'slate'} %}
+
+{% block extra_css %}
+<style>
+    .mt-4 { margin-top: 4px; }
+    .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--primary-soft); border-top-color: var(--primary);
+               animation: ap-spin .8s linear infinite; flex: none; }
+    @keyframes ap-spin { to { transform: rotate(360deg); } }
+    .ap-crumbs { font-size: 12px; color: var(--muted-foreground); margin-top: 4px; }
+    .ap-crumbs a { color: var(--muted-foreground); }
+    .ap-crumbs b { color: var(--foreground); font-weight: 600; }
+
+    /* the flow: import, data captured, verification, export */
+    .ap-steps { list-style: none; margin: 0 0 14px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .ap-steps li { display: flex; gap: 10px; align-items: center; background: var(--card); border: 1px solid var(--border);
+                    border-radius: var(--radius-lg); padding: 10px 12px; box-shadow: var(--shadow-sm); }
+    .ap-steps li b { display: block; font-size: 13px; }
+    .ap-steps li span.ap-step-sub { display: block; font-size: 11.5px; color: var(--muted-foreground); }
+    .ap-step-ic { flex: none; width: 34px; height: 34px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center;
+                   background: var(--muted); color: var(--muted-foreground); }
+    .ap-step-ic svg { width: 18px; height: 18px; }
+    .ap-steps li.now .ap-step-ic { background: var(--primary-soft); color: var(--primary-strong); }
+    .ap-steps li.done .ap-step-ic { background: #dcfce7; color: #15803d; }
+    .ap-steps a.ap-export { color: inherit; text-decoration: none; display: flex; gap: 10px; align-items: center; width: 100%; }
+    .ap-steps a.ap-export:hover b { color: var(--primary-strong); }
+
+    .ap-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
+    .ap-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+    .ap-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; }
+    .ap-title svg { width: 18px; height: 18px; color: var(--primary-strong); }
+    .ap-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
+    .ap-meta { display: flex; flex-wrap: wrap; gap: 6px 26px; font-size: 12.5px; padding: 0 16px 12px; border-bottom: 1px solid var(--border); }
+    .ap-meta span { color: var(--muted-foreground); margin-right: 6px; }
+
+    /* ID verification details: the ID, the data captured, the watchlist */
+    .ap-cards { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.15fr) minmax(0, 0.95fr); gap: 12px; padding: 14px 16px 16px; }
+    .ap-doc { position: relative; margin: 0; background: #2b2b2b; border-radius: var(--radius-lg); overflow: hidden; min-height: 190px;
+               display: flex; align-items: center; justify-content: center; }
+    .ap-doc img { width: 100%; height: 100%; max-height: 260px; object-fit: contain; display: block; }
+    .ap-doc figcaption { position: absolute; right: 8px; bottom: 8px; background: rgba(255,255,255,.92); color: #111; border-radius: 6px;
+                          font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 3px 7px; }
+    .ap-box { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; display: flex; flex-direction: column; background: var(--card); }
+    .ap-box-head { background: var(--primary); color: var(--primary-foreground); padding: 8px 12px; font-weight: 600; font-size: 13px;
+                    display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .ap-box-head.plain { background: var(--muted); color: var(--foreground); }
+    .ap-box-head.stack { flex-direction: column; align-items: flex-start; gap: 1px; }
+    .ap-box-head small { font-weight: 500; opacity: .85; font-size: 11px; }
+    .ap-box dl { margin: 0; padding: 8px 12px 10px; display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 12.5px; }
+    .ap-box dt { color: var(--muted-foreground); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; white-space: nowrap; }
+    .ap-box dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+    .ap-box .ap-box-body { padding: 10px 12px; font-size: 12.5px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+    .ap-big { font-size: 22px; font-weight: 600; line-height: 1.1; }
+    .ap-hit { display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+    .ap-hit:first-of-type { border-top: 0; padding-top: 0; }
+    .ap-more { margin-top: auto; font-size: 12px; font-weight: 600; }
+
+    /* verification results: the modules, and the checks of the one chosen */
+    .ap-results { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: 260px; }
+    .ap-modules { border-right: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .ap-modules .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted-foreground); margin: 2px 4px 4px; }
+    .ap-mod { display: flex; gap: 9px; align-items: center; width: 100%; text-align: left; border: 1px solid transparent; background: none;
+               border-radius: var(--radius-md); padding: 8px 9px; cursor: pointer; font: inherit; color: var(--foreground); }
+    .ap-mod:hover { background: var(--muted); }
+    .ap-mod[aria-selected="true"] { background: var(--primary-soft); border-color: var(--primary); }
+    .ap-mod b { display: block; font-size: 13px; font-weight: 600; }
+    .ap-mod small { display: block; font-size: 11.5px; color: var(--muted-foreground); }
+    .ap-panel { padding: 12px 16px 16px; min-width: 0; }
+    .ap-panel h4 { margin: 0 0 2px; font-size: 14px; }
+    .ap-panel table td:first-child { width: 34%; font-weight: 600; }
+    .ap-panel table td:nth-child(2) { width: 1%; white-space: nowrap; }
+    .ap-panel .tiny.muted { display: block; }
+
+    /* beside: status, flags, comments */
+    .ap-side { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 12px; }
+    .ap-side .card-body { display: flex; flex-direction: column; gap: 10px; font-size: 12.5px; }
+    .ap-side h5 { margin: 0; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted-foreground); font-weight: 600; }
+    .ap-flag { display: grid; grid-template-columns: 20px 1fr; gap: 6px; align-items: start; }
+    .ap-flag .ck-mark { margin: 1px 0 0; }
+    .ap-comment { border-left: 3px solid var(--border); padding: 2px 0 2px 9px; }
+    .ap-actions { display: flex; flex-direction: column; gap: 6px; }
+    .ap-actions .btn { justify-content: flex-start; }
+
+    /* the import, and what it fills while the AI reads */
+    .ap-import { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 16px; }
+    .ap-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 170px; padding: 18px;
+                border: 2px dashed var(--border); border-radius: var(--radius-lg); background: var(--muted); cursor: pointer; text-align: center; }
+    .ap-drop.over, .ap-drop:hover { border-color: var(--primary); background: var(--primary-tint); }
+    .ap-drop svg { width: 28px; height: 28px; color: var(--primary-strong); }
+    .ap-drop input { max-width: 220px; font-size: 12px; }
+    .ap-samples { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+    .ap-samples form { margin: 0; }
+    .ap-sample { width: 100%; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-md); background: #2b2b2b; cursor: pointer; display: block; }
+    .ap-sample:hover, .ap-sample:focus-visible { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
+    .ap-sample img { width: 100%; height: 66px; object-fit: contain; display: block; }
+    .ap-skel { display: block; height: 10px; border-radius: 5px; background: var(--muted); margin: 7px 0; }
+    .ap-skel.w40 { width: 40%; } .ap-skel.w60 { width: 60%; } .ap-skel.w80 { width: 80%; } .ap-skel.tall { height: 150px; border-radius: var(--radius-lg); }
+    .ap-waiting { opacity: .75; }
+    .reading .ap-skel { background: linear-gradient(90deg, var(--muted) 0%, var(--primary-soft) 50%, var(--muted) 100%); background-size: 200% 100%;
+                         animation: ap-shimmer 1.2s linear infinite; }
+    @keyframes ap-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+    #ap-reading { display: none; }
+    .reading #ap-reading { display: flex; }
+    .reading .ap-sample, .reading .ap-drop { pointer-events: none; opacity: .6; }
+
+    @media (max-width: 1200px) { .ap-grid { grid-template-columns: 1fr; } .ap-side { position: static; }
+                                 .ap-cards { grid-template-columns: 1fr 1fr; } .ap-doc { grid-column: 1 / -1; } }
+    @media (max-width: 860px) { .ap-steps { grid-template-columns: 1fr 1fr; } .ap-results { grid-template-columns: 1fr; }
+                                .ap-modules { border-right: 0; border-bottom: 1px solid var(--border); }
+                                .ap-cards, .ap-import { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div><h2>{% if s %}Application details{% else %}New application{% endif %}</h2>
+        <div class="ap-crumbs"><a href="{{ url_for('scan_id') }}">Cases</a> › ID verification › <b>{{ name if s else 'New application' }}</b></div></div>
+    {% if s %}<a class="btn btn-outline" href="{{ url_for('application') }}" id="ap-new">{{ icon('plus') }} New application</a>{% endif %}
+</div>
+
+<ol class="ap-steps" id="ap-steps">
+    <li class="{{ 'done' if s else 'now' }}"><span class="ap-step-ic">{{ icon('upload') }}</span>
+        <div><b>Import</b><span class="ap-step-sub">a photo or scan of the ID</span></div></li>
+    <li class="{{ 'done' if s and s.read }}"><span class="ap-step-ic">{{ icon('file-text') }}</span>
+        <div><b>Data captured</b><span class="ap-step-sub">name, date of birth, number, address…</span></div></li>
+    <li class="{{ 'done' if s and s.read }}"><span class="ap-step-ic">{{ icon('shield-check') }}</span>
+        <div><b>Verification</b><span class="ap-step-sub">the SOP checks and the watchlist</span></div></li>
+    <li>{% if s %}<a class="ap-export" href="{{ url_for('scan_json', scan_id=s.id) }}" id="ap-export">{% endif %}<span class="ap-step-ic">{{ icon('download') }}</span>
+        <div><b>Export</b><span class="ap-step-sub">JSON, for any system</span></div>{% if s %}</a>{% endif %}</li>
+</ol>
+
+{% if not s %}
+{# ── empty: the import, and the sections it will fill ── #}
+<div class="ap-grid" id="ap-page">
+    <div class="ap-main">
+        <div class="card" id="ap-import">
+            <div class="card-head"><div><div class="ap-title">{{ icon('upload') }} Import</div>
+                <div class="card-sub">a photo or scan of the ID: JPEG, PNG or WebP, up to 10 MB</div></div></div>
+            <div class="card-body ap-import">
+                <form method="post" action="{{ url_for('scan_id') }}" enctype="multipart/form-data" id="ap-upload" class="ap-read">
+                    <input type="hidden" name="next" value="application"><input type="hidden" name="via" value="ai">
+                    <input type="hidden" name="model" value="{{ default_model }}">
+                    <label class="ap-drop" for="ap-file">
+                        {{ icon('upload') }}
+                        <span class="strong" id="ap-file-name">Choose the ID image</span>
+                        <span class="small muted">or drop it here</span>
+                        <input type="file" id="ap-file" name="image" accept="image/jpeg,image/png,image/webp" required>
+                    </label>
+                    <button type="submit" class="btn btn-primary mt-8" id="ap-submit"{% if not model_ready %} disabled title="No AI model is configured"{% endif %}>{{ icon('zoom-in') }} Read with AI</button>
+                </form>
+                <div id="ap-samples">
+                    <div class="small strong mb-8">Or a sample ID</div>
+                    <div class="ap-samples">
+                        {% for x in samples %}
+                        <form method="post" action="{{ url_for('scan_id') }}" class="ap-read">
+                            <input type="hidden" name="next" value="application"><input type="hidden" name="via" value="ai">
+                            <input type="hidden" name="model" value="{{ default_model }}"><input type="hidden" name="sample" value="{{ x.id }}">
+                            <button type="submit" class="ap-sample" title="Read sample ID {{ loop.index }}"{% if not model_ready %} disabled{% endif %}>
+                                <img src="{{ url_for('scan_sample_photo' if x.image else 'scan_sample_image', sample_id=x.id) }}" alt="Sample ID {{ loop.index }}" loading="lazy"></button>
+                        </form>
+                        {% endfor %}
+                    </div>
+                    <div class="tiny muted mt-8">No customer's ID needed. Each is read and screened exactly as an upload is.</div>
+                </div>
+            </div>
+            <div class="card-body small" id="ap-reading" style="gap:8px;align-items:center;padding-top:0">
+                <span class="spinner"></span><b>The AI is reading the document and screening the name…</b><span class="muted">about half a minute</span></div>
+        </div>
+        <div class="card ap-waiting" id="ap-idv">
+            <div class="card-head"><div class="ap-title">{{ icon('user-check') }} ID verification details</div>
+                <span class="ap-status">Status: <span class="badge slate">Waiting for an ID</span></span></div>
+            <div class="ap-cards">
+                <div><span class="ap-skel tall"></span></div>
+                <div><span class="ap-skel w60"></span><span class="ap-skel w80"></span><span class="ap-skel w40"></span><span class="ap-skel w80"></span><span class="ap-skel w60"></span></div>
+                <div><span class="ap-skel w40"></span><span class="ap-skel w80"></span><span class="ap-skel w60"></span></div>
+            </div>
+        </div>
+        <div class="card ap-waiting" id="ap-results">
+            <div class="card-head"><div class="ap-title">{{ icon('activity') }} Verification results</div>
+                <span class="ap-status">Status: <span class="badge slate">Not started</span></span></div>
+            <div class="card-body small muted">Read the ID · check the document · screen the name · the outcome: each fills in here once the ID is read.
+                <span class="ap-skel w80 mt-8"></span><span class="ap-skel w60"></span></div>
+        </div>
+    </div>
+    <aside class="ap-side">
+        <div class="card"><div class="card-body">
+            <div><h5>Status</h5><div class="mt-4"><span class="badge slate">Waiting for an ID</span></div></div>
+            <div><h5>Flags found</h5><div class="muted mt-4">None yet</div></div>
+            <div><h5>Comments</h5><div class="muted mt-4">None yet</div></div>
+        </div></div>
+    </aside>
+</div>
+
+{% else %}
+{# ── filled: one application ── #}
+{% set hits = a.hits %}
+<div class="ap-grid" id="ap-page">
+    <div class="ap-main">
+        <div class="card pad-0" id="ap-idv">
+            <div class="card-head"><div class="ap-title">{{ icon('user-check') }} ID verification details</div>
+                <span class="ap-status">Status: <span class="badge {{ a.status.tone }}" id="ap-status">{{ a.status.label }}</span></span></div>
+            <div class="ap-meta">
+                <div><span>Created on</span>{{ s.at[:16] }}</div>
+                <div><span>Workflow</span>ID screening · SOP {{ sop.version }}</div>
+                <div><span>Case ID</span><span class="mono" style="color:var(--foreground)">{{ s.id }}</span></div>
+                {% if a.reader %}<div><span>Read by</span>{{ a.reader }}</div>{% endif %}
+                {% if s.sample %}<div><span class="tag" id="ap-sample-tag">Sample ID</span></div>{% endif %}
+            </div>
+            <div class="ap-cards">
+                <figure class="ap-doc" id="ap-doc">
+                    <a href="{{ url_for('scan_image', scan_id=s.id) }}" target="_blank" rel="noopener" title="Open the image"><img src="{{ url_for('scan_image', scan_id=s.id) }}" alt="The ID as uploaded"></a>
+                    <figcaption>ID · front</figcaption>
+                </figure>
+                <div class="ap-box" id="ap-captured">
+                    <div class="ap-box-head stack"><span>Data captured</span><small>{{ a.doc or 'not read' }}</small></div>
+                    {% if a.captured %}
+                    <dl>{% for c in a.captured %}<dt>{{ c.label }}</dt><dd>{{ c.value }}{% if c.unsure %} <span class="badge amber">unsure</span>{% endif %}</dd>{% endfor %}</dl>
+                    {% else %}
+                    <div class="ap-box-body muted">Nothing could be read from this image.</div>
+                    {% endif %}
+                </div>
+                <div class="ap-box" id="ap-watchlist">
+                    <div class="ap-box-head plain"><span>Watchlist</span><small>{{ a.source }}</small></div>
+                    <div class="ap-box-body">
+                        {% if a.screen_error %}<div class="rose-text">{{ a.screen_error }}</div>
+                        {% elif not s.screening %}<div class="muted">Not screened: the ID was not read.</div>
+                        {% elif not hits %}<div class="ap-big">No match</div><div class="muted">No sanctions, PEP or adverse-media record matches the name.</div>
+                        {% else %}<div class="ap-big">{{ hits|length }} hit{{ 's' if hits|length != 1 }}</div>
+                            {% for h in hits[:3] %}<div class="ap-hit"><div><b>{{ h.name }}</b><div class="tiny muted">{{ h.category }}</div></div>
+                                <span class="tiny nowrap">{% if h.resolution %}{{ h.resolution.status }}{% elif (h.ai or {}).suggested %}AI: {{ h.ai.suggested }}{% else %}waiting{% endif %}</span></div>{% endfor %}
+                            {% if hits|length > 3 %}<div class="tiny muted">and {{ hits|length - 3 }} more</div>{% endif %}
+                        {% endif %}
+                        {% if hits %}<a class="ap-more" href="{{ url_for('scan_alerts', scan_id=s.id) }}" id="ap-hits-link">Review the hits →</a>{% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card pad-0" id="ap-results">
+            {% set T = a.totals %}
+            <div class="card-head"><div class="ap-title">{{ icon('activity') }} Verification results</div>
+                <span class="ap-status">Status: {% if T.fail %}<span class="badge rose">{{ T.fail }} failed</span>{% elif T.warn %}<span class="badge amber">{{ T.warn }} to look at</span>{% else %}<span class="badge emerald">Passed</span>{% endif %}</span></div>
+            <div class="ap-results">
+                <div class="ap-modules" role="tablist" aria-label="Modules">
+                    <div class="lbl">Modules</div>
+                    {% for m in a.modules %}
+                    <button type="button" class="ap-mod" role="tab" id="ap-mod-{{ m.n }}" aria-controls="ap-panel-{{ m.n }}" aria-selected="{{ 'true' if m.n == a.focus else 'false' }}">
+                        <span class="ck-mark {{ m.state }}" title="{{ a.words[m.state] }}">{{ MARK[m.state] }}</span>
+                        <span><b>{{ m.name }}</b><small>{{ m.rows|length }} check{{ 's' if m.rows|length != 1 }} · {{ a.words[m.state]|lower }}</small></span>
+                    </button>
+                    {% endfor %}
+                </div>
+                {% for m in a.modules %}
+                <div class="ap-panel" role="tabpanel" id="ap-panel-{{ m.n }}" aria-labelledby="ap-mod-{{ m.n }}"{% if m.n != a.focus %} hidden{% endif %}>
+                    <h4>{{ m.n }} · {{ m.name }}</h4>
+                    <div class="tiny muted mb-8">what was checked, what was found, and who checked it</div>
+                    <div class="tbl-scroll"><table class="tbl dense">
+                        <tbody>{% for r in m.rows %}
+                        <tr class="ck-{{ r.state }}"><td><span class="ck-mark {{ r.state }}">{{ MARK[r.state] }}</span> {{ r.rule }}</td>
+                            <td><span class="badge {{ TONE[r.state] }}">{{ a.words[r.state] }}</span></td>
+                            <td class="small">{{ r.detail or '-' }}{% if r.effect and r.state != 'ok' %}<span class="tiny muted">{{ r.effect }}</span>{% endif %}</td>
+                            <td class="small nowrap muted">{{ r.by|who }}</td></tr>
+                        {% endfor %}</tbody>
+                    </table></div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <aside class="ap-side" id="ap-side">
+        <div class="card"><div class="card-body">
+            <div><h5>Status</h5><div class="mt-4"><span class="badge {{ a.status.tone }}">{{ a.status.label }}</span></div>
+                {% if a.status.by %}<div class="tiny muted mt-4">by {{ a.status.by|who }}{% if a.status.at %} · {{ a.status.at[:16] }}{% endif %}</div>{% endif %}</div>
+            {% if a.reasons %}<div><h5>Why a person</h5><ul class="small" style="margin:4px 0 0;padding-left:16px">{% for r in a.reasons %}<li>{{ r }}</li>{% endfor %}</ul></div>{% endif %}
+            <div id="ap-flags"><h5>Flags found</h5>
+                {% if a.flags %}<div class="mt-4" style="display:flex;flex-direction:column;gap:6px">{% for r in a.flags %}
+                    <div class="ap-flag"><span class="ck-mark {{ r.state }}">{{ MARK[r.state] }}</span><div><b>{{ r.rule }}</b><div class="tiny muted">{{ (r.detail or '')|truncate(110) }}</div></div></div>{% endfor %}</div>
+                {% else %}<div class="muted mt-4">None</div>{% endif %}</div>
+            <div id="ap-comments"><h5>Comments</h5>
+                {% if a.comments %}{% for c in a.comments %}<div class="ap-comment mt-4"><div>{{ c.text }}</div><div class="tiny muted">{{ c.by|who }}{% if c.at %} · {{ c.at[:16] }}{% endif %}</div></div>{% endfor %}
+                {% else %}<div class="muted mt-4">No comment yet</div>{% endif %}</div>
+        </div></div>
+        <div class="ap-actions">
+            <a class="btn btn-primary" href="{{ url_for('scan_result', scan_id=s.id) }}" id="ap-open-case">{{ icon('arrow-right') }} Open the full case</a>
+            {% if hits %}<a class="btn btn-outline" href="{{ url_for('scan_alerts', scan_id=s.id) }}">{{ icon('search') }} Review the hits</a>{% endif %}
+            <a class="btn btn-outline" href="{{ url_for('scan_json', scan_id=s.id) }}">{{ icon('download') }} Export JSON</a>
+        </div>
+    </aside>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    // the modules: one panel at a time, by click or the arrow keys
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.ap-mod'));
+    function pick(tab) {
+        tabs.forEach(function (t) {
+            var on = t === tab;
+            t.setAttribute('aria-selected', on ? 'true' : 'false');
+            document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+        });
+    }
+    tabs.forEach(function (t, i) {
+        t.addEventListener('click', function () { pick(t); });
+        t.addEventListener('keydown', function (e) {
+            var j = e.key === 'ArrowDown' ? i + 1 : e.key === 'ArrowUp' ? i - 1 : null;
+            if (j === null) return;
+            e.preventDefault();
+            var next = tabs[(j + tabs.length) % tabs.length]; next.focus(); pick(next);
+        });
+    });
+    // the import: the file's name, a drop, and the page reading once sent (once)
+    var input = document.getElementById('ap-file');
+    if (!input) return;
+    var drop = input.closest('.ap-drop'), label = document.getElementById('ap-file-name'), page = document.getElementById('ap-page'), sent = false;
+    input.addEventListener('change', function () { if (input.files.length) label.textContent = input.files[0].name; });
+    ['dragover', 'dragenter'].forEach(function (e) { drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.add('over'); }); });
+    ['dragleave', 'drop'].forEach(function (e) { drop.addEventListener(e, function () { drop.classList.remove('over'); }); });
+    drop.addEventListener('drop', function (ev) {
+        ev.preventDefault();
+        if (ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; label.textContent = input.files[0].name; }
+    });
+    document.querySelectorAll('.ap-read').forEach(function (form) {
+        form.addEventListener('submit', function (ev) {
+            if (sent) { ev.preventDefault(); return; }
+            sent = true;
+            page.classList.add('reading');
+            var b = document.getElementById('ap-submit');
+            if (b) b.textContent = 'Reading…';
+        });
+    });
+})();
+</script>
+{% endblock %}

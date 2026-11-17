@@ -242,7 +242,7 @@ _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
               ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"), ("model_evaluation", "model_evaluation"), ("scan", "scan_id"),
-              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"), ("overview", "overview"), ("quality", "quality"))
+              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"), ("overview", "overview"), ("quality", "quality"), ("application", "application"))
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -277,6 +277,8 @@ def _side_nav():
             {"title": "Screening", "items": [
                 {"label": "How it works", "title": "The demo's workflow, before the tool", "icon": "home", "endpoint": "overview",
                  "active": owner == "overview"},
+                {"label": "New application", "title": "Import an ID and see it verified, on one page", "icon": "plus",
+                 "endpoint": "application", "active": owner == "application"},
                 {"label": "Cases", "title": "Upload an ID, screen it on World-Check", "icon": "user-check", "endpoint": "scan_id",
                  "active": owner == "scan_id", "count": sum(1 for s in _scans() if s.get("status") == "open")}]},
             {"title": "Setup", "items": setup},
@@ -2133,6 +2135,8 @@ def scan_id():
                                auto_on=SCREEN_SETTINGS.get("auto_verify"), watched=sum(1 for s in scans if _watched(s)),
                                source=id_screening.source_label(SCREEN_SETTINGS), outcome=id_screening.outcome,
                                samples=samples.shown(), sample_cost=_sample_cost())
+    to_app = request.form.get("next") == "application"     # sent from the New application page: back there
+    home = url_for("application") if to_app else url_for("scan_id")
     sample = samples.get(request.form.get("sample", ""))
     if sample:                                      # a sample ID: the console's own image, read as an upload is
         data, name = samples.png(sample["id"]), f"sample-{sample['id']}.png"
@@ -2140,16 +2144,16 @@ def scan_id():
         f = request.files.get("image")
         if not f or not f.filename:
             flash("Choose a photo or scan of the ID document, or pick a sample ID.", "error")
-            return redirect(url_for("scan_id"))
+            return redirect(home)
         data, name = f.read(), f.filename
     reader = OCR_READER["id"] if request.form.get("via") == "ocr" else (request.form.get("model") or None)
     ok, record = _run_action(_new_scan, data, name, reader, _actor(), sample=sample)
     if not ok:
-        return redirect(url_for("scan_id"))
+        return redirect(home)
     for message in (record.get("fallback"), record["error"], (record.get("screening") or {}).get("error")):
         if message:
             flash(message, "error")
-    return redirect(url_for("scan_result", scan_id=record["id"]))
+    return redirect(url_for("application_case" if to_app else "scan_result", scan_id=record["id"]))
 
 
 @app.route("/scan/samples/<sample_id>.svg")
@@ -2492,6 +2496,78 @@ def _aadhaar_prefill(rec):
     digits = re.sub(r"\D", "", f.get("document_number") or "")
     dob = (f.get("date_of_birth") or "").strip()
     return {"dob": dob if re.fullmatch(r"\d{4}-\d{2}-\d{2}", dob) else "", "number": digits if len(digits) == 12 else ""}
+
+
+# ─── New application: the demo's start, one application on one page ─────────
+_STATE_WORDS = {"ok": "Passed", "fail": "Failed", "warn": "To look at", "wait": "Waiting", "info": "Note", "na": "Not run"}
+
+
+def _module_state(rows):
+    """A module's mark: its worst rule (failed, then to look at, then waiting); not run when none ran."""
+    states = {r["state"] for r in rows}
+    for state in ("fail", "warn", "wait"):
+        if state in states:
+            return state
+    return "na" if states <= {"na"} else "ok"
+
+
+def _application(rec):
+    """What the application page shows of a case: its status, the data the
+    reader captured, the screening, the SOP checklist's steps as modules,
+    the flags and the comments. All of it is the case's own record."""
+    read, sc, closed = rec.get("read") or {}, rec.get("screening") or {}, rec.get("closed") or {}
+    f, unsure = read.get("fields") or {}, set(read.get("uncertain") or [])
+    skip = ("surname", "given_names") if f.get("full_name") else ()
+    captured = [{"label": label, "value": f[key], "unsure": key in unsure or label in unsure}
+                for key, label in id_scan.FIELDS if f.get(key) and key not in skip]
+    ck = id_screening.checklist(rec, SCREEN_SETTINGS)
+    summary = id_screening.case_summary(rec, SCREEN_SETTINGS) or {}
+    if rec.get("status") == "closed":
+        out = closed.get("outcome") or id_screening.outcome(rec)
+        status = {"label": "Auto-verified" if closed.get("auto") else f"Closed: {out}",
+                  "tone": "emerald" if out in ("No match", "Cleared") else "rose", "by": closed.get("by", ""), "at": closed.get("at", "")}
+    elif rec.get("qc_sample"):
+        status = {"label": "QC sample: with a person", "tone": "amber", "by": "", "at": ""}
+    else:
+        status = {"label": summary.get("label") or "Needs a person", "tone": summary.get("tone") or "amber", "by": "", "at": ""}
+    modules = [{"n": i + 1, "name": st["step"].split("·", 1)[-1].strip(), "rows": st["rows"], "state": _module_state(st["rows"])}
+               for i, st in enumerate(ck["steps"])]
+    flags, hit_rows = [], []
+    for m in modules:
+        if m["name"] == "Outcome":
+            continue
+        for r in m["rows"]:
+            if r["state"] in ("fail", "warn"):
+                (hit_rows if r["rule"].startswith("Hit: ") else flags).append(r)
+    if len(hit_rows) == 1:
+        flags.append(hit_rows[0])
+    elif hit_rows:                                  # the hits in one line: each is on the Screen the name module
+        flags.append({"state": "warn", "rule": f"{len(hit_rows)} watchlist hits for an analyst",
+                      "detail": "; ".join(r["rule"][len("Hit: "):].split(" (")[0] for r in hit_rows)})
+    comments = ([{"by": closed.get("by", ""), "at": closed.get("at", ""), "text": closed["note"]}] if closed.get("note") else []) + [
+        {"by": h["resolution"].get("by", ""), "at": h["resolution"].get("at", ""), "text": f"{h.get('name', '')}: {h['resolution']['note']}"}
+        for h in sc.get("hits") or [] if (h.get("resolution") or {}).get("note")]
+    return {"captured": captured, "doc": " · ".join(x for x in (read.get("document_type"), read.get("issuing_country")) if x),
+            "status": status, "reasons": summary.get("reasons") or [], "modules": modules, "totals": ck["totals"],
+            "focus": next((m["n"] for m in modules if m["state"] in ("fail", "warn")), 1), "flags": flags, "comments": comments,
+            "hits": sc.get("hits") or [], "source": id_screening.SOURCES.get(sc.get("source"), sc.get("source") or ""),
+            "screen_error": sc.get("error", ""), "reader": (rec.get("model") or {}).get("label", ""), "words": _STATE_WORDS}
+
+
+@app.route("/application")
+def application():
+    """The demo's start: a new application, imported by an upload or a
+    sample ID, the sections it fills waiting below."""
+    return render_template("application.html", s=None, samples=samples.shown(), model_ready=id_scan.model_ready(),
+                           default_model=SCREEN_SETTINGS["reader_model"])
+
+
+@app.route("/application/<scan_id>")
+def application_case(scan_id):
+    """One application as one page: the ID and the data captured, the
+    verification results by module, the status, the flags and the comments."""
+    rec = _scan(scan_id)
+    return render_template("application.html", s=rec, a=_application(rec), sop=id_screening.sop_current(_sop_stored()))
 
 
 @app.route("/scan/<scan_id>/screening")
