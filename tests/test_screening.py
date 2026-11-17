@@ -468,17 +468,21 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertEqual([(w["text"], w["width"], w["share"]) for w in qa["charts"]["warnings"]],
                          [("Portrait image not detected", 100, 33), ("Unable to determine address location", 100, 33)])
 
-    def test_the_application_page_imports_an_id_and_shows_it_verified(self):
+    def test_cases_imports_a_new_application_and_shows_it_verified(self):
         c = self.client()
-        self.assertIn('href="/application" id="lp-start"', c.get("/overview").data.decode("utf-8"))   # Start the demo opens it
-        page = c.get("/application").data.decode("utf-8")
-        for needle in ('id="ap-import"', 'id="ap-samples"', 'id="ap-idv"', 'id="ap-results"', "Waiting for an ID", 'href="/application"',
+        self.assertIn('href="/scan" id="lp-start"', c.get("/overview").data.decode("utf-8"))           # Start the demo opens Cases
+        page = c.get("/scan").data.decode("utf-8")
+        for needle in ('id="ap-steps"', 'id="scan-form"', "New application", 'id="scan-samples"', 'id="scan-cases"',
                        '<input type="hidden" name="next" value="application">'):
-            self.assertIn(needle, page)
-        self.assertEqual(page.count('class="ap-sample"'), 7)
-        # nothing chosen: back to the page, which says so
+            self.assertIn(needle, page)                                                  # the import, then the list: one page
+        self.assertLess(page.index('id="scan-form"'), page.index('id="scan-cases"'))
+        self.assertEqual(page.count('<input type="hidden" name="next" value="application">'), 8)   # the upload and the 7 samples
+        self.assertNotIn('href="/application"', page)                                   # no second menu item
+        r = c.get("/application")
+        self.assertTrue(r.headers["Location"].endswith("/scan#scan-form"))              # the old address: the import on Cases
+        # nothing chosen: back to Cases
         r = c.post("/scan", data={"next": "application"}, content_type="multipart/form-data")
-        self.assertTrue(r.headers["Location"].endswith("/application"))
+        self.assertTrue(r.headers["Location"].endswith("/scan"))
         result = {"read": a_read(), "model": {"model": "m", "label": "Model", "tokens_in": 1, "tokens_out": 1, "cost": 0.0, "seconds": 1.0},
                   "checks": id_scan.checks(a_read()), "error": ""}
         with mock.patch.object(id_scan, "scan", lambda jpeg, *a, **k: dict(result)), mock.patch.object(id_screening, "decide", self.decide):
@@ -491,6 +495,7 @@ class ScreeningBookPageTests(unittest.TestCase):
         self.assertEqual((a["focus"], a["status"]["label"]), (3, "Needs a person"))      # the hit: the module with something to look at
         self.assertEqual([f["rule"] for f in a["flags"]], ["Hit: UPADHYAY, Ashish (WC-675768)"])
         self.assertIn({"label": "Document number", "value": "S3321051", "unsure": False}, a["captured"])
+        self.assertIn(f'href="/application/{sid}" title="Open the application"', c.get("/scan").data.decode("utf-8"))   # the list opens it
         page = c.get(f"/application/{sid}").data.decode("utf-8")
         for needle in ("Application details", "ASHISH UPADHYAY", 'id="ap-captured"', "S3321051", 'id="ap-watchlist"', "1 hit",
                        'id="ap-mod-3" aria-controls="ap-panel-3" aria-selected="true"', "Needs a person", 'id="ap-flags"',
@@ -840,7 +845,7 @@ class ScreeningBookPageTests(unittest.TestCase):
         c = self.client()
         with mock.patch.object(ocr, "available", lambda: True):
             page = c.get("/scan").data.decode("utf-8")
-            self.assertIn('id="scan-submit-ocr"', page)
+            self.assertNotIn("Read with OCR", page)                                   # no button on Cases: OCR is sent as a form field
             self.assertIn("Read with AI", page)
             zeb = a_read(name="ZEBEDIAH QUARTERMAINE", surname="QUARTERMAINE", given="ZEBEDIAH")
             zeb.update(ocr_text="PASSPORT QUARTERMAINE", photo_judged=False, mrz_by="OCR's reading", fields_from_mrz=True)
@@ -854,7 +859,6 @@ class ScreeningBookPageTests(unittest.TestCase):
         for needle in ('id="scan-ocr-text"', "PASSPORT QUARTERMAINE", "free (on this machine)", "Not judged"):
             self.assertIn(needle, page)
         with mock.patch.object(ocr, "available", lambda: False):
-            self.assertIn('id="scan-submit-ocr" disabled', c.get("/scan").data.decode("utf-8"))
             r = c.post("/scan", data={"image": (io.BytesIO(self.png("ivory")), "id.png"), "via": "ocr"}, content_type="multipart/form-data")
         rec = fcc._scan(r.headers["Location"].rsplit("/", 1)[-1])
         self.assertIn("not installed", rec["error"])

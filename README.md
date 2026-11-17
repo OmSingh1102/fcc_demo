@@ -263,19 +263,19 @@ LexisNexis or Dow Jones by one more connector; the deciding models), each
 marked in use, connected, ready for a key or can be added. Every name and
 number on it is read from Settings and the cases, not written in.
 
-**New application** (`/application`, opened by *Start the demo* on How it
-works, and second in the left menu; `templates/application.html`,
-`app._application`). One application on one page. Empty, it imports an ID
-(an upload, or one of the sample pictures) with the sections it fills
-waiting below, shimmering while the AI reads. Filled
-(`/application/<case>`): a step bar (import, data captured, verification,
-export as JSON); the ID verification details (created on, workflow, case
-ID, the reader; the ID image, the data captured, the watchlist result); the
-verification results, the SOP checklist's four steps as modules, each
-opening its checks; and beside them the status, why a person is needed,
-the flags found (the hits in one line) and the comments, with links to the
-full case, the hits and the export. An upload from it comes back to it;
-nothing on it is stored apart from the case itself.
+**Cases and New application** (`/scan`, opened by *Start the demo* on How
+it works; `templates/scan.html`, `templates/application.html`,
+`templates/_ap.html`, `app._application`). One menu item. On top, a step bar
+(import, data captured, verification, export as JSON) and the New
+application import: an upload (with the reading model, or OCR) or one of the
+sample pictures; below, every case. Once read, the case opens as its
+application (`/application/<case>`; a case ID in the list opens it too): the
+ID verification details (created on, workflow, case ID, the reader; the ID
+image, the data captured, the watchlist result); the verification results,
+the SOP checklist's four steps as modules, each opening its checks; and
+beside them the status, why a person is needed, the flags found (the hits in
+one line) and the comments, with links to the full case, the hits and the
+export. Display only: nothing on it is stored apart from the case itself.
 
 **Sample IDs** (`fincrime/documents/samples.py`; *Or pick a sample ID* on
 `/scan`). Eleven sample IDs. Ten are made-up documents drawn by `svg_cards`,
@@ -424,9 +424,10 @@ Settings, nothing of it in the code):
   has its own key (`X-API-Key`, or `Authorization: Bearer`), created by the
   QC lead on Settings, shown once, kept as its SHA-256 only, revocable. The
   case is made exactly as an upload is (`_new_scan`). Working.
-- *OCR (Tesseract)* (`documents/ocr.id_read`): the upload page has two
-  buttons, *Read with AI* (the model chosen above them) and *Read with OCR*
-  (Tesseract on this machine, free, enabled when it is installed). OCR's
+- *OCR (Tesseract)* (`documents/ocr.id_read`): Tesseract on this machine,
+  free, used when it is installed and an upload is sent with `via=ocr` (the
+  Cases page shows only *Read with AI*; its *Read with OCR* button was
+  removed on request on 17 Nov 2026). OCR's
   fields come from a passport's machine-readable zone only (a field whose
   check digit does not add up is marked unsure): on its own OCR cannot tell
   which printed line is the name or which date the birth date, so an ID

@@ -1,65 +1,74 @@
 {% extends "base.html" %}
-{% block title %}Screening cases{% endblock %}
+{# Cases: a new application is imported on top (an upload or a sample picture; it opens as an application once
+   read), and every case is listed below. #}
+{% from "_ap.html" import ap_css, ap_steps with context %}
+{% block title %}Cases{% endblock %}
+
+{% block extra_css %}
+<style>
+{{ ap_css() }}
+    /* the import: a new application */
+    .ap-import { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 18px; }
+    .ap-opts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+    .ap-opts select { flex: 1 1 220px; min-width: 0; }
+    .ap-samples { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+    .ap-samples form { margin: 0; }
+    .sample-tile { width: 100%; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-md); background: #2b2b2b; cursor: pointer; display: block; }
+    .sample-tile:hover, .sample-tile:focus-visible { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
+    .sample-tile img { width: 100%; height: 72px; object-fit: contain; display: block; }
+    #scan-reading { display: none; gap: 8px; align-items: center; padding-top: 0; }
+    .reading #scan-reading { display: flex; }
+    .reading .sample-tile, .reading .scan-drop { pointer-events: none; opacity: .6; }
+    @media (max-width: 860px) { .ap-import { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="page-head">
-    <div><h2>Screening cases</h2>
-        <p>Upload an ID. The AI reads it; the person is searched on World-Check; the AI decides each hit under the <a href="{{ url_for('screening_sop') }}">screening SOP</a>, from similar resolved cases; an analyst confirms. Every upload is a case.</p></div>
+    <div><h2>Cases</h2>
+        <p>Start a new application: import an ID, or pick a sample. The AI reads it, the SOP checks run, the name is screened, and the AI suggests an outcome for every hit under the <a href="{{ url_for('screening_sop') }}">screening SOP</a>; an analyst confirms. Every application is a case in the list below.</p></div>
 </div>
 
-<div class="card mt-12" id="scan-form">
-    <div class="card-head"><div class="card-title">Upload an ID</div>
-        <div class="card-sub">JPEG, PNG or WebP, up to 10 MB · turned upright, resized, EXIF and GPS removed before anything reads it</div></div>
-    <div class="card-body">
-        <form method="post" enctype="multipart/form-data" class="scan-upload" id="scan-upload">
+{{ ap_steps() }}
+
+<div class="card" id="scan-form">
+    <div class="card-head"><div><div class="ap-title">{{ icon('upload') }} New application</div>
+        <div class="card-sub">import a photo or scan of the ID: JPEG, PNG or WebP, up to 10 MB · turned upright, resized, EXIF and GPS removed before anything reads it</div></div></div>
+    <div class="card-body ap-import">
+        <form method="post" enctype="multipart/form-data" id="scan-upload" class="scan-read">
+            <input type="hidden" name="next" value="application">
             <label class="scan-drop" for="scan-file">
                 {{ icon('upload') }}
                 <span class="strong" id="scan-file-name">Choose the ID image</span>
                 <span class="small muted">or drop it here</span>
                 <input type="file" id="scan-file" name="image" accept="image/jpeg,image/png,image/webp" required>
             </label>
-            <div class="scan-options">
-                <label class="small strong" for="scan-model">AI model that reads the document</label>
-                <select name="model" id="scan-model" class="input"{% if not model_ready %} disabled{% endif %}>
+            <div class="ap-opts">
+                <select name="model" id="scan-model" class="input input-sm" title="The AI model that reads the document"{% if not model_ready %} disabled{% endif %}>
                     {% for m in models %}<option value="{{ m.id }}"{% if m.id == default_model %} selected{% endif %}>{{ m.label }} · {% if m.price %}${{ m.price[0] }} / ${{ m.price[1] }} per M tokens{% else %}${{ m.per_page }} a page (Azure){% endif %}</option>{% endfor %}
                 </select>
-                <div class="tiny muted">{% if model_ready %}Through Straive's LLM Foundry gateway; the default is set on <a href="{{ url_for('screening_settings') }}">Settings</a>.{% else %}No model is configured (LLM_FOUNDRY_KEY): the image cannot be read.{% endif %}</div>
-                <div class="tiny muted" id="scan-source">Screened on: <b>{{ source }}</b> (<a href="{{ url_for('screening_settings') }}">change</a>).</div>
-                <div class="row mt-8" style="gap:8px">
-                    <button type="submit" name="via" value="ai" class="btn btn-primary" id="scan-submit"{% if not model_ready %} disabled{% endif %}>{{ icon('zoom-in') }} Read with AI</button>
-                    <button type="submit" name="via" value="ocr" class="btn btn-outline" id="scan-submit-ocr"{% if not ocr_ready %} disabled title="Tesseract is not installed on this machine"{% endif %}>{{ icon('file-text') }} Read with OCR</button>
-                </div>
-                <div class="tiny muted" id="scan-via-note"><b>AI</b>: the model above reads the ID and judges the photo. <b>OCR</b>: Tesseract on this machine, free; it reads the text, takes the fields from a passport's machine-readable zone, and does not judge the photo.</div>
+                <button type="submit" name="via" value="ai" class="btn btn-primary" id="scan-submit" title="The model reads the ID and judges the photo"{% if not model_ready %} disabled{% endif %}>{{ icon('zoom-in') }} Read with AI</button>
             </div>
+            <div class="tiny muted mt-8" id="scan-source">{% if model_ready %}Read through Straive's LLM Foundry gateway (the default model is set on <a href="{{ url_for('screening_settings') }}">Settings</a>){% else %}<span class="rose-text">No model is configured (LLM_FOUNDRY_KEY): the image cannot be read</span>{% endif %} · screened on <b>{{ source }}</b> (<a href="{{ url_for('screening_settings') }}">change</a>).</div>
         </form>
-    </div>
-</div>
-
-<div class="card mt-12" id="scan-samples">
-    <div class="card-head"><div><div class="card-title">Or pick a sample ID</div>
-        <div class="card-sub">{{ samples|length }} sample IDs: no customer's ID needed</div></div></div>
-    <div class="card-body">
-        <div class="tiny muted mb-8" id="sample-cost">A sample is read and screened exactly as an upload is, with the model chosen above: one AI read, and an AI decision per hit{% if sample_cost.didit %}, plus {{ sample_cost.didit|map('first')|join(' and ') }} (${{ '%.2f'|format(sample_cost.didit_total) }} on Didit's account){% else %}; nothing on Didit's account (Settings has its checks off){% endif %}.</div>
-        <div class="sample-grid">
-            {% for x in samples %}
-            <div class="sample-tile" id="sample-{{ x.id }}">
-                {# the picture only: nothing on the tile says what the sample should do #}
-                <img src="{{ url_for('scan_sample_photo' if x.image else 'scan_sample_image', sample_id=x.id) }}" alt="Sample ID {{ loop.index }}" loading="lazy">
-                <form method="post" action="{{ url_for('scan_id') }}" class="sample-form">
+        <div id="scan-samples">
+            <div class="small strong mb-8">Or a sample ID <span class="muted" style="font-weight:400">· {{ samples|length }} sample IDs: no customer's ID needed</span></div>
+            <div class="ap-samples">
+                {% for x in samples %}
+                <form method="post" action="{{ url_for('scan_id') }}" class="scan-read sample-form">
+                    <input type="hidden" name="next" value="application"><input type="hidden" name="via" value="ai">
                     <input type="hidden" name="sample" value="{{ x.id }}"><input type="hidden" name="model" value="{{ default_model }}" class="sample-model">
-                    <button class="btn btn-outline btn-xs" type="submit" name="via" value="ai"{% if not model_ready %} disabled title="No AI model is configured"{% endif %}>{{ icon('zoom-in') }} Read with AI</button>
+                    {# the picture only: nothing on the tile says what the sample should do #}
+                    <button type="submit" class="sample-tile" id="sample-{{ x.id }}" title="Read sample ID {{ loop.index }} with AI"{% if not model_ready %} disabled{% endif %}>
+                        <img src="{{ url_for('scan_sample_photo' if x.image else 'scan_sample_image', sample_id=x.id) }}" alt="Sample ID {{ loop.index }}" loading="lazy"></button>
                 </form>
+                {% endfor %}
             </div>
-            {% endfor %}
+            <div class="tiny muted mt-8" id="sample-cost">A sample is read and screened exactly as an upload is, with the model chosen beside the upload: one AI read, and an AI decision per hit{% if sample_cost.didit %}, plus {{ sample_cost.didit|map('first')|join(' and ') }} (${{ '%.2f'|format(sample_cost.didit_total) }} on Didit's account){% else %}; nothing on Didit's account (Settings has its checks off){% endif %}.</div>
         </div>
     </div>
+    <div class="card-body small" id="scan-reading"><span class="spinner"></span><b>The AI is reading the document and screening the name…</b><span class="muted">about half a minute; the application opens when it is done</span></div>
 </div>
-<style>
-    .sample-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
-    .sample-tile { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px; display: flex; flex-direction: column; gap: 5px; background: var(--card); }
-    .sample-tile img { width: 100%; height: 150px; object-fit: contain; background: #2b2b2b; border-radius: var(--radius-md); }
-    .sample-tile form { margin-top: auto; padding-top: 4px; }
-</style>
 
 <div class="card mt-12 pad-0" id="scan-cases">
     <div class="card-head" style="padding-bottom:10px"><div><div class="card-title">Cases</div>
@@ -76,7 +85,7 @@
     <table class="tbl">
         <thead><tr><th>Case ID</th><th>Uploaded</th><th>Name on the ID</th><th>Document</th><th>Watchlist</th><th>AI</th><th>Status</th><th>Details</th></tr></thead>
         <tbody>{% for s in scans %}{% set r = s.read or {} %}{% set f = r.fields or {} %}{% set sc = s.screening or {} %}{% set hits = sc.hits or [] %}
-        <tr><td class="nowrap"><a class="mono" href="{{ url_for('scan_result', scan_id=s.id) }}">{{ s.id }}</a></td>
+        <tr><td class="nowrap"><a class="mono" href="{{ url_for('application_case', scan_id=s.id) }}" title="Open the application">{{ s.id }}</a></td>
             <td class="nowrap small">{{ s.at }}<div class="tiny muted">{{ s.by|who }}</div></td>
             <td class="strong">{{ f.full_name or ((f.given_names ~ ' ' ~ f.surname)|trim) or '—' }}{% if s.sample %} <span class="tag" title="Sample ID: {{ s.sample.title }}">sample</span>{% endif %}<div class="tiny muted">{{ f.date_of_birth }}</div></td>
             <td class="small">{{ r.document_type or '—' }}<div class="tiny muted">{{ r.issuing_country }}{% if f.document_number %} · {{ f.document_number }}{% endif %}</div>
@@ -107,6 +116,7 @@
 <script>
 (function () {
     var input = document.getElementById('scan-file'), drop = input.closest('.scan-drop'), name = document.getElementById('scan-file-name');
+    var card = document.getElementById('scan-form'), sent = false;
     input.addEventListener('change', function () { if (input.files.length) name.textContent = input.files[0].name; });
     ['dragover', 'dragenter'].forEach(function (e) { drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.add('over'); }); });
     ['dragleave', 'drop'].forEach(function (e) { drop.addEventListener(e, function () { drop.classList.remove('over'); }); });
@@ -114,22 +124,16 @@
         ev.preventDefault();
         if (ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; name.textContent = input.files[0].name; }
     });
-    var sent = false;
-    document.getElementById('scan-upload').addEventListener('submit', function (ev) {
-        if (sent) { ev.preventDefault(); return; }
-        sent = true;
-        var b = ev.submitter || document.getElementById('scan-submit');
-        b.textContent = (b.value === 'ocr' ? 'OCR is reading' : 'The AI is reading') + ' the document and screening the name…';
-    });
-    // a sample is read with the model chosen in the upload form, once
-    document.querySelectorAll('.sample-form').forEach(function (form) {
+    // an upload or a sample: read once, with the model chosen beside the upload, the card saying it is reading
+    document.querySelectorAll('.scan-read').forEach(function (form) {
         form.addEventListener('submit', function (ev) {
             if (sent) { ev.preventDefault(); return; }
             sent = true;
-            var chosen = document.getElementById('scan-model');
-            if (chosen && chosen.value) form.querySelector('.sample-model').value = chosen.value;
-            var b = ev.submitter || form.querySelector('button');
-            b.textContent = 'Reading and screening…';
+            var chosen = document.getElementById('scan-model'), model = form.querySelector('.sample-model');
+            if (model && chosen && chosen.value) model.value = chosen.value;
+            card.classList.add('reading');
+            var b = ev.submitter;
+            if (b && b.id) b.textContent = 'Reading…';
         });
     });
 })();

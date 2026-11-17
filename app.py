@@ -242,7 +242,7 @@ _NAV_OWNER = (("kyc_", "kyc_list"), ("document", "kyc_list"), ("ns_", "ns_queue"
               ("queue_", "queue_l2"), ("analytics", "analytics"),
               ("work", "work"), ("pipeline", "pipeline"), ("trackers", "trackers"), ("audit_log", "audit_log"),
               ("ai_", "ai_screening"), ("qc_", "qc_sampling"), ("routing_", "routing_console"), ("sop_", "sop_page"), ("architecture", "architecture"), ("model_evaluation", "model_evaluation"), ("scan", "scan_id"),
-              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"), ("overview", "overview"), ("quality", "quality"), ("application", "application"))
+              ("screening_sop", "screening_sop"), ("screening_settings", "screening_settings"), ("overview", "overview"), ("quality", "quality"), ("application", "scan_id"))
 
 
 def _nav_owner(endpoint: str) -> str:
@@ -277,8 +277,6 @@ def _side_nav():
             {"title": "Screening", "items": [
                 {"label": "How it works", "title": "The demo's workflow, before the tool", "icon": "home", "endpoint": "overview",
                  "active": owner == "overview"},
-                {"label": "New application", "title": "Import an ID and see it verified, on one page", "icon": "plus",
-                 "endpoint": "application", "active": owner == "application"},
                 {"label": "Cases", "title": "Upload an ID, screen it on World-Check", "icon": "user-check", "endpoint": "scan_id",
                  "active": owner == "scan_id", "count": sum(1 for s in _scans() if s.get("status") == "open")}]},
             {"title": "Setup", "items": setup},
@@ -2135,8 +2133,8 @@ def scan_id():
                                auto_on=SCREEN_SETTINGS.get("auto_verify"), watched=sum(1 for s in scans if _watched(s)),
                                source=id_screening.source_label(SCREEN_SETTINGS), outcome=id_screening.outcome,
                                samples=samples.shown(), sample_cost=_sample_cost())
-    to_app = request.form.get("next") == "application"     # sent from the New application page: back there
-    home = url_for("application") if to_app else url_for("scan_id")
+    to_app = request.form.get("next") == "application"     # the import on Cases: the case opens as an application
+    home = url_for("scan_id")
     sample = samples.get(request.form.get("sample", ""))
     if sample:                                      # a sample ID: the console's own image, read as an upload is
         data, name = samples.png(sample["id"]), f"sample-{sample['id']}.png"
@@ -2556,10 +2554,8 @@ def _application(rec):
 
 @app.route("/application")
 def application():
-    """The demo's start: a new application, imported by an upload or a
-    sample ID, the sections it fills waiting below."""
-    return render_template("application.html", s=None, samples=samples.shown(), model_ready=id_scan.model_ready(),
-                           default_model=SCREEN_SETTINGS["reader_model"])
+    """A new application is imported on Cases, above the list."""
+    return redirect(url_for("scan_id") + "#scan-form")
 
 
 @app.route("/application/<scan_id>")

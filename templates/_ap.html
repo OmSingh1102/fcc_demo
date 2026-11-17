@@ -1,0 +1,41 @@
+{# What the Cases page (the import) and an application's page share: the flow's step bar and its styles.
+   A page imports them with its context (they draw icons):
+       {% from "_ap.html" import ap_css, ap_steps with context %}
+   then puts {{ ap_css() }} inside its <style>, and {{ ap_steps(case) }} where the bar goes (none: nothing imported yet). #}
+
+{% macro ap_css() %}
+    .mt-4 { margin-top: 4px; }
+    .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--primary-soft); border-top-color: var(--primary);
+               animation: ap-spin .8s linear infinite; flex: none; }
+    @keyframes ap-spin { to { transform: rotate(360deg); } }
+    .ap-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; }
+    .ap-title svg { width: 18px; height: 18px; color: var(--primary-strong); }
+
+    /* the flow: import, data captured, verification, export */
+    .ap-steps { list-style: none; margin: 0 0 14px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .ap-steps li { display: flex; gap: 10px; align-items: center; background: var(--card); border: 1px solid var(--border);
+                   border-radius: var(--radius-lg); padding: 10px 12px; box-shadow: var(--shadow-sm); }
+    .ap-steps li b { display: block; font-size: 13px; }
+    .ap-steps li span.ap-step-sub { display: block; font-size: 11.5px; color: var(--muted-foreground); }
+    .ap-step-ic { flex: none; width: 34px; height: 34px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center;
+                  background: var(--muted); color: var(--muted-foreground); }
+    .ap-step-ic svg { width: 18px; height: 18px; }
+    .ap-steps li.now .ap-step-ic { background: var(--primary-soft); color: var(--primary-strong); }
+    .ap-steps li.done .ap-step-ic { background: #dcfce7; color: #15803d; }
+    .ap-steps a.ap-export { color: inherit; text-decoration: none; display: flex; gap: 10px; align-items: center; width: 100%; }
+    .ap-steps a.ap-export:hover b { color: var(--primary-strong); }
+    @media (max-width: 860px) { .ap-steps { grid-template-columns: 1fr 1fr; } }
+{% endmacro %}
+
+{% macro ap_steps(s=none) %}
+<ol class="ap-steps" id="ap-steps">
+    <li class="{{ 'done' if s else 'now' }}"><span class="ap-step-ic">{{ icon('upload') }}</span>
+        <div><b>Import</b><span class="ap-step-sub">a photo or scan of the ID</span></div></li>
+    <li class="{{ 'done' if s and s.read }}"><span class="ap-step-ic">{{ icon('file-text') }}</span>
+        <div><b>Data captured</b><span class="ap-step-sub">name, date of birth, number, address…</span></div></li>
+    <li class="{{ 'done' if s and s.read }}"><span class="ap-step-ic">{{ icon('shield-check') }}</span>
+        <div><b>Verification</b><span class="ap-step-sub">the SOP checks and the watchlist</span></div></li>
+    <li>{% if s %}<a class="ap-export" href="{{ url_for('scan_json', scan_id=s.id) }}" id="ap-export">{% endif %}<span class="ap-step-ic">{{ icon('download') }}</span>
+        <div><b>Export</b><span class="ap-step-sub">JSON, for any system</span></div>{% if s %}</a>{% endif %}</li>
+</ol>
+{% endmacro %}
