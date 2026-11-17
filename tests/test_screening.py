@@ -512,6 +512,45 @@ class ScreeningBookPageTests(unittest.TestCase):
             self.assertIn(needle, page)
         self.assertEqual(fcc._application(fcc._scan(r.headers["Location"].rsplit("/", 1)[-1]))["flags"], [])
 
+    def test_the_ai_document_review_is_a_check_of_its_own(self):
+        # the reader is asked for it, and its answer is tidied: at most three findings, none empty
+        self.assertIn("review", id_scan.SCHEMA["required"])
+        self.assertIn("- review: " + id_scan.REVIEW_HELP, id_scan.SYSTEM)
+        model = id_scan.models()[0]
+        answer = dict(a_read(), review={"consistent": False, "findings": [" a ", "", "b", "c", "d"]})
+        with mock.patch.object(id_scan.benchmark, "call", lambda *a, **k: (dict(answer), 10, 5)):
+            read, _used = id_scan._model_read(b"jpeg", model)
+        self.assertEqual(read["review"], {"consistent": False, "findings": ["a", "b", "c"]})
+        for missing in ({}, {"review": "fine"}, {"review": {"findings": []}}):     # no review given: none kept, the check not run
+            with mock.patch.object(id_scan.benchmark, "call", lambda *a, **k: (dict(a_read(), **missing), 10, 5)):
+                self.assertNotIn("review", id_scan._model_read(b"jpeg", model)[0])
+        # a check like the others: a note by default, what Settings says otherwise, or off
+        review = lambda checks: next(c for c in checks if c["label"] == "AI document review")      # noqa: E731
+        fine = dict(a_read(), review={"consistent": True, "findings": []})
+        self.assertEqual(review(id_scan.checks(fine)), {"label": "AI document review", "state": "ok",
+                                                         "detail": "Complete and consistent for its type."})
+        odd = dict(a_read(), review={"consistent": False, "findings": ["The date of birth is in another font."]})
+        self.assertEqual((review(id_scan.checks(odd))["state"], review(id_scan.checks(odd))["detail"]),
+                         ("info", "The date of birth is in another font."))
+        self.assertEqual(id_scan.verdict({"read": odd, "checks": id_scan.checks(odd)}), "Pass")          # a note only, by default
+        self.assertEqual(id_scan.verdict({"read": odd, "checks": id_scan.checks(odd, rules={"ai_review": "warn"})}), "Check")
+        self.assertEqual(review(id_scan.checks(odd, rules={"ai_review": "off"}))["state"], "na")
+        bill = dict(odd, document_type="Not an identity document")
+        self.assertFalse([c for c in id_scan.checks(bill) if c["label"] == "AI document review"])     # no review of a utility bill
+        self.assertFalse([c for c in id_scan.checks(a_read()) if c["label"] == "AI document review"])  # an older read has none
+        # the checklist: under Check the document, by the reader; not run on a read without it
+        def row(read):
+            case = {"read": read, "checks": id_scan.checks(read), "model": {"label": "Claude Opus 4.8"}}
+            return next(r for st in id_screening.checklist(case, fcc.SCREEN_SETTINGS)["steps"] for r in st["rows"]
+                        if r["rule"] == "AI document review")
+        self.assertEqual((row(odd)["state"], row(odd)["by"]), ("info", "Claude Opus 4.8"))
+        self.assertEqual(row(a_read())["state"], "na")
+        # Settings has its rule (a note only by default), and How it works says so
+        qc = self.client("leah.fernandez")
+        self.assertIn('name="rule_ai_review"', qc.get("/screening/settings").data.decode("utf-8"))
+        self.assertEqual(fcc.SCREEN_SETTINGS["check_rules"]["ai_review"], "info")
+        self.assertIn("the AI's own review of the document (note only)", qc.get("/overview").data.decode("utf-8"))
+
     def test_upload_to_closed_case(self):
         c = self.client()
         sid = self.upload(c, a_read())

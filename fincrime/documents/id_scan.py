@@ -42,6 +42,16 @@ DOC_TYPES = ("Passport", "National ID card", "Driving licence", "Residence permi
              "Voter ID", "Other identity document", "Not an identity document")
 PROBLEMS = ("blurred", "glare", "cut off", "covered", "too dark", "low resolution", "not the data page")
 
+# The AI document review: what the reader is asked to judge (in SYSTEM, and in SCHEMA for instructions set on Settings).
+REVIEW_HELP = ("Your overall judgement of the document, as a KYC analyst would give it before accepting it. "
+               "consistent: true only when you would accept it as it is: complete for its type and country (the fields that type prints "
+               "are there, dates and numbers in the formats it uses), legible enough to trust what you read, not expired on today's date "
+               "(given with the image), its printed details agreeing with its MRZ when it has one, and nothing that looks altered, pasted "
+               "in or out of place; false otherwise. "
+               "findings: when it is not, at most three short, specific reasons (the most serious first; a blurred photo that leaves "
+               "dates unsure, an expiry date already passed, a printed date that differs from the MRZ), else []. "
+               "A field the document type does not print (no expiry date on an Aadhaar card, no MRZ on a driving licence) is not a finding.")
+
 SYSTEM = """You read one photo or scan of an identity document for a KYC onboarding team, the way an OCR / ID-document service would. Transcribe what is printed; never guess and never fill a field from what is usual for the document.
 
 - document_type: the kind of document; issuing_country: the country (or state, for a US driving licence: "United States (California)") that issued it.
@@ -49,11 +59,11 @@ SYSTEM = """You read one photo or scan of an identity document for a KYC onboard
 - mrz: the machine-readable lines exactly as printed, one string per line, with every < filler; [] when there is none.
 - uncertain: the names of the fields you read but are not sure of (a character you could not make out, glare over a digit).
 - readable: false when the photo is too poor to read the document's main fields. problems: what spoils the photo, from the list; [] for a good photo. A slight angle or a scan is fine.
-- note: one short sentence on anything an analyst should know (a field crossed out, a handwritten change, a second document in the picture); else empty."""
+- note: one short sentence on anything an analyst should know (a field crossed out, a handwritten change, a second document in the picture); else empty.""" + "\n- review: " + REVIEW_HELP
 
 SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["document_type", "issuing_country", "readable", "problems", "fields", "mrz", "uncertain", "note"],
+    "required": ["document_type", "issuing_country", "readable", "problems", "fields", "mrz", "uncertain", "note", "review"],
     "properties": {
         "document_type": {"type": "string", "enum": list(DOC_TYPES)},
         "issuing_country": {"type": "string"},
@@ -64,6 +74,11 @@ SCHEMA = {
         "mrz": {"type": "array", "items": {"type": "string"}},
         "uncertain": {"type": "array", "items": {"type": "string"}},
         "note": {"type": "string"},
+        # the AI document review: the model's own judgement, a check like the others (RULES "ai_review"; Note only by default)
+        "review": {"type": "object", "additionalProperties": False, "required": ["consistent", "findings"],
+                   "description": REVIEW_HELP,
+                   "properties": {"consistent": {"type": "boolean"},
+                                  "findings": {"type": "array", "items": {"type": "string"}}}},
     },
 }
 
@@ -84,12 +99,18 @@ def model_ready():
 def _model_read(jpeg, model, system=None):
     content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                             "data": base64.b64encode(jpeg).decode("ascii")}},
-               {"type": "text", "text": "Read this document."}]
+               {"type": "text", "text": f"Read this document. Today is {date.today().isoformat()}."}]
     started = time.monotonic()
     read, t_in, t_out = benchmark.call(model, content, system or SYSTEM, SCHEMA)
     fields = read.get("fields") or {}
     read["fields"] = {k: str(fields.get(k) or "").strip() for k, _ in FIELDS}
     read["mrz"] = [str(x).replace(" ", "").strip() for x in (read.get("mrz") or []) if str(x).strip()]
+    review = read.get("review")
+    if isinstance(review, dict) and isinstance(review.get("consistent"), bool):
+        read["review"] = {"consistent": review["consistent"],
+                          "findings": [str(x).strip() for x in review.get("findings") or [] if str(x).strip()][:3]}
+    else:                                           # no review in the answer: the check says Not run, never "consistent"
+        read.pop("review", None)
     price_in, price_out = model["price"]
     return read, {"model": model["id"], "label": model["label"], "tokens_in": t_in, "tokens_out": t_out,
                   "cost": round((t_in * price_in + t_out * price_out) / 1e6, 4),
@@ -133,7 +154,9 @@ RULES = (
     ("under_age", "The holder is under the age limit", "warn"),
     ("mrz_digits", "The MRZ check digits do not add up", "warn"),
     ("mrz_differs", "The printed fields differ from the MRZ", "fail"),
+    ("ai_review", "The AI's document review finds it incomplete or inconsistent", "info"),
 )
+AI_RULES = ("ai_review",)            # the model's own judgement; the others are the code's
 CHECK_RULES = {k: state for k, _, state in RULES}
 SEVERITIES = (("fail", "Fail"), ("warn", "Check: an analyst looks"), ("info", "Note only"), ("off", "Off: not checked"))
 OFF = "off"
@@ -276,6 +299,15 @@ def checks(read, today=None, min_age=18, rules=None):
                     add("Printed fields against the MRZ", "ok", f"{len(agree)} agree: {', '.join(agree)}.")
         elif len(printed) == 3:
             add("MRZ", "info", "An ID-card zone (three lines): transcribed below; its check digits are not tested here.")
+        review = read.get("review")
+        if isinstance(review, dict) and read.get("document_type") != "Not an identity document":
+            if off("ai_review"):
+                add("AI document review", OFF, "")
+            elif review.get("findings") or review.get("consistent") is False:
+                found = [x.rstrip(".") for x in review.get("findings") or []] or ["The AI does not find it consistent for its type"]
+                add("AI document review", rule["ai_review"], "; ".join(found) + ".")
+            else:
+                add("AI document review", "ok", "Complete and consistent for its type.")
     return out
 
 

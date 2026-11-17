@@ -621,6 +621,10 @@ def checklist(case, settings):
                 doc_rows.append(_row(_DOC_CHECKS[label], found[label]["state"], found[label]["detail"], "Code"))
         if not digits and "MRZ" not in found:
             doc_rows.append(_row("MRZ check digits add up", "na", "No machine-readable zone on this document."))
+        c = found.get("AI document review")
+        doc_rows.append(_row("AI document review", c["state"], c["detail"], reader) if c
+                        else _row("AI document review", "na", "Not run: this read has no AI review (read before it was added, "
+                                                              "or by a reader that returns text only)."))
     idv = case.get("idv") or {}
     who = idv.get("provider", "Didit")
     if not idv:

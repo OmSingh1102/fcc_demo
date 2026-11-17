@@ -470,6 +470,22 @@ or fails, nor (unless Settings says otherwise) while Didit has not approved
 this very document. A share of the cases the rule would close (5% by
 default, fixed by the case ID) is left for an analyst as a QC sample. All of
 it is on Settings.
+**AI document review** (`id_scan.REVIEW_HELP`, the rule `ai_review`). The
+reader answers, with each read, whether it would accept the document as it
+is, as an analyst would: complete for its type and country, legible enough
+to trust, not expired on today's date (given with the image), its printed
+details agreeing with its MRZ, nothing that looks altered; and if not, why
+(at most three findings, the most serious first). A field the type does
+not print (no expiry on an Aadhaar card, no MRZ on a driving licence) is not
+a finding. It
+is the twelfth check: in the case's SOP checklist and on its application
+page under Check the document, checked by the reading model, and on
+Settings with the same four choices as the others, a note only by default
+(shown, never changing an outcome) until the QC lead decides otherwise.
+It is part of the same call as the read, so it costs no second call. It is
+not fraud detection: Didit stays the genuine-document check. Reads made
+before it was added, and readers that return text only (OCR, Azure), have
+none: the checklist says Not run.
 **Rules, not code.** The code only measures (is the ID expired, do the MRZ
 check digits add up, what the AI answered); what each finding does is a rule
 on Settings (*Rules: what each finding does*): for each of the eleven ID

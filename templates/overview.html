@@ -99,7 +99,7 @@
             </div>
             <div class="lp-step" id="lp-step-checks">
                 <div class="lp-step-head"><span class="lp-num">2</span><div><div class="lp-kicker">SOP validation &amp; fraud</div><h4>Check the document</h4></div></div>
-                <div class="small">{{ n_checks }} checks in code on what was read: MRZ check digits, printed fields against the MRZ, expiry, age under {{ s.min_age }}, photo quality, missing or unsure fields.</div>
+                <div class="small">{{ n_checks }} checks in code on what was read: MRZ check digits, printed fields against the MRZ, expiry, age under {{ s.min_age }}, photo quality, missing or unsure fields. Beside them, the AI's own review of the document{% if review_rule %} ({{ review_rule|lower }}){% endif %}.</div>
                 <div class="lp-uses">{% if idv_on %}Plus <b>Didit</b>: is the document genuine (screen captures, printed copies, a replaced portrait)?{% else %}Didit's genuine-document check: {{ 'connected, off for uploads' if dd_ready else 'ready for a key' }} (Settings){% endif %}</div>
                 <div class="lp-human">→ <b>A person</b> when a check fails or asks for a look{% if idv_on and s.auto_needs_idv %}, or Didit does not approve the document{% endif %}.</div>
             </div>
@@ -134,8 +134,8 @@
                 <h5>{{ icon('zoom-in') }} Call 1 · Read the ID</h5>
                 <dl>
                     <dt>Sent</dt><dd>The ID image (turned upright, resized, EXIF and GPS removed) and the reader's instructions: transcribe what is printed, never guess.</dd>
-                    <dt>Returned</dt><dd>The document type and country, each field as printed, the MRZ lines, the fields it is unsure of, and any photo problem.</dd>
-                    <dt>Then</dt><dd>Code runs the {{ n_checks }} checks on that read; the model's own opinion is not one of them.</dd>
+                    <dt>Returned</dt><dd>The document type and country, each field as printed, the MRZ lines, the fields it is unsure of, any photo problem, and its review: is the document complete and consistent for its type, and if not, why.</dd>
+                    <dt>Then</dt><dd>Code runs the {{ n_checks }} checks on that read; the AI's review is a check of its own, set on Settings{% if review_rule %} ({{ review_rule|lower }}){% endif %}, so the model's opinion decides only what Settings lets it.</dd>
                     <dt>Model</dt><dd>{{ reader_label }} (Settings)</dd>
                 </dl>
             </div>
